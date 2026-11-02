@@ -82,8 +82,15 @@ export class LocalBackend implements Backend {
       case 'play': {
         const q = toQueueItems(items);
         if (!q.length) return;
-        this.set({ queue: q, index: Math.min(cmd.startIndex ?? 0, q.length - 1) });
-        this.startCurrent(0);
+        const pos = Math.max(0, cmd.positionMs ?? 0);
+        this.set({
+          queue: q,
+          index: Math.min(cmd.startIndex ?? 0, q.length - 1),
+          status: cmd.paused ? 'paused' : 'playing',
+          positionMs: pos,
+          updatedAt: Date.now(),
+        });
+        this.startCurrent(pos, !cmd.paused);
         return;
       }
       case 'enqueue': {

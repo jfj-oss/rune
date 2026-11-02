@@ -204,7 +204,9 @@ export class SpotifyConnectZone implements PlaybackZone {
         if (cmd.startIndex !== undefined && cmd.startIndex > 0 && uris.length > 0) {
           body.offset = { position: Math.min(cmd.startIndex, uris.length - 1) };
         }
+        if (cmd.positionMs && cmd.positionMs > 0) body.position_ms = Math.round(cmd.positionMs);
         await this.api.play(body, device);
+        if (cmd.paused) await this.api.pause(device).catch(() => undefined);
         this.startedQueue = await this.fetchStartedQueue(spotifyIds);
         return this.refresh();
       }

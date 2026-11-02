@@ -589,7 +589,7 @@ class PcZoneImpl implements PcZone {
   private applyCommand(cmd: PlayerCommand): Promise<void> {
     switch (cmd.type) {
       case 'play':
-        return this.cmdPlay(cmd.trackIds, cmd.startIndex);
+        return this.cmdPlay(cmd.trackIds, cmd.startIndex, cmd.positionMs, cmd.paused);
       case 'enqueue':
         return this.cmdEnqueue(cmd.trackIds, cmd.next);
       case 'pause':
@@ -619,11 +619,11 @@ class PcZoneImpl implements PcZone {
     }
   }
 
-  private async cmdPlay(trackIds: string[], startIndex?: number): Promise<void> {
+  private async cmdPlay(trackIds: string[], startIndex?: number, positionMs = 0, paused = false): Promise<void> {
     const items = this.playable(loadQueueItems(this.db, trackIds));
     if (items.length === 0) return;
     this.q = queuePlay(this.q, items, startIndex ?? 0);
-    await this.startPlayback({ positionMs: 0 });
+    await this.startPlayback({ positionMs: Math.max(0, Math.round(positionMs)), paused });
   }
 
   private async cmdEnqueue(trackIds: string[], isNext?: boolean): Promise<void> {

@@ -143,7 +143,8 @@ export interface PlayerState {
 }
 
 export type PlayerCommand =
-  | { type: 'play'; trackIds: Id[]; startIndex?: number }
+  /** positionMs/paused: start mid-track (used when handing playback to another zone). */
+  | { type: 'play'; trackIds: Id[]; startIndex?: number; positionMs?: number; paused?: boolean }
   | { type: 'enqueue'; trackIds: Id[]; next?: boolean }
   | { type: 'pause' }
   | { type: 'resume' }

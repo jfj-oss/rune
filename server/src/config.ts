@@ -24,6 +24,10 @@ export function loadConfig(): Config {
     userAgent: 'Liner/0.1 ( personal music player, self-hosted )',
     ...user,
   };
+  // Overrides for running a second, silent instance (tests / smoke checks).
+  if (process.env.RUNE_PORT) cfg.port = Number(process.env.RUNE_PORT);
+  if (process.env.RUNE_DATA_DIR) cfg.dataDir = process.env.RUNE_DATA_DIR;
+  if (process.env.RUNE_AUDIO_DEVICE) cfg.audioDevice = process.env.RUNE_AUDIO_DEVICE;
   mkdirSync(cfg.dataDir, { recursive: true });
   return cfg;
 }

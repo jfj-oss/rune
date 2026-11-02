@@ -5,7 +5,7 @@ import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
 import { AudioEngine, MockEngine } from '../player/engine';
 import { LocalBackend } from '../player/local';
 import { RemoteBackend } from '../player/remote';
-import { emptyState, type Backend } from '../player/types';
+import { emptyState, livePosition, type Backend } from '../player/types';
 import { loadLocal, saveLocal, useUi } from './ui';
 
 const backends = new Map<Zone, Backend>();
@@ -105,9 +105,41 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async setZone(id) {
       const z = get().zones.find((x) => x.id === id);
-      if (!z) return;
+      if (!z || id === get().zone) return;
       saveLocal('rune.zone', id);
+      const prev = backends.get(get().zone);
       const b = backendFor(z);
+      // Hand playback over (like Roon's "transfer zone"): same queue, same track, same
+      // position, same play/pause state — then stop the old zone.
+      if (prev && prev !== b) {
+        try {
+          await prev.refresh();
+        } catch {
+          /* old zone unreachable: transfer from the last state we saw */
+        }
+        const s = prev.state;
+        const active = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
+        if (active) {
+          const items: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
+          const toSpotify = z.kind === 'spotify';
+          const playable = items.filter((i) => (i.track.source === 'spotify') === toSpotify);
+          const current = items[s.index]!;
+          const notice = (m: string) => useUi.getState().toast(m);
+          if ((current.track.source === 'spotify') !== toSpotify) {
+            notice(toSpotify ? 'Spotify devices can only play Spotify tracks — your local files stay where they are' : 'Spotify tracks play on a Spotify device');
+          } else {
+            const startIndex = playable.indexOf(current);
+            const positionMs = livePosition(s);
+            const paused = s.status === 'paused';
+            if (s.status === 'playing') await prev.send({ type: 'pause' }).catch(() => undefined);
+            attach(b);
+            await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
+            if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
+            if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${z.name})`);
+            return;
+          }
+        }
+      }
       attach(b);
       await b.refresh();
     },
