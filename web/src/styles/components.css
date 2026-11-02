@@ -6,7 +6,7 @@
 .hscroll__track { display: flex; gap: 20px; overflow-x: auto; padding: 4px var(--pad) 8px; scroll-snap-type: x proximity; scroll-padding-inline: var(--pad); scrollbar-width: none; }
 .hscroll__track::-webkit-scrollbar { display: none; }
 .hscroll__track > * { flex: none; scroll-snap-align: start; }
-.hscroll__btn { position: absolute; top: 80px; z-index: 5; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--surface-3) 94%, transparent); border: 1px solid var(--line); opacity: 0; transition: opacity var(--t); box-shadow: var(--shadow-pop); }
+.hscroll__btn { position: absolute; top: 80px; z-index: 5; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--line); opacity: 0; transition: opacity var(--t); box-shadow: var(--shadow-pop); }
 .hscroll:hover .hscroll__btn { opacity: 1; }
 .hscroll__btn--l { left: 8px; }
 .hscroll__btn--r { right: 8px; }
@@ -45,9 +45,9 @@
 .seg--tabs { width: 100%; margin-bottom: 14px; }
 .seg--tabs a { flex: 1; height: 34px; }
 .select { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 6px 0 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--text-3); }
-.select select { appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: var(--text); font-weight: 500; padding: 0 22px 0 4px; height: 100%; cursor: pointer; outline: 0; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23a4a5b0' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
+.select select { appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: var(--text); font-weight: 500; padding: 0 22px 0 4px; height: 100%; cursor: pointer; outline: 0; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23c4c5d0' stroke-width='1.6'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; }
 @media (max-width: 899px) { .seg--icons, .select span { display: none; } .select { padding-left: 10px; } .toolbar .seg button { padding: 0 12px; } }
-.select select option { background: var(--surface-2); }
+.select select option { background: #1b1c24; color: var(--text); }
 
 /* ---------- virtualized library ---------- */
 .vgrid { position: relative; width: 100%; }
@@ -159,7 +159,7 @@ button.note__track:hover { text-decoration: underline; text-underline-offset: 3p
 
 /* ---------- dialog / banner ---------- */
 .dialog__scrim { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: rgba(6, 6, 9, 0.66); backdrop-filter: blur(4px); animation: popin 160ms ease; }
-.dialog { width: min(600px, 100%); max-height: min(720px, 100%); display: flex; flex-direction: column; background: var(--surface-2); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-pop); outline: 0; }
+.dialog { width: min(600px, 100%); max-height: min(720px, 100%); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%); border: 1px solid color-mix(in srgb, #fff 14%, transparent); border-radius: 16px; box-shadow: var(--shadow-pop); outline: 0; }
 .dialog__head { display: flex; align-items: center; justify-content: space-between; padding: 18px 14px 6px 22px; }
 .dialog__head h2 { font-size: 19px; font-weight: 700; }
 .dialog__body { padding: 8px 22px 18px; overflow-y: auto; }

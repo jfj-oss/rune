@@ -1,0 +1,80 @@
+/* ====================================================================
+   v1.1 — ambient background + liquid glass
+   ==================================================================== */
+
+/* ---------- ambient background ----------
+   Three full-viewport gradient layers stacked. Blue is the opaque base; purple then green fade in over it and
+   green fades out again, so every transition is an exact crossfade. Only `opacity` is animated, and each layer
+   is its own compositor layer, so nothing repaints. ~90 s cycle: per colour 18 s hold + 12 s eased fade. */
+.ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: #00161c; }
+.ambient__l { position: absolute; inset: 0; display: block; }
+.ambient__l--blue {
+  background:
+    radial-gradient(120% 55% at 50% -12%, rgba(38, 139, 210, 0.3), transparent 70%),
+    linear-gradient(180deg, #0c4f63 0%, #08394a 20%, #00303c 45%, #001f27 78%, #00141a 100%);
+}
+.ambient__l--purple {
+  background: linear-gradient(180deg, #290893 0%, #230879 18%, #1f0862 34%, #190c41 62%, #150f25 100%);
+  opacity: 0;
+}
+.ambient__l--green {
+  background:
+    radial-gradient(120% 55% at 50% -12%, rgba(70, 150, 70, 0.22), transparent 70%),
+    linear-gradient(180deg, #0b3a0b 0%, #093209 24%, #072607 52%, #051a05 80%, #031003 100%);
+  opacity: 0;
+}
+:root[data-ambient='off'] .ambient { display: none; }
+:root[data-ambient='blue'] .ambient__l--purple, :root[data-ambient='blue'] .ambient__l--green { opacity: 0; }
+:root[data-ambient='purple'] .ambient__l--purple { opacity: 1; }
+:root[data-ambient='green'] .ambient__l--green { opacity: 1; }
+:root:not([data-ambient]) .ambient__l--purple, :root[data-ambient='cycle'] .ambient__l--purple { animation: amb-purple 90s infinite; will-change: opacity; }
+:root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: amb-green 90s infinite; will-change: opacity; }
+@keyframes amb-purple {
+  0%, 20% { opacity: 0; animation-timing-function: ease-in-out; }
+  33.33%, 66.66% { opacity: 1; }
+  66.67%, 100% { opacity: 0; }
+}
+@keyframes amb-green {
+  0%, 53.33% { opacity: 0; animation-timing-function: ease-in-out; }
+  66.67%, 86.67% { opacity: 1; animation-timing-function: ease-in-out; }
+  100% { opacity: 0; }
+}
+/* reduced motion: static (purple from the reference screenshot) unless a colour was chosen */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-ambient]) .ambient__l--purple, :root[data-ambient='cycle'] .ambient__l--purple { animation: none; opacity: 1; will-change: auto; }
+  :root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: none; opacity: 0; will-change: auto; }
+}
+.ambdot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
+.ambdot--cycle { background: conic-gradient(#0c4f63, #290893, #0b3a0b, #0c4f63); }
+.ambdot--blue { background: #08394a; }
+.ambdot--purple { background: #290893; }
+.ambdot--green { background: #0b3a0b; }
+.ambdot--off { background: #0f1013; }
+
+/* ---------- liquid glass ----------
+   Desktop: sidebar + now-playing bar. Mobile: tab bar + mini-player. Album sticky tab strip matches.
+   blur + saturate, faint white fill, a 1 px highlight on the edge facing the content, soft outer shadow,
+   a vertical sheen (lighter at the top) and a very faint diagonal specular. */
+.side, .npbar, .tabs, .mini, .atabs {
+  --glass-fill: rgba(255, 255, 255, 0.065);
+  --glass-tint: rgba(6, 6, 14, 0); /* slight dark tint under the bars that carry text over busy covers */
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0.03) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(var(--glass-tint), var(--glass-tint)),
+    var(--glass-fill);
+  -webkit-backdrop-filter: blur(32px) saturate(150%);
+  backdrop-filter: blur(32px) saturate(150%);
+}
+.npbar, .tabs, .mini { --glass-tint: rgba(6, 6, 14, 0.34); }
+/* text on glass sits over a lighter, busier backdrop than on the page, so secondary text is a step brighter there (WCAG AA on all phases) */
+.side, .npbar, .tabs, .mini, .atabs { --text-2: #d3d4de; --text-3: #c2c3d1; }
+.side { box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12), 12px 0 40px -8px rgba(0, 0, 0, 0.4); }
+.npbar { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 -12px 40px -8px rgba(0, 0, 0, 0.45); }
+.tabs { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 -10px 34px -8px rgba(0, 0, 0, 0.5); }
+.mini { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 12px 32px -6px rgba(0, 0, 0, 0.55); --glass-fill: rgba(255, 255, 255, 0.1); }
+.atabs { --glass-fill: rgba(255, 255, 255, 0.06); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.14), 0 10px 30px -12px rgba(0, 0, 0, 0.4); -webkit-backdrop-filter: blur(24px) saturate(150%); backdrop-filter: blur(24px) saturate(150%); --glass-tint: rgba(6, 6, 14, 0.3); }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .side, .npbar, .tabs, .mini, .atabs, .pop__panel, .dialog, .drawer, .toast { background: rgba(15, 16, 19, 0.85); }
+}
