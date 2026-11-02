@@ -202,6 +202,7 @@ export class SpotifySdkEngine implements Engine {
 
   private async start(track: Track, startMs: number, autoplay: boolean, seq: number) {
     try {
+      clientLog('info', 'spotify sdk: load', { track: track.id, startMs, autoplay, phase: this.status.phase });
       const deviceId = await this.ensureReady();
       if (seq !== this.seq) return;
       const uri = track.spotifyUri ?? `spotify:track:${spotifyIdOf(track.id)}`;
@@ -209,6 +210,7 @@ export class SpotifySdkEngine implements Engine {
       if (seq !== this.seq) return;
       if (!autoplay) await this.player?.pause().catch(() => undefined);
     } catch (e) {
+      clientLog('error', `spotify sdk: load failed — ${(e as Error).message}`);
       if (seq === this.seq) this.errorFn((e as Error).message);
     }
   }
@@ -224,6 +226,7 @@ export class SpotifySdkEngine implements Engine {
         body: JSON.stringify({ uris: [uri], position_ms: Math.max(0, Math.round(startMs)) }),
       });
       this.lastStatus = res.status;
+      clientLog(res.ok ? 'info' : 'warn', `spotify sdk: PUT /me/player/play → ${res.status}`, { attempt, deviceId, volume: this.volume });
       if (res.ok) return;
       if (res.status === 404) { // device not known to Spotify yet: transfer playback to it, then retry
         await fetch('https://api.spotify.com/v1/me/player', {

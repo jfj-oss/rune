@@ -383,6 +383,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const z = await zoneFor(req.params.zone);
         if (!z) return reply.code(404).send({ error: 'unknown zone' });
         try {
+          if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: req.body?.type }, 'spotify command');
           return sanitize(await z.command(req.body));
         } catch (e) {
           app.log.warn({ zone: req.params.zone, cmd: req.body?.type, err: (e as Error).message }, 'player command failed');
