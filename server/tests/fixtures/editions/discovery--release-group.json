@@ -1,0 +1,5 @@
+{
+ "url": "https://musicbrainz.org/ws/2/release-group/48117b90-a16e-34ca-a514-19c702df1158?fmt=json",
+ "status": 200,
+ "body": "{\"disambiguation\":\"\",\"title\":\"Discovery\",\"secondary-types\":[],\"id\":\"48117b90-a16e-34ca-a514-19c702df1158\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"secondary-type-ids\":[],\"first-release-date\":\"2001-02-26\",\"primary-type\":\"Album\"}"
+}
