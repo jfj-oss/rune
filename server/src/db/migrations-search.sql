@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS search_docs (
   PRIMARY KEY (kind, ref_id)
 );
 CREATE INDEX IF NOT EXISTS search_docs_album ON search_docs(album_id);
+-- Result hydration looks docs up by ref_id alone (kind is selected, not filtered):
+-- without this, every search scans the whole doc table.
+CREATE INDEX IF NOT EXISTS search_docs_ref ON search_docs(ref_id);
 
 -- Vocabulary used for typo correction (edit-distance candidate generation).
 -- Deliberately append-only between full rebuilds: a stale term can only cost a

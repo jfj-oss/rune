@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { openDb, type Db } from '../src/db/index.js';
 import { ensureHistorySchema } from '../src/history/index.js';
@@ -11,6 +11,9 @@ import {
   registerMyPlaylistRoutes,
   type RunePlaylistDetail,
 } from '../src/myplaylists/index.js';
+import { ensureOverlaySchema, mergedEntries } from '../src/myplaylists/overlay.js';
+import { publicTrack } from '../src/api/library.js';
+import { loadTrack } from '../src/play/rows.js';
 import { syncPlaylists } from '../src/spotify/library.js';
 
 const NOW = 1_700_000_000_000;
@@ -161,6 +164,58 @@ function ids(detail: RunePlaylistDetail): string[] {
   return detail.tracks.map((t) => t.id);
 }
 
+// The pre-batching implementation of toPlaylistTracks (one loadTrack + one album
+// lookup per entry), kept here as the oracle for the batched rewrite.
+type OldEntry =
+  | string
+  | {
+      trackId: string;
+      addedAt?: number | null;
+      entrySource?: string;
+      entryId?: string;
+    };
+
+function oldToPlaylistTracks(db: Db, entries: OldEntry[]): unknown[] {
+  const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
+  const result: Record<string, unknown>[] = [];
+  for (const entry of entries) {
+    const item = typeof entry === 'string' ? { trackId: entry } : entry;
+    const track = loadTrack(db, item.trackId);
+    if (!track) continue;
+    const album = albumStmt.get(track.albumId) as
+      | { title: string | null; cover_path: string | null }
+      | undefined;
+    const coverUrl = album?.cover_path
+      ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
+      : undefined;
+    const row: Record<string, unknown> = {
+      ...publicTrack(track),
+      album: {
+        id: track.albumId,
+        title: album?.title ?? '',
+        ...(coverUrl ? { coverUrl } : {}),
+      },
+    };
+    if (typeof entry !== 'string' && 'entryId' in entry) {
+      row.entrySource = entry.entrySource;
+      row.entryId = entry.entryId;
+    }
+    if (typeof entry !== 'string' && entry.addedAt != null) row.addedAt = entry.addedAt;
+    result.push(row);
+  }
+  return result;
+}
+
+function insertEntries(db: Db, playlistId: string, entries: OldEntry[]): void {
+  const insert = db.prepare(
+    'INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at) VALUES (?, ?, ?, ?)',
+  );
+  entries.forEach((entry, position) => {
+    const item = typeof entry === 'string' ? { trackId: entry } : entry;
+    insert.run(playlistId, position, item.trackId, item.addedAt ?? null);
+  });
+}
+
 // ---------------------------------------------------------------- tests
 
 describe('rune playlists: CRUD and ordering', () => {
@@ -304,6 +359,88 @@ describe('rune playlists: CRUD and ordering', () => {
     expect(getPlaylistDetail(db, 'pl:sp:mine')).toBeUndefined();
 
     await app.close();
+  });
+});
+
+describe('rune playlists: batched track reads', () => {
+  it('keeps order, duplicates, dangling entries, addedAt and overlay entries identical', () => {
+    const db = freshDb();
+    const staticId = 'pl:rune:batched';
+    db.prepare(
+      `INSERT INTO playlists (id, source, name, position, updated_at)
+       VALUES (?, 'local', 'Batched', 0, ?)`,
+    ).run(staticId, NOW);
+    insertEntries(db, staticId, [
+      { trackId: 'l:b', addedAt: NOW - 5 },
+      { trackId: 'l:a', addedAt: NOW - 4 },
+      { trackId: 'l:b', addedAt: NOW - 3 }, // duplicate entry
+      { trackId: 'l:missing', addedAt: NOW - 2 }, // dangling: no track row
+      { trackId: 'l:d', addedAt: NOW - 1 },
+    ]);
+
+    const staticDetail = getPlaylistDetail(db, staticId) as RunePlaylistDetail;
+    expect(staticDetail.tracks).toEqual(
+      oldToPlaylistTracks(db, [
+        { trackId: 'l:b', addedAt: NOW - 5 },
+        { trackId: 'l:a', addedAt: NOW - 4 },
+        { trackId: 'l:b', addedAt: NOW - 3 },
+        { trackId: 'l:missing', addedAt: NOW - 2 },
+        { trackId: 'l:d', addedAt: NOW - 1 },
+      ]),
+    );
+    expect(ids(staticDetail)).toEqual(['l:b', 'l:a', 'l:b', 'l:d']);
+    expect(staticDetail.tracks.map((t) => t.addedAt)).toEqual([NOW - 5, NOW - 4, NOW - 3, NOW - 1]);
+
+    // A synced Spotify playlist with two base entries and two overlay entries.
+    ensureOverlaySchema(db);
+    const spotifyId = 'pl:sp:overlay';
+    spotifyPlaylistRow(db, spotifyId);
+    db.prepare(
+      `INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at)
+       VALUES (?, 1, 'sp:t2', ?)`,
+    ).run(spotifyId, NOW - 100);
+    const addOverlay = db.prepare(
+      `INSERT INTO playlist_overlay
+         (id, playlist_id, track_id, anchor_track_id, anchor_occurrence, added_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    addOverlay.run('ov:top', spotifyId, 'l:d', null, 0, NOW + 1);
+    addOverlay.run('ov:after', spotifyId, 'l:a', 'sp:t1', 0, NOW + 2);
+
+    const merged = mergedEntries(db, spotifyId);
+    expect(merged.map((e) => e.trackId)).toEqual(['l:d', 'sp:t1', 'l:a', 'sp:t2']);
+    const spotifyDetail = getPlaylistDetail(db, spotifyId) as RunePlaylistDetail;
+    expect(spotifyDetail.tracks).toEqual(oldToPlaylistTracks(db, merged));
+    expect(spotifyDetail.tracks.map((t) => t.entryId)).toEqual(merged.map((e) => e.entryId));
+    expect(spotifyDetail.tracks.map((t) => t.entrySource)).toEqual(
+      merged.map((e) => e.entrySource),
+    );
+    expect(spotifyDetail.tracks.map((t) => t.entrySource)).toEqual([
+      'rune-overlay',
+      'spotify-playlist',
+      'rune-overlay',
+      'spotify-playlist',
+    ]);
+  });
+
+  it('loads smart-playlist candidates once per GET /playlists, not once per smart row', () => {
+    const db = freshDb({ plays: false });
+    createSmartPlaylist(db, { name: 'Smart one', rules: [], sort: 'title:asc' });
+    createSmartPlaylist(db, { name: 'Smart two', rules: [], sort: 'album:asc' });
+
+    const original = db.prepare.bind(db);
+    let candidateLoads = 0;
+    const spy = vi.spyOn(db, 'prepare').mockImplementation(((sql: string) => {
+      if (sql.includes('AS track_format') && sql.includes('FROM tracks t')) candidateLoads++;
+      return original(sql);
+    }) as typeof db.prepare);
+    try {
+      const all = listAllPlaylists(db);
+      expect(all).toHaveLength(2);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(candidateLoads).toBe(1);
   });
 });
 

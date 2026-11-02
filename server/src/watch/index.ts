@@ -76,6 +76,13 @@ export interface LibraryWatcherOptions {
   maxWaitMs?: number;
   /** Fallback poll interval (mount check + fingerprint). Default 10 min. */
   pollIntervalMs?: number;
+  /**
+   * How often to fingerprint a root whose fs.watch is healthy. inotify is the
+   * source of truth there, so the full-tree walk only needs to catch whatever
+   * it missed occasionally. Default 1 h; roots in poll-only mode use
+   * `pollIntervalMs` instead.
+   */
+  healthyPollIntervalMs?: number;
   /** false = never use fs.watch (poll only). Useful on broken filesystems and in tests. */
   useFsWatch?: boolean;
   /** Override the watched extension set (tests). */
@@ -109,6 +116,8 @@ export interface LibraryWatcher {
   mountedCount(): number;
   /** Roots that currently have a live fs.watch (empty in poll-only mode). */
   watchedRoots(): string[];
+  /** Roots whose initial tree fingerprint has been captured. */
+  seededRoots(): string[];
   /** Epoch ms of the last emitted batch, or null. */
   lastChangeAt(): number | null;
 }
@@ -125,11 +134,18 @@ interface RootState {
   mounted: boolean;
   pending: Set<string>;
   fingerprint: Fingerprint;
+  /** False until the startup/reappear fingerprint walk has completed. */
+  seeded: boolean;
+  /** In-flight fingerprint walk (startup seeds in the background). */
+  seeding: Promise<void> | null;
+  /** Epoch ms of the last successful fingerprint walk. */
+  lastFingerprintAt: number;
 }
 
 const DEFAULT_DEBOUNCE_MS = 10_000;
 const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
 const DEFAULT_POLL_MS = 10 * 60_000;
+const DEFAULT_HEALTHY_POLL_MS = 60 * 60_000;
 
 export function createLibraryWatcher(opts: LibraryWatcherOptions): LibraryWatcher {
   return new LibraryWatcherImpl(opts);
@@ -141,6 +157,7 @@ class LibraryWatcherImpl implements LibraryWatcher {
   private readonly debounceMs: number;
   private readonly maxWaitMs: number;
   private readonly pollIntervalMs: number;
+  private readonly healthyPollIntervalMs: number;
   private readonly useFsWatch: boolean;
   private readonly extensions: ReadonlySet<string>;
   private readonly logger?: Logger;
@@ -162,11 +179,18 @@ class LibraryWatcherImpl implements LibraryWatcher {
       mounted: false,
       pending: new Set<string>(),
       fingerprint: new Map<string, string>(),
+      seeded: false,
+      seeding: null,
+      lastFingerprintAt: 0,
     }));
     this.onChange = opts.onChange;
     this.debounceMs = Math.max(0, opts.debounceMs ?? DEFAULT_DEBOUNCE_MS);
     this.maxWaitMs = Math.max(this.debounceMs, opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS);
     this.pollIntervalMs = Math.max(1, opts.pollIntervalMs ?? DEFAULT_POLL_MS);
+    this.healthyPollIntervalMs = Math.max(
+      1,
+      opts.healthyPollIntervalMs ?? DEFAULT_HEALTHY_POLL_MS,
+    );
     this.useFsWatch = opts.useFsWatch !== false;
     this.extensions = opts.extensions ?? WATCHED_EXTENSIONS;
     this.logger = opts.logger;
@@ -177,16 +201,14 @@ class LibraryWatcherImpl implements LibraryWatcher {
     if (this.started || this.stopped) return;
     this.started = true;
     for (const root of this.roots) this.attach(root, true);
-    // Seed fingerprints so the first poll does not rescan a healthy root just
-    // because the server started. Roots that are absent get none; when they
-    // appear the transition itself notifies. Roots are scanned in parallel.
-    await Promise.all(
-      this.roots
-        .filter((root) => root.mounted)
-        .map(async (root) => {
-          root.fingerprint = await this.scanTree(root).catch(() => new Map<string, string>());
-        }),
-    );
+    // Seed fingerprints in the BACKGROUND so the HTTP port can open immediately:
+    // walking the whole library tree is the slow part of startup. A root that is
+    // not seeded yet never diffs against its empty map (see doPoll), so it cannot
+    // report every file as new. Roots that are absent get none; when they appear
+    // the transition itself notifies.
+    for (const root of this.roots) {
+      if (root.mounted) void this.seed(root);
+    }
     this.pollTimer = setInterval(() => {
       void this.pollNow().catch((err) => this.warn({ err }, 'library watcher poll failed'));
     }, this.pollIntervalMs);
@@ -221,6 +243,10 @@ class LibraryWatcherImpl implements LibraryWatcher {
 
   watchedRoots(): string[] {
     return this.roots.filter((r) => r.watcher !== undefined).map((r) => r.path);
+  }
+
+  seededRoots(): string[] {
+    return this.roots.filter((r) => r.seeded).map((r) => r.path);
   }
 
   lastChangeAt(): number | null {
@@ -273,10 +299,34 @@ class LibraryWatcherImpl implements LibraryWatcher {
         this.attach(root, false);
       }
 
+      // Wait for the startup background seed before comparing anything. An empty
+      // map would make every existing file look new (and trigger a full rescan).
+      if (!root.seeded) {
+        await this.seed(root);
+        if (!root.seeded) continue; // still unreadable: never diff against nothing
+      }
+
+      if (wasMissing) {
+        // seed() just captured the whole (new) tree; the appeared event is the
+        // notification, and there is no useful diff to report.
+        continue;
+      }
+
+      // While inotify is healthy it is the source of truth: skip the expensive
+      // full-tree fingerprint walk until the hourly safety net is due.
+      if (
+        this.useFsWatch &&
+        root.watcher !== undefined &&
+        this.now() - root.lastFingerprintAt < this.healthyPollIntervalMs
+      ) {
+        continue;
+      }
+
       const before = root.fingerprint;
       const after = await this.scanTree(root);
-      const diff = wasMissing ? [] : diffFingerprints(root.absolute, before, after);
       root.fingerprint = after;
+      root.lastFingerprintAt = this.now();
+      const diff = diffFingerprints(root.absolute, before, after);
       if (diff.length > 0) changed.push(...diff);
     }
 
@@ -352,6 +402,9 @@ class LibraryWatcherImpl implements LibraryWatcher {
     // A later reappearance must notify even if the content fingerprint happens
     // to match what we remembered: the scanner may have run in between.
     root.fingerprint = new Map();
+    // Re-seed the tree before diffing again; an empty map would make every file
+    // on the remounted drive look new (and trigger a full rescan).
+    root.seeded = false;
   }
 
   private onFsEvent(
@@ -459,6 +512,34 @@ class LibraryWatcherImpl implements LibraryWatcher {
       if (files.some((f) => f === root.absolute || f.startsWith(prefix))) roots.push(root.path);
     }
     return roots;
+  }
+
+  /**
+   * Capture a root's baseline fingerprint. Never rejects (a failure is retried on
+   * the next poll) and leaves `seeded` false when it could not read the tree, so
+   * callers never diff against an empty map.
+   */
+  private seed(root: RootState): Promise<void> {
+    if (root.seeding) return root.seeding;
+    const job = this.scanTree(root)
+      .then((fingerprint) => {
+        // A seed that finished after the root vanished must not mark the (now
+        // stale) tree as the baseline; the next poll re-seeds after reappearing.
+        if (this.stopped || !root.mounted) return;
+        root.fingerprint = fingerprint;
+        root.seeded = true;
+        root.lastFingerprintAt = this.now();
+      })
+      .catch((err) => {
+        if (!this.stopped) {
+          this.warn({ err, root: root.path }, 'library fingerprint failed; retrying on the next poll');
+        }
+      })
+      .finally(() => {
+        root.seeding = null;
+      });
+    root.seeding = job;
+    return job;
   }
 
   /** Recursively collect relpath -> "mtimeMs:size" for watched files. */

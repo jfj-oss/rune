@@ -3,6 +3,7 @@
 import type { ArtistRef, QueueItem, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import { radioQueueAlbum, radioTrackForStation } from '../iradio/store.js';
+import { coverUrlFor } from '../api/cover.js';
 
 const RADIO_ID_PREFIX = 'rs:';
 
@@ -64,6 +65,46 @@ function mapFormat(format: string | null): Track['format'] {
   return undefined;
 }
 
+/** Keep every SQL IN (...) list below SQLite's conservative variable bound. */
+const MAX_IN_CHUNK = 500;
+
+function chunk<T>(items: T[], size = MAX_IN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function placeholders(n: number): string {
+  return new Array(n).fill('?').join(',');
+}
+
+/**
+ * Explicit track artists for many tracks at once (one IN (...) query per chunk).
+ * Missing entries fall back to the album artist in `artistsFor` below.
+ */
+export function loadTrackArtists(db: Db, trackIds: string[]): Map<string, ArtistRef[]> {
+  const out = new Map<string, ArtistRef[]>();
+  const unique = [...new Set(trackIds)];
+  for (const part of chunk(unique)) {
+    if (part.length === 0) continue;
+    const rows = db
+      .prepare(
+        `SELECT ta.track_id AS track_id, ar.id AS id, ar.name AS name
+         FROM track_artists ta JOIN artists ar ON ar.id = ta.artist_id
+         WHERE ta.track_id IN (${placeholders(part.length)})
+         ORDER BY ta.track_id, ta.position`,
+      )
+      .all(...part) as { track_id: string; id: string; name: string }[];
+    for (const row of rows) {
+      const list = out.get(row.track_id);
+      const artist = { id: row.id, name: row.name };
+      if (list) list.push(artist);
+      else out.set(row.track_id, [artist]);
+    }
+  }
+  return out;
+}
+
 function trackArtists(db: Db, row: JoinedTrackRow): ArtistRef[] {
   const rows = db
     .prepare(
@@ -72,14 +113,18 @@ function trackArtists(db: Db, row: JoinedTrackRow): ArtistRef[] {
        WHERE ta.track_id = ? ORDER BY ta.position`,
     )
     .all(row.id) as { id: string; name: string }[];
-  if (rows.length > 0) return rows.map((r) => ({ id: r.id, name: r.name }));
+  const explicit = rows.map((r) => ({ id: r.id, name: r.name }));
+  return explicit.length > 0 ? explicit : artistsFromAlbum(row);
+}
+
+function artistsFromAlbum(row: JoinedTrackRow): ArtistRef[] {
   if (row.album_artist_id && row.album_artist_name) {
     return [{ id: row.album_artist_id, name: row.album_artist_name }];
   }
   return [];
 }
 
-export function trackFromJoinedRow(db: Db, row: JoinedTrackRow): PlayableTrack {
+function trackFromRow(row: JoinedTrackRow, explicitArtists?: ArtistRef[]): PlayableTrack {
   const durationMs = row.duration_ms;
   let cue: Track['cue'];
   if (row.cue_start_ms != null) {
@@ -92,7 +137,8 @@ export function trackFromJoinedRow(db: Db, row: JoinedTrackRow): PlayableTrack {
     albumId: row.album_id,
     source: row.source === 'spotify' ? 'spotify' : 'local',
     title: row.title,
-    artists: trackArtists(db, row),
+    artists:
+      explicitArtists && explicitArtists.length > 0 ? explicitArtists : artistsFromAlbum(row),
     disc: row.disc,
     number: row.number,
     durationMs: cue ? Math.max(0, cue.endMs - cue.startMs) : durationMs,
@@ -106,6 +152,10 @@ export function trackFromJoinedRow(db: Db, row: JoinedTrackRow): PlayableTrack {
   };
 }
 
+export function trackFromJoinedRow(db: Db, row: JoinedTrackRow): PlayableTrack {
+  return trackFromRow(row, trackArtists(db, row));
+}
+
 export function loadTrack(db: Db, id: string): Track | undefined {
   if (id.startsWith(RADIO_ID_PREFIX)) return radioTrackForStation(db, id)?.track;
   const row = db.prepare(`${SELECT_TRACK} WHERE t.id = ?`).get(id) as
@@ -117,15 +167,23 @@ export function loadTrack(db: Db, id: string): Track | undefined {
 /** Load tracks preserving the requested id order; unknown ids are skipped. */
 export function loadTracks(db: Db, ids: string[]): Track[] {
   if (ids.length === 0) return [];
-  const placeholders = ids.map(() => '?').join(',');
-  const rows = db
-    .prepare(`${SELECT_TRACK} WHERE t.id IN (${placeholders})`)
-    .all(...ids) as JoinedTrackRow[];
+  // Deduplicate for the IN (...) queries (a playlist may repeat a song) but walk
+  // the caller's ids below, so duplicates keep their requested order.
+  const unique = [...new Set(ids)];
+  const rows: JoinedTrackRow[] = [];
+  for (const part of chunk(unique)) {
+    rows.push(
+      ...(db
+        .prepare(`${SELECT_TRACK} WHERE t.id IN (${placeholders(part.length)})`)
+        .all(...part) as JoinedTrackRow[]),
+    );
+  }
   const byId = new Map(rows.map((r) => [r.id, r]));
+  const artists = loadTrackArtists(db, unique);
   const out: Track[] = [];
   for (const id of ids) {
     const row = byId.get(id);
-    if (row) out.push(trackFromJoinedRow(db, row));
+    if (row) out.push(trackFromRow(row, artists.get(id)));
   }
   return out;
 }
@@ -180,9 +238,7 @@ export function loadQueueItems(db: Db, ids: string[]): QueueItem[] {
       album: {
         id: track.albumId,
         title: album.title,
-        coverUrl: album.cover_path
-          ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
-          : undefined,
+        coverUrl: coverUrlFor(track.albumId, album.cover_path, 200),
       },
     });
   }

@@ -115,6 +115,17 @@ export function createHistory(db: Db, opts: HistoryOptions = {}): HistoryService
 
   const trackStmt = db.prepare('SELECT album_id, duration_ms FROM tracks WHERE id = ?');
 
+  // Cheap version of everything rediscover depends on. The day + window + this
+  // fingerprint key the memoized candidate list, so a scan (albums added/removed)
+  // or a new play invalidates it without a timer.
+  const rediscoverVersionStmt = db.prepare(
+    `SELECT (SELECT COUNT(*) FROM albums) AS albums,
+            (SELECT COALESCE(MAX(added_at), 0) FROM albums) AS maxAddedAt,
+            (SELECT COUNT(*) FROM plays) AS plays,
+            (SELECT COALESCE(MAX(id), 0) FROM plays) AS maxPlayId`,
+  );
+  let rediscoverCache: { key: string; rows: RediscoverAlbum[] } | null = null;
+
   return {
     recordFromState(prev, next) {
       counter.recordFromState(prev, next);
@@ -141,19 +152,32 @@ export function createHistory(db: Db, opts: HistoryOptions = {}): HistoryService
         ? Math.max(0, olderThanDays)
         : DEFAULT_OLDER_THAN_DAYS;
       const cutoff = at - days * DAY_MS;
-      const rows = rediscoverStmt.all(cutoff) as RediscoverAlbum[];
       // Deterministic shuffle: same set/order for the whole UTC day, changes at
       // midnight. Never-played albums (lastPlayedAt null) take part too.
       const day = Math.floor(at / DAY_MS);
-      const score = new Map<string, string>();
-      for (const row of rows) {
-        score.set(row.albumId, createHash('sha1').update(`${day}:${row.albumId}`).digest('hex'));
+      const version = rediscoverVersionStmt.get() as {
+        albums: number;
+        maxAddedAt: number;
+        plays: number;
+        maxPlayId: number;
+      };
+      const key = `${day}:${days}:${version.albums}:${version.maxAddedAt}:${version.plays}:${version.maxPlayId}`;
+      let rows: RediscoverAlbum[];
+      if (rediscoverCache?.key === key) {
+        rows = rediscoverCache.rows;
+      } else {
+        rows = rediscoverStmt.all(cutoff) as RediscoverAlbum[];
+        const score = new Map<string, string>();
+        for (const row of rows) {
+          score.set(row.albumId, createHash('sha1').update(`${day}:${row.albumId}`).digest('hex'));
+        }
+        rows.sort(
+          (a, b) =>
+            (score.get(a.albumId) ?? '').localeCompare(score.get(b.albumId) ?? '') ||
+            a.albumId.localeCompare(b.albumId),
+        );
+        rediscoverCache = { key, rows };
       }
-      rows.sort(
-        (a, b) =>
-          (score.get(a.albumId) ?? '').localeCompare(score.get(b.albumId) ?? '') ||
-          a.albumId.localeCompare(b.albumId),
-      );
       return rows.slice(0, clampLimit(limit, DEFAULT_REDISCOVER_LIMIT));
     },
 

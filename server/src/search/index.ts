@@ -23,8 +23,8 @@ import type { FastifyInstance } from 'fastify';
 import type { AlbumSummary, ArtistRef, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
-import { loadTrack } from '../play/rows.js';
-import { coverUrl, publicTrack } from '../api/library.js';
+import { loadTracks } from '../play/rows.js';
+import { coverUrlFor, publicTrack } from '../api/library.js';
 import {
   compact,
   editDistance,
@@ -920,7 +920,7 @@ export function createSearch(db: Db): Search {
           title: r.title,
           artist: { id: r.artist_id, name: r.artist_name ?? 'Unknown Artist' },
           ...(r.year ? { year: r.year } : {}),
-          ...(r.cover_path ? { coverUrl: coverUrl(r.id) } : {}),
+          ...(r.cover_path ? { coverUrl: coverUrlFor(r.id, r.cover_path) } : {}),
           ...(r.format ? { format: r.format } : {}),
           addedAt: r.added_at,
         });
@@ -944,10 +944,7 @@ export function createSearch(db: Db): Search {
 
   function trackItems(ids: string[]): Map<string, Track> {
     const map = new Map<string, Track>();
-    for (const id of ids) {
-      const t = loadTrack(db, id);
-      if (t) map.set(id, publicTrack(t));
-    }
+    for (const t of loadTracks(db, ids)) map.set(t.id, publicTrack(t));
     return map;
   }
 

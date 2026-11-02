@@ -14,8 +14,8 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { PlaylistDetail, PlaylistSummary, PlaylistTrack, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
-import { publicTrack } from '../api/library.js';
-import { loadTrack } from '../play/rows.js';
+import { coverUrlFor, publicTrack } from '../api/library.js';
+import { loadTrack, loadTracks } from '../play/rows.js';
 import { buildM3u8, m3u8Filename, parseM3u8, resolveImportEntry } from './m3u.js';
 import {
   addOverlayTracks,
@@ -29,12 +29,14 @@ import {
   type MergedEntry,
 } from './overlay.js';
 import {
+  createSmartSession,
   evaluateSmartSpec,
   parseLimit,
   parseSort,
   PlaylistInputError,
   validateSmartSpec,
   type SmartRule,
+  type SmartSession,
   type SmartSpec,
 } from './rules.js';
 import { ensureMyPlaylistSchema } from './schema.js';
@@ -214,8 +216,8 @@ function specFromRow(row: PlaylistRow): SmartSpec {
  * Ordered track ids for any playlist row (smart rows are evaluated live; synced
  * Spotify rows include the user's local overlay entries at their resolved spots).
  */
-function orderedTrackIds(db: Db, row: PlaylistRow): string[] {
-  if (isSmart(row)) return evaluateSmartSpec(db, specFromRow(row));
+function orderedTrackIds(db: Db, row: PlaylistRow, session?: SmartSession): string[] {
+  if (isSmart(row)) return evaluateSmartSpec(db, specFromRow(row), session);
   if (isRune(row)) return readEntries(db, row.id).map((e) => e.trackId);
   return mergedEntries(db, row.id).map((e) => e.trackId);
 }
@@ -270,19 +272,42 @@ function summaryFor(
   return summary;
 }
 
-function toPlaylistTracks(db: Db, entries: (string | MergedEntry | { trackId: string; addedAt: number | null })[]): PlaylistTrack[] {
-  const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
+function toPlaylistTracks(
+  db: Db,
+  entries: (string | MergedEntry | { trackId: string; addedAt: number | null })[],
+): PlaylistTrack[] {
+  const items = entries.map((entry) =>
+    typeof entry === 'string' ? { trackId: entry } : entry,
+  );
+  // One batched query for every track (and its artists), one for every album,
+  // instead of two queries per playlist entry. loadTracks keeps the requested
+  // order and duplicates; unknown (dangling) ids are skipped.
+  const loaded = loadTracks(
+    db,
+    items.map((item) => item.trackId),
+  );
+  const trackById = new Map(loaded.map((track) => [track.id, track]));
+
+  const albumIds = [...new Set(loaded.map((track) => track.albumId))];
+  const albumById = new Map<string, { title: string | null; cover_path: string | null }>();
+  for (const part of chunk(albumIds, 500)) {
+    if (part.length === 0) continue;
+    const placeholders = part.map(() => '?').join(',');
+    for (const row of db
+      .prepare(`SELECT id, title, cover_path FROM albums WHERE id IN (${placeholders})`)
+      .all(...part) as { id: string; title: string | null; cover_path: string | null }[]) {
+      albumById.set(row.id, row);
+    }
+  }
+
   const tracks: PlaylistTrack[] = [];
-  for (const entry of entries) {
-    const item = typeof entry === 'string' ? { trackId: entry } : entry;
-    const track = loadTrack(db, item.trackId);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!;
+    const item = items[i]!;
+    const track = trackById.get(item.trackId);
     if (!track) continue; // dangling entry (track/album removed) — skip it
-    const album = albumStmt.get(track.albumId) as
-      | { title: string | null; cover_path: string | null }
-      | undefined;
-    const coverUrl = album?.cover_path
-      ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
-      : undefined;
+    const album = albumById.get(track.albumId);
+    const coverUrl = coverUrlFor(track.albumId, album?.cover_path, 200);
     const playlistTrack: PlaylistTrack = {
       ...(publicTrack(track) as Track),
       album: {
@@ -321,8 +346,11 @@ export function listAllPlaylists(db: Db): RunePlaylistSummary[] {
        ORDER BY CASE WHEN source = 'local' THEN 0 ELSE 1 END, position, name COLLATE NOCASE`,
     )
     .all() as PlaylistRow[];
+  // Every smart playlist evaluates the same whole-library candidate set; load it
+  // once for the request instead of once per smart row.
+  const session = rows.some(isSmart) ? createSmartSession(db) : undefined;
   return rows.map((row) =>
-    summaryFor(db, row, isRune(row) ? orderedTrackIds(db, row) : undefined),
+    summaryFor(db, row, isRune(row) ? orderedTrackIds(db, row, session) : undefined),
   );
 }
 

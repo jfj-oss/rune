@@ -258,7 +258,7 @@ export function parseLimit(input: unknown): number | undefined {
 
 // ---------------------------------------------------------------- evaluation
 
-interface Candidate {
+export interface Candidate {
   id: string;
   source: string;
   title: string;
@@ -545,9 +545,23 @@ function sortCandidates(rows: Candidate[], sort: string): Candidate[] {
   });
 }
 
+/**
+ * One request's worth of candidate rows, shared by every smart playlist it
+ * evaluates. Building the set is the expensive part (the whole track table plus
+ * artists and play counts); filtering/sorting it per spec is cheap.
+ */
+export interface SmartSession {
+  candidates: Candidate[];
+}
+
+/** Load the shared candidate set once for a request. */
+export function createSmartSession(db: Db): SmartSession {
+  return { candidates: loadCandidates(db) };
+}
+
 /** Evaluate a smart spec against the whole track table, live. */
-export function evaluateSmartSpec(db: Db, spec: SmartSpec): string[] {
-  let rows = loadCandidates(db);
+export function evaluateSmartSpec(db: Db, spec: SmartSpec, session?: SmartSession): string[] {
+  let rows = session ? session.candidates : loadCandidates(db);
   if (spec.rules.length > 0) {
     rows = rows.filter((c) =>
       spec.match === 'any'
