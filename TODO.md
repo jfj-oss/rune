@@ -3,3 +3,4 @@
 - CONTRACTS.md stream fmt list → `orig|flac|aac` (opus returns 400).
 - matcher rate limiter is per MbClient instance; share one limiter between matcher and meta (both call MusicBrainz).
 - cover route: Spotify albums store an http(s) URL in albums.cover_path — /api/cover must redirect/proxy those.
+- scanner: folders with inconsistent album tags split into several albums (Chicago X → 'Chicago X' + 'X'; Sugar Ray '14:59' ×2). Merge when titles are near-identical or one is a substring.
