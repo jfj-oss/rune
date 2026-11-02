@@ -183,7 +183,6 @@ export class SpotifySdkEngine implements Engine {
       if (this.pos.playing) { this.pos = { ms: this.position() ?? this.pos.ms, at: Date.now(), playing: false }; this.syncFn(this.pos.ms, false); }
       return;
     }
-    this.last = { s, at: Date.now() };
     const t = s.track_window.current_track;
     const want = spotifyIdOf(cur.track.id);
     if (t.id !== want && t.linked_from?.id !== want) {
@@ -194,6 +193,7 @@ export class SpotifySdkEngine implements Engine {
       if (movedOn && this.advancedFrom !== want && this.pos.playing) {
         this.advancedFrom = want;
         this.snap = null;
+        this.last = { s, at: Date.now() }; // what Spotify is playing now: load() follows it
         this.endedFn();
       }
       return; // otherwise an older track's event: ignore
@@ -213,6 +213,8 @@ export class SpotifySdkEngine implements Engine {
       if (s.paused) return;
       this.awaitUntil = 0;
     }
+    // only states that passed the checks above may steer a fast switch
+    this.last = { s, at: Date.now() };
     const next: Snap = {
       id: want,
       positionMs: s.position,
@@ -236,6 +238,7 @@ export class SpotifySdkEngine implements Engine {
   // ---------- Engine ----------
   load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
     if (autoplay && startMs === 0 && this.fastSwitch(track)) return;
+    this.last = null; // describes the song we are leaving
     const seq = ++this.seq;
     this.cur = { track, startMs };
     this.advancedFrom = null;
@@ -258,12 +261,15 @@ export class SpotifySdkEngine implements Engine {
   private fastSwitch(track: Track): boolean {
     const id = spotifyIdOf(track.id);
     const last = this.last;
-    if (!this.player || !last || Date.now() - last.at > 15_000 || !this.window.includes(id)) return false;
+    if (!this.player || !last || Date.now() - last.at > 4_000 || !this.window.includes(id)) return false;
     const tw = last.s.track_window;
     // following only applies to a song Spotify moved to by itself (not a restart of the same song)
     const adopt = isTrack(tw.current_track, id) && !!this.cur && spotifyIdOf(this.cur.track.id) !== id;
     const skip = !adopt && isTrack(tw.next_tracks?.[0], id) && !!this.player.nextTrack;
     if (!adopt && !skip) return false;
+    // after a skip, Spotify is still switching: until it reports the new song, nothing may follow the old state
+    // (Previous pressed right after Next would otherwise "follow" the song being left and send nothing)
+    this.last = null;
     this.seq++;
     this.cur = { track, startMs: 0 };
     this.snap = null;

@@ -48,6 +48,16 @@ describe('SpotifySdkEngine look-ahead', () => {
     expect(e.position()).toBeGreaterThanOrEqual(300);
   });
 
+  it('Previous right after Next is a real load, not a follow of the song being left', () => {
+    const { e, player, onState } = playing();
+    onState(state('a', [], ['b', 'c'], 5000));
+    const ensure = vi.spyOn(e as unknown as { ensureReady(): Promise<string> }, 'ensureReady').mockResolvedValue('dev');
+    e.load(track('b'), 0, true, [track('c')]); // Next: skip
+    expect(player.nextTrack).toHaveBeenCalledTimes(1);
+    e.load(track('a'), 0, true, [track('b'), track('c')]); // Previous before Spotify reported b
+    expect(ensure).toHaveBeenCalledTimes(1); // a normal play request
+  });
+
   it('a song outside the sent list, or a restart of the same song, is a normal load', () => {
     const { e, player, onState } = playing();
     onState(state('a', [], ['b', 'c'], 5000));
