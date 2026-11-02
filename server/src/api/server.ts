@@ -26,7 +26,7 @@ import { registerJsonCompression } from './compress.js';
 import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
-import { coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
+import { albumsByIds, coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
 import { createLoudness, ensureLoudnessSchema, registerLoudnessRoutes } from '../loudness/index.js';
 import { albumNotHiddenSql, ensureDupesSchema, registerDupesRoutes } from '../library/dupes.js';
 import { createRadio, registerRadioRoutes } from '../radio/index.js';
@@ -43,6 +43,8 @@ import { createEditions, ensureEditionsSchema, registerEditionsRoutes } from '..
 import { ensureStatsSchema, registerStatsRoutes } from '../stats/index.js';
 import { createIradio, ensureRadioSchema, registerRadioStationRoutes } from '../iradio/index.js';
 import { createSearch, ensureSearchSchema, registerSearchRoutes } from '../search/index.js';
+import { createLocalSearchCache } from '../search/local-cache.js';
+import { createSemaphore } from './semaphore.js';
 import { createLibraryWatcher, type LibraryWatcher } from '../watch/index.js';
 import { rootsStatus } from '../watch/root-status.js';
 import {
@@ -75,6 +77,13 @@ export interface BuiltApp {
   close: () => Promise<void>;
   /** Graceful SIGINT/SIGTERM teardown: watcher, in-flight work, WAL checkpoint, modules, Db. */
   shutdown: (reason?: string) => Promise<ShutdownResult>;
+}
+
+/** The local (library-only) half of GET /search, as returned by the cache. */
+interface LocalSearchResult {
+  albums: AlbumSummary[];
+  artists: ArtistRef[];
+  tracks: Track[];
 }
 
 const IMAGE_TYPES: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
@@ -112,7 +121,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const clients = new Set<{ send: (s: string) => void; slim?: boolean }>();
   /** Per zone: the queue fingerprint last broadcast (slim clients then get position updates without it). */
   const sentQueueRev = new Map<string, string>();
+  /** /search?local=1 and /search share this 15 s memo; library changes clear it. */
+  const localSearchCache = createLocalSearchCache<LocalSearchResult>();
   const broadcast = (ev: ServerEvent) => {
+    // Every scan/sync/link path announces itself this way; drop stale local hits.
+    if (ev.type === 'library-changed') localSearchCache.clear();
     let full: string;
     let slim: string | null = null;
     if (ev.type === 'player') {
@@ -526,6 +539,42 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     })();
   });
 
+  // ---------- local search (shared by /search and /search?local=1)
+  /**
+   * Rank the local library and drop hidden albums/artists/tracks. This is the
+   * expensive half of search; both query variants go through localSearchCache.
+   */
+  function computeLocalSearch(q: string): LocalSearchResult {
+    const found = searchIndex.search(q);
+    let local: LocalSearchResult = {
+      albums: found.albums,
+      artists: found.artists,
+      tracks: found.tracks,
+    };
+    const hiddenRows = db
+      .prepare('SELECT album_id FROM album_prefs WHERE hidden = 1')
+      .all() as { album_id: string }[];
+    if (hiddenRows.length > 0) {
+      const hidden = new Set(hiddenRows.map((r) => r.album_id));
+      const visibleArtists = new Set(
+        (
+          db
+            .prepare(
+              `SELECT DISTINCT ar.id AS id FROM artists ar
+               WHERE EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = ar.id AND a.in_library = 1 AND ${albumNotHiddenSql(db, 'a')})`,
+            )
+            .all() as { id: string }[]
+        ).map((r) => r.id),
+      );
+      local = {
+        albums: found.albums.filter((a) => !hidden.has(a.id)),
+        artists: found.artists.filter((a) => visibleArtists.has(a.id)),
+        tracks: found.tracks.filter((t) => !hidden.has(t.albumId)),
+      };
+    }
+    return local;
+  }
+
   // ---------- routes
   await app.register(
     async (r) => {
@@ -541,8 +590,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         socket.send(JSON.stringify({ type: 'scan', progress: last } satisfies ServerEvent));
       });
 
-      r.get<{ Querystring: Record<string, string | string[] | undefined> }>('/library/albums', async (req) => {
+      r.get<{ Querystring: Record<string, string | string[] | undefined> }>('/library/albums', async (req, reply) => {
         const q = req.query;
+        // ?ids=a,b,c: batch summaries in the caller's order (the Home page fetches
+        // exactly the albums it shows instead of N /albums/:id requests).
+        const idsParam = queryValue(q.ids);
+        if (idsParam !== undefined) {
+          const ids = idsParam
+            .split(',')
+            .map((id) => id.trim())
+            .filter(Boolean);
+          if (ids.length === 0) return reply.code(400).send({ error: 'ids required' });
+          if (ids.length > 100) return reply.code(400).send({ error: 'at most 100 ids' });
+          return albumsByIds(db, ids);
+        }
         const offset = queryValue(q.offset);
         const limit = queryValue(q.limit);
         const year = queryValue(q.year);
@@ -743,35 +804,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const q = (queryValue(req.query.q) ?? '').trim();
         if (!q) return { albums: [], artists: [], tracks: [] };
         // Ranked search (worker T). Hidden albums stay out of every search
-        // surface, exactly like the library grid.
-        const found = searchIndex.search(q);
+        // surface, exactly like the library grid. ?local=1 and the plain request
+        // share one cached computation (cleared by library-changed events).
         // Keep the historical response shape (no `top`; /search2 exposes that).
-        let local: { albums: AlbumSummary[]; artists: ArtistRef[]; tracks: Track[] } = {
-          albums: found.albums,
-          artists: found.artists,
-          tracks: found.tracks,
-        };
-        const hiddenRows = db
-          .prepare('SELECT album_id FROM album_prefs WHERE hidden = 1')
-          .all() as { album_id: string }[];
-        if (hiddenRows.length > 0) {
-          const hidden = new Set(hiddenRows.map((r) => r.album_id));
-          const visibleArtists = new Set(
-            (
-              db
-                .prepare(
-                  `SELECT DISTINCT ar.id AS id FROM artists ar
-                   WHERE EXISTS (SELECT 1 FROM albums a WHERE a.artist_id = ar.id AND a.in_library = 1 AND ${albumNotHiddenSql(db, 'a')})`,
-                )
-                .all() as { id: string }[]
-            ).map((r) => r.id),
-          );
-          local = {
-            albums: found.albums.filter((a) => !hidden.has(a.id)),
-            artists: found.artists.filter((a) => visibleArtists.has(a.id)),
-            tracks: found.tracks.filter((t) => !hidden.has(t.albumId)),
-          };
-        }
+        const local = localSearchCache.get(q, () => computeLocalSearch(q));
         // ?local=1: library hits only (milliseconds), so the page can show them before Spotify answers
         if (!spotify || queryValue(req.query.local) === '1') return local;
         try {
@@ -802,7 +838,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       r.get<{ Params: { id: string }; Querystring: { size?: string } }>('/cover/:id', async (req, reply) => {
         const p = coverPath(db, req.params.id);
         if (!p) return reply.code(404).send({ error: 'no cover' });
-        if (/^https?:\/\//.test(p)) return reply.redirect(p);
+        if (/^https?:\/\//.test(p)) {
+          // Old clients still ask for /api/cover for Spotify albums; a redirect is
+          // cached like the image itself so it is only paid once.
+          reply.header('cache-control', 'public, max-age=86400');
+          return reply.redirect(p);
+        }
         if (!existsSync(p)) return reply.code(404).send({ error: 'cover missing' });
         const size = req.query.size === '200' ? 200 : req.query.size === 'full' ? 0 : 600;
         const file = size ? await thumbnail(cfg, req.params.id, p, size) : p;
@@ -1024,6 +1065,8 @@ function sanitize(s: PlayerState): PlayerState {
 }
 
 const thumbJobs = new Map<string, Promise<string>>();
+/** At most 3 ffmpeg processes at once; the rest wait in FIFO order. */
+const thumbnailSlots = createSemaphore(3);
 /** Resize covers with ffmpeg into <dataDir>/thumbs, cached by source mtime. */
 function thumbnail(cfg: Config, albumId: string, src: string, size: number): Promise<string> {
   const dir = join(cfg.dataDir, 'thumbs');
@@ -1033,14 +1076,21 @@ function thumbnail(cfg: Config, albumId: string, src: string, size: number): Pro
   if (existsSync(out)) return Promise.resolve(out);
   let job = thumbJobs.get(out);
   if (!job) {
-    job = new Promise<string>((resolve) => {
-      execFile(
-        'ffmpeg',
-        ['-v', 'error', '-y', '-i', src, '-vf', `scale='min(${size},iw)':-2:flags=lanczos`, '-frames:v', '1', '-q:v', '3', out],
-        { timeout: 20_000 },
-        (err) => resolve(err ? src : out),
-      );
-    }).finally(() => thumbJobs.delete(out));
+    job = (async () => {
+      await thumbnailSlots.acquire();
+      try {
+        return await new Promise<string>((resolve) => {
+          execFile(
+            'ffmpeg',
+            ['-v', 'error', '-y', '-i', src, '-vf', `scale='min(${size},iw)':-2:flags=lanczos`, '-frames:v', '1', '-q:v', '3', out],
+            { timeout: 20_000 },
+            (err) => resolve(err ? src : out),
+          );
+        });
+      } finally {
+        thumbnailSlots.release();
+      }
+    })().finally(() => thumbJobs.delete(out));
     thumbJobs.set(out, job);
   }
   return job;

@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { openDb, type Db } from '../src/db/index.js';
 import { ensureHistorySchema } from '../src/history/index.js';
-import { createSearch, registerSearchRoutes, type Search } from '../src/search/index.js';
+import {
+  createSearch,
+  ensureSearchSchema,
+  registerSearchRoutes,
+  type Search,
+} from '../src/search/index.js';
 
 // ---------------------------------------------------------------- fixtures
 
@@ -416,6 +424,35 @@ describe('index maintenance', () => {
     db.exec('DELETE FROM search_docs');
     const second = createSearch(db); // empty table → rebuild
     expect(second.search('abbey road').albums[0]).toMatchObject({ id: 'la:abbeyroad' });
+  });
+
+  it('adds the ref_id index when migrating an existing database', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'liner-search-migration-'));
+    const path = join(dir, 'liner.db');
+    const plan = (db: Db) =>
+      (
+        db
+          .prepare('EXPLAIN QUERY PLAN SELECT title FROM search_docs WHERE ref_id = ?')
+          .all('la:abbeyroad') as { detail: string }[]
+      )
+        .map((r) => r.detail)
+        .join('\n');
+    try {
+      // Simulate an older DB: search tables exist, but the new index does not.
+      let db = openDb(path);
+      ensureSearchSchema(db);
+      db.exec('DROP INDEX search_docs_ref');
+      expect(plan(db)).not.toContain('search_docs_ref');
+      db.close();
+
+      // Reopening applies the migration to the existing database.
+      db = openDb(path);
+      ensureSearchSchema(db);
+      expect(plan(db)).toContain('search_docs_ref'); // SEARCH ... USING INDEX search_docs_ref
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

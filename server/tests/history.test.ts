@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { PlayerState, QueueItem, Track } from '@liner/shared';
 import { openDb, type Db } from '../src/db/index.js';
@@ -395,6 +395,68 @@ describe('rediscover', () => {
       'la:old',
       'la:older',
     ]);
+  });
+
+  it('memoizes per day/window until albums or plays change', () => {
+    const db = openDb(':memory:');
+    let clock = BASE + 400 * DAY;
+    let scans = 0;
+    const original = db.prepare.bind(db);
+    const spy = vi.spyOn(db, 'prepare').mockImplementation(((sql: string) => {
+      const stmt = original(sql);
+      if (sql.includes('LEFT JOIN plays p ON p.album_id = a.id')) {
+        const all = stmt.all.bind(stmt);
+        (stmt as unknown as { all: (...args: unknown[]) => unknown }).all = (...args) => {
+          scans++;
+          return all(...args);
+        };
+      }
+      return stmt;
+    }) as typeof db.prepare);
+    let h: HistoryService;
+    try {
+      h = createHistory(db, { now: () => clock });
+    } finally {
+      spy.mockRestore();
+    }
+    insertAlbum(db, 'la:a');
+    insertAlbum(db, 'la:b');
+    h.record({
+      trackId: 'l:a1',
+      albumId: 'la:a',
+      zone: 'pc',
+      startedAt: clock - 200 * DAY,
+      playedMs: 31_000,
+      completed: false,
+    });
+
+    const first = h.rediscover(10, 90);
+    expect(scans).toBe(1);
+    expect(h.rediscover(10, 90)).toEqual(first); // same key: cached
+    expect(h.rediscover(1, 90)).toHaveLength(1); // limit slices the cached list
+    expect(scans).toBe(1);
+
+    insertAlbum(db, 'la:c'); // library changed: album count/version changes
+    h.rediscover(10, 90);
+    expect(scans).toBe(2);
+
+    h.record({
+      trackId: 'l:b1',
+      albumId: 'la:b',
+      zone: 'pc',
+      startedAt: clock - 150 * DAY,
+      playedMs: 31_000,
+      completed: false,
+    }); // plays table changed
+    h.rediscover(10, 90);
+    expect(scans).toBe(3);
+
+    h.rediscover(10, 50); // different window
+    expect(scans).toBe(4);
+
+    clock += DAY; // next UTC day: new deterministic shuffle
+    h.rediscover(10, 90);
+    expect(scans).toBe(5);
   });
 });
 

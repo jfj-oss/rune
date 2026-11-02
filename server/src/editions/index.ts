@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { AlbumSummary, Id } from '@liner/shared';
 import { normalizeName, type Db } from '../db/index.js';
+import { coverUrlFor } from '../api/cover.js';
 import type { Config } from '../config.js';
 import {
   MbClient,
@@ -318,7 +319,7 @@ function albumSummary(row: AlbumRow): AlbumSummary {
     title: row.title,
     artist: { id: row.artist_id, name: row.artist_name ?? 'Unknown Artist' },
     ...(row.year ? { year: row.year } : {}),
-    ...(row.cover_path ? { coverUrl: coverUrl(row.id) } : {}),
+    ...(row.cover_path ? { coverUrl: coverUrlFor(row.id, row.cover_path) } : {}),
     ...(row.format ? { format: row.format } : {}),
     addedAt: row.added_at,
   };

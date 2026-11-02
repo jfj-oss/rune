@@ -307,6 +307,36 @@ describe('GET /api/library/albums', () => {
     expect((await getJson<Page<AlbumSummary>>('/api/library/albums?year=1234')).total).toBe(0);
   });
 
+  it('batches summaries for ?ids= in the caller order, skipping unknown ids', async () => {
+    const want = [ZEBRA_ALBUM, SPOTIFY_SAVED, UNMATCHED_ALBUM, 'la:does-not-exist', ZEBRA_ALBUM];
+    const url = `/api/library/albums?ids=${want.map((id) => encodeURIComponent(id)).join(',')}`;
+    const body = await getJson<{ items: AlbumSummary[]; total: number }>(url);
+    expect(body.total).toBe(4);
+    expect(body.items.map((a) => a.id)).toEqual([
+      ZEBRA_ALBUM,
+      SPOTIFY_SAVED,
+      UNMATCHED_ALBUM,
+      ZEBRA_ALBUM,
+    ]);
+
+    // Identical row shape to the album grid.
+    const grid = await getJson<Page<AlbumSummary>>('/api/library/albums');
+    const expected = want
+      .map((id) => grid.items.find((a) => a.id === id))
+      .filter((a): a is AlbumSummary => a !== undefined);
+    expect(body.items).toEqual(expected);
+
+    for (const ids of ['', ',,,%20']) {
+      const res = await app.inject({ method: 'GET', url: `/api/library/albums?ids=${ids}` });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: 'ids required' });
+    }
+    const tooMany = Array.from({ length: 101 }, (_, i) => `sp:bulk${i}`).join(',');
+    const over = await app.inject({ method: 'GET', url: `/api/library/albums?ids=${tooMany}` });
+    expect(over.statusCode).toBe(400);
+    expect(over.json()).toEqual({ error: 'at most 100 ids' });
+  });
+
   it('searches with FTS, including diacritics ("Öyster" ↔ "oyster") and prefixes', async () => {
     for (const q of ['oyster', encodeURIComponent('Öyster'), 'oys']) {
       const page = await getJson<Page<AlbumSummary>>(`/api/library/albums?q=${q}`);
@@ -503,6 +533,16 @@ describe('GET /api/search', () => {
     expect(body.albums.map((a) => a.id)).toEqual([CUE_ALBUM, MATCHED_ALBUM]);
   });
 
+  it('serves the same local result for ?local=1 and the full request', async () => {
+    const local = await getJson<{ albums: AlbumSummary[]; artists: ArtistRef[]; tracks: Track[] }>(
+      '/api/search?q=oys&local=1',
+    );
+    // No Spotify client is configured, so the plain request is the local half too;
+    // both go through the one 15 s cache entry for this query.
+    expect(await getJson('/api/search?q=oys')).toEqual(local);
+    expect(await getJson('/api/search?q=oys&local=1')).toEqual(local);
+  });
+
   it('tolerates repeated query parameters', async () => {
     const body = await getJson<{ albums: AlbumSummary[] }>('/api/search?q=oys&q=oyster');
     expect(body.albums.map((a) => a.id)).toEqual([CUE_ALBUM, MATCHED_ALBUM]);
@@ -593,6 +633,34 @@ describe('GET /api/cover/:id', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('image/jpeg');
     expect(res.rawPayload[0]).toBe(0xff);
+  });
+
+  it('returns the Spotify CDN URL directly and caches the old-client redirect', async () => {
+    const id = 'sp:httpscover';
+    const https = 'https://img.example/https-cover.jpg';
+    db.prepare(
+      `INSERT INTO albums (id, source, title, artist_id, cover_path, added_at, in_library)
+       VALUES (?, 'spotify', 'HTTPS Cover', ?, ?, 4000, 0)`,
+    ).run(id, SPOTIFY_ARTIST, https);
+    try {
+      // Summaries must not wrap an absolute CDN URL in /api/cover/<id>.
+      const batch = await getJson<{ items: AlbumSummary[] }>(
+        `/api/library/albums?ids=${encodeURIComponent(id)}`,
+      );
+      expect(batch.items[0]!.coverUrl).toBe(https);
+      const album = await getJson<Album>(`/api/albums/${encodeURIComponent(id)}`);
+      expect(album.coverUrl).toBe(https);
+
+      const redirect = await app.inject({
+        method: 'GET',
+        url: `/api/cover/${encodeURIComponent(id)}?size=200`,
+      });
+      expect(redirect.statusCode).toBe(302);
+      expect(redirect.headers.location).toBe(https);
+      expect(redirect.headers['cache-control']).toBe('public, max-age=86400');
+    } finally {
+      db.prepare('DELETE FROM albums WHERE id = ?').run(id);
+    }
   });
 
   it('404s when the album has no cover or does not exist', async () => {

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { AlbumSummary, ArtistRef, Id, Page, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
+import { coverUrlFor } from './cover.js';
 
 const migrationSql = readFileSync(new URL('../db/migrations-browse.sql', import.meta.url), 'utf8');
 
@@ -87,7 +88,7 @@ function albumSummary(r: AlbumRow): AlbumSummary {
     title: r.title,
     artist: { id: r.artist_id, name: r.artist_name ?? 'Unknown Artist' },
     ...(r.year ? { year: r.year } : {}),
-    ...(r.cover_path ? { coverUrl: coverUrl(r.id) } : {}),
+    ...(r.cover_path ? { coverUrl: coverUrlFor(r.id, r.cover_path) } : {}),
     ...(r.format ? { format: r.format } : {}),
     addedAt: r.added_at,
   };
@@ -230,7 +231,7 @@ function browseTrack(r: TrackRow, artists: ArtistRef[]): BrowseTrack {
     album: {
       id: r.album_id,
       title: r.album_title,
-      ...(r.cover_path ? { coverUrl: coverUrl(r.album_id) } : {}),
+      ...(r.cover_path ? { coverUrl: coverUrlFor(r.album_id, r.cover_path) } : {}),
     },
   };
 }

@@ -6,7 +6,8 @@ import type { PlaylistDetail, PlaylistSummary, PlaylistTrack } from '@liner/shar
 import type Database from 'better-sqlite3';
 import type { Db } from '../db/index.js';
 import { getAlbum, publicTrack } from '../api/library.js';
-import { loadTrack } from '../play/rows.js';
+import { coverUrlFor } from '../api/cover.js';
+import { loadTracks } from '../play/rows.js';
 import type {
   SpotifyAlbum,
   SpotifyPlaylist,
@@ -470,18 +471,27 @@ export function getPlaylist(db: Db, id: string): PlaylistDetail | undefined {
 
   // Synced entries + local overlay entries, resolved after any Spotify resync.
   const entries = mergedEntries(db, id);
-  const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
+  // Batch the track/artist/album loads instead of two statements per entry.
+  const loaded = loadTracks(db, entries.map((entry) => entry.trackId));
+  const trackById = new Map(loaded.map((track) => [track.id, track]));
+  const albumIds = [...new Set(loaded.map((track) => track.albumId))];
+  const albumById = new Map<string, { title: string | null; cover_path: string | null }>();
+  for (let i = 0; i < albumIds.length; i += 500) {
+    const part = albumIds.slice(i, i + 500);
+    const placeholders = part.map(() => '?').join(',');
+    for (const album of db
+      .prepare(`SELECT id, title, cover_path FROM albums WHERE id IN (${placeholders})`)
+      .all(...part) as { id: string; title: string | null; cover_path: string | null }[]) {
+      albumById.set(album.id, album);
+    }
+  }
 
   const tracks: PlaylistTrack[] = [];
   for (const entry of entries) {
-    const track = loadTrack(db, entry.trackId);
+    const track = trackById.get(entry.trackId);
     if (!track) continue; // dangling entry (album/track removed) — just skip it
-    const album = albumStmt.get(track.albumId) as
-      | { title: string | null; cover_path: string | null }
-      | undefined;
-    const coverUrl = album?.cover_path
-      ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
-      : undefined;
+    const album = albumById.get(track.albumId);
+    const coverUrl = coverUrlFor(track.albumId, album?.cover_path, 200);
     const shared = publicTrack(track) as Track;
     tracks.push({
       ...shared,

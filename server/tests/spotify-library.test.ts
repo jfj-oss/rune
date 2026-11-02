@@ -208,7 +208,8 @@ describe('syncPlaylists', () => {
     expect(liked?.tracks[0]?.album).toEqual({
       id: 'sp:abbey',
       title: 'Abbey Road',
-      coverUrl: '/api/cover/sp%3Aabbey?size=200',
+      // Spotify stores an absolute CDN URL: return it instead of a redirect hop.
+      coverUrl: ABBEY_COVER,
     });
     expect(liked?.tracks[0]?.spotifyUri).toBe('spotify:track:t1');
 

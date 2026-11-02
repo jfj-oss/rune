@@ -5,6 +5,7 @@ import type { Db } from '../db/index.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { loadTrack } from '../play/rows.js';
 import { albumNotHiddenSql } from '../library/dupes.js';
+import { coverUrlFor } from './cover.js';
 
 export interface AlbumListQuery {
   q?: string;
@@ -44,18 +45,19 @@ const ALBUM_SELECT = `
          a.match_confidence, a.added_at
   FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id`;
 
-export function coverUrl(albumId: string, size: 200 | 600 | 'full' = 600): string {
-  return `/api/cover/${encodeURIComponent(albumId)}?size=${size}`;
-}
+// Kept here for existing callers; the helpers themselves live in cover.ts so the
+// play/rows and myplaylists layers can use them without importing this module.
+export { coverUrl, coverUrlFor } from './cover.js';
 
 function summary(r: AlbumRow): AlbumSummary {
+  const cover = coverUrlFor(r.id, r.cover_path);
   return {
     id: r.id,
     source: r.source === 'spotify' ? 'spotify' : 'local',
     title: r.title,
     artist: { id: r.artist_id, name: r.artist_name ?? 'Unknown Artist' },
     ...(r.year ? { year: r.year } : {}),
-    ...(r.cover_path ? { coverUrl: coverUrl(r.id) } : {}),
+    ...(cover ? { coverUrl: cover } : {}),
     ...(r.format ? { format: r.format } : {}),
     addedAt: r.added_at,
   };
@@ -124,6 +126,32 @@ export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
   const total = (db.prepare(`SELECT count(*) n FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id ${w}`).get(...args) as { n: number }).n;
   const rows = db.prepare(`${ALBUM_SELECT} ${w} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...args, limit, offset) as AlbumRow[];
   return { items: rows.map(summary), total };
+}
+
+/**
+ * Album summaries for an explicit list of ids, in the caller's order. Unknown ids
+ * are skipped. This is the batch behind GET /library/albums?ids= (the Home page
+ * uses it instead of one /albums/:id request per card).
+ */
+export function albumsByIds(db: Db, ids: string[]): { items: AlbumSummary[]; total: number } {
+  ensureSpotifyLibrarySchema(db);
+  const unique = [...new Set(ids)];
+  const byId = new Map<string, AlbumRow>();
+  for (let i = 0; i < unique.length; i += 500) {
+    const part = unique.slice(i, i + 500);
+    if (part.length === 0) continue;
+    const placeholders = part.map(() => '?').join(',');
+    for (const row of db
+      .prepare(`${ALBUM_SELECT} WHERE a.id IN (${placeholders})`)
+      .all(...part) as AlbumRow[]) {
+      byId.set(row.id, row);
+    }
+  }
+  const items = ids
+    .map((id) => byId.get(id))
+    .filter((row): row is AlbumRow => row !== undefined)
+    .map(summary);
+  return { items, total: items.length };
 }
 
 /** Strip server-only fields (file path) from a track before sending it to a client. */
