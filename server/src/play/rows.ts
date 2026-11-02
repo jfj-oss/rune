@@ -2,6 +2,9 @@
 // so both the PC zone and the stream routes can share it.
 import type { ArtistRef, QueueItem, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
+import { radioQueueAlbum, radioTrackForStation } from '../iradio/store.js';
+
+const RADIO_ID_PREFIX = 'rs:';
 
 /** The shared Track plus the local file path (a field the shared contract lacks). */
 export interface PlayableTrack extends Track {
@@ -104,6 +107,7 @@ export function trackFromJoinedRow(db: Db, row: JoinedTrackRow): PlayableTrack {
 }
 
 export function loadTrack(db: Db, id: string): Track | undefined {
+  if (id.startsWith(RADIO_ID_PREFIX)) return radioTrackForStation(db, id)?.track;
   const row = db.prepare(`${SELECT_TRACK} WHERE t.id = ?`).get(id) as
     | JoinedTrackRow
     | undefined;
@@ -142,12 +146,26 @@ export function makeQueueItem(track: Track, queueId = makeQueueId()): QueueItem 
   return { queueId, track, album };
 }
 
-/** Load tracks and wrap them as QueueItems (album title/cover filled in where known). */
+/**
+ * Load tracks and wrap them as QueueItems (album title/cover filled in where
+ * known). Radio stations ('rs:<uuid>') come from radio_stations instead of the
+ * local tracks table and keep their requested position in the queue.
+ */
 export function loadQueueItems(db: Db, ids: string[]): QueueItem[] {
-  const tracks = loadTracks(db, ids);
+  const localIds = ids.filter((id) => !id.startsWith(RADIO_ID_PREFIX));
+  const localTracks = new Map(loadTracks(db, localIds).map((track) => [track.id, track]));
   const albumRows = new Map<string, { title: string; cover_path: string | null }>();
   const stmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
-  return tracks.map((track) => {
+  const items: QueueItem[] = [];
+  for (const id of ids) {
+    if (id.startsWith(RADIO_ID_PREFIX)) {
+      const radio = radioTrackForStation(db, id);
+      if (!radio) continue;
+      items.push({ queueId: makeQueueId(), track: radio.track, album: radioQueueAlbum(radio.station) });
+      continue;
+    }
+    const track = localTracks.get(id);
+    if (!track) continue;
     let album = albumRows.get(track.albumId);
     if (!album) {
       const row = stmt.get(track.albumId) as
@@ -156,7 +174,7 @@ export function loadQueueItems(db: Db, ids: string[]): QueueItem[] {
       album = { title: row?.title ?? '', cover_path: row?.cover_path ?? null };
       albumRows.set(track.albumId, album);
     }
-    return {
+    items.push({
       queueId: makeQueueId(),
       track,
       album: {
@@ -166,6 +184,7 @@ export function loadQueueItems(db: Db, ids: string[]): QueueItem[] {
           ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
           : undefined,
       },
-    };
-  });
+    });
+  }
+  return items;
 }
