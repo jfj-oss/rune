@@ -10,7 +10,10 @@ import type { PlayerCommand, PlayerState, QueueItem, Track } from '@liner/shared
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
 import type { PlaybackZone } from '../modules.js';
+import { ensureLoudnessSchema, gainInfoForTrack } from '../loudness/index.js';
+import { buildFileOptions } from './file-options.js';
 import { MpvIpc, type MpvArg, type MpvMessage } from './mpv-ipc.js';
+import { levelingLabel } from './signal-path.js';
 import {
   createQueue,
   currentItem,
@@ -62,6 +65,9 @@ const POSITION_EMIT_INTERVAL_MS = 1_000;
 const MAX_RESPAWN_ATTEMPTS = 5;
 
 export async function createPcZone(db: Db, cfg: Config): Promise<PcZone> {
+  // The zone reads gains directly from track_loudness; make sure the table
+  // exists even when the loudness worker has not been created yet.
+  ensureLoudnessSchema(db);
   const zone = new PcZoneImpl(db, cfg);
   await zone.init();
   return zone;
@@ -471,15 +477,20 @@ class PcZoneImpl implements PcZone {
    * mpv can ignore while the file is still being opened.
    */
   private fileOptions(track: Track, startMs = 0): string | undefined {
-    const parts: string[] = [];
-    if (track.cue) {
-      const absoluteStart = (track.cue.startMs + Math.max(0, startMs)) / 1_000;
-      parts.push(`start=${trimSeconds(absoluteStart)}`);
-      parts.push(`end=${trimSeconds(track.cue.endMs / 1_000)}`);
-    } else if (startMs > 0) {
-      parts.push(`start=${trimSeconds(startMs / 1_000)}`);
+    // ReplayGain-style leveling is applied per file: mpv's af volume filter is
+    // reset for each playlist entry, and upcoming entries are loaded with their
+    // own gain below. Peak-limited, so this cannot clip.
+    return buildFileOptions({ cue: track.cue, startMs, gainDb: this.gainFor(track) });
+  }
+
+  /** Applied loudness gain for a local track, 0 when disabled or unmeasured. */
+  private gainFor(track: Track): number {
+    if (track.source !== 'local') return 0;
+    try {
+      return gainInfoForTrack(this.db, track.id, this.cfg.normalize ?? 'album')?.gainDb ?? 0;
+    } catch {
+      return 0;
     }
-    return parts.length > 0 ? parts.join(',') : undefined;
   }
 
   private async appendEntry(
@@ -873,10 +884,9 @@ class PcZoneImpl implements PcZone {
         parts.push(`resampled to ${rateLabel(out.samplerate)}`);
       } else if (input.format && out.format && input.format !== out.format) {
         parts.push(`converted to ${out.format}`);
-      } else if (this.volume !== 100) {
-        parts.push(`volume ${this.volume}%`);
       } else {
-        parts.push('bit-perfect');
+        // The signal path is no longer bit-perfect once the leveling filter runs.
+        parts.push(levelingLabel(this.gainFor(track), this.volume));
       }
     }
     return parts;
@@ -893,10 +903,6 @@ class PcZoneImpl implements PcZone {
 /** Upcoming QueueItems from pure queue state (wraps / repeats per repeat mode). */
 function upcomingEntries(q: QueueState, count: number): QueueItem[] {
   return queueUpcoming(q, count).map((entry) => entry.item);
-}
-
-function trimSeconds(n: number): string {
-  return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(3)));
 }
 
 function formatLabel(track: Track): string {

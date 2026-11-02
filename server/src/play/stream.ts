@@ -19,6 +19,7 @@ import { extname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
+import { ensureLoudnessSchema, gainInfoForTrack } from '../loudness/index.js';
 
 export interface StoredTrack {
   id: string;
@@ -180,6 +181,7 @@ export function cachedTranscode(cfg: Config, track: StoredTrack, fmt: 'flac' | '
 }
 
 export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config): void {
+  ensureLoudnessSchema(db);
   const getTrack = db.prepare(
     'SELECT id, path, cue_start_ms, cue_end_ms, format, source FROM tracks WHERE id = ?',
   );
@@ -205,18 +207,38 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
       return reply.code(410).send({ error: 'audio file is missing' });
     }
 
+    // Loudness gain is only a *hint*: the server never alters the audio here.
+    // Browsers apply it with Web Audio (GainNode) so a quiet 70s FLAC and a
+    // loud modern master play at the same level. Absent when normalization is
+    // off or the track has not been analysed.
+    const loudnessHeaders = gainHeaders(db, trackId, cfg);
+
     const isCue = track.cue_start_ms != null;
     if (fmt === 'orig' && !isCue && offsetMs === 0) {
-      return serveFile(request.method, request.headers.range, reply, track.path);
+      return serveFile(request.method, request.headers.range, reply, track.path, loudnessHeaders);
     }
     // Cue tracks are always resliced; orig means "lossless FLAC" in that case.
     const outFmt: 'flac' | 'aac' = fmt === 'aac' ? 'aac' : 'flac';
     if (offsetMs === 0 && query.live !== '1') {
       const file = await cachedTranscode(cfg, track, outFmt, kbps);
-      if (file) return serveFile(request.method, request.headers.range, reply, file);
+      if (file) return serveFile(request.method, request.headers.range, reply, file, loudnessHeaders);
     }
-    return serveTranscode(request.method, reply, track, outFmt, kbps, offsetMs);
+    return serveTranscode(request.method, reply, track, outFmt, kbps, offsetMs, loudnessHeaders);
   });
+}
+
+/** X-Rune-Gain-Db hint for clients that can apply gain (Web Audio). */
+function gainHeaders(db: Db, trackId: string, cfg: Config): Record<string, string> {
+  try {
+    const info = gainInfoForTrack(db, trackId, cfg.normalize ?? 'album');
+    if (!info || info.gainDb === 0) return {};
+    return {
+      'X-Rune-Gain-Db': info.gainDb.toFixed(1),
+      'Access-Control-Expose-Headers': 'X-Rune-Gain-Db',
+    };
+  } catch {
+    return {};
+  }
 }
 
 function serveFile(
@@ -224,6 +246,7 @@ function serveFile(
   rangeHeader: string | undefined,
   reply: import('fastify').FastifyReply,
   path: string,
+  extraHeaders: Record<string, string> = {},
 ): void {
   let size: number;
   try {
@@ -244,6 +267,7 @@ function serveFile(
       'Content-Length': size,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, max-age=3600',
+      ...extraHeaders,
     });
     if (method === 'HEAD') {
       res.end();
@@ -275,6 +299,7 @@ function serveFile(
       'Content-Range': `bytes ${range.start}-${range.end}/${size}`,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, max-age=3600',
+      ...extraHeaders,
     });
     if (method === 'HEAD') {
       res.end();
@@ -306,6 +331,7 @@ function serveFile(
     'Content-Length': total,
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, max-age=3600',
+    ...extraHeaders,
   });
   if (method === 'HEAD') {
     res.end();
@@ -375,12 +401,14 @@ function serveTranscode(
   fmt: 'flac' | 'aac',
   kbps: number,
   offsetMs = 0,
+  extraHeaders: Record<string, string> = {},
 ): void {
   const contentType = fmt === 'flac' ? 'audio/flac' : 'audio/aac';
   const headers = {
     'Content-Type': contentType,
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    ...extraHeaders,
   };
 
   if (method === 'HEAD') {

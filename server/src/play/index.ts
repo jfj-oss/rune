@@ -11,3 +11,5 @@ export {
 } from './stream.js';
 export * from './queue.js';
 export * from './rows.js';
+export { buildFileOptions, type FileOptionInput } from './file-options.js';
+export { levelingLabel } from './signal-path.js';
