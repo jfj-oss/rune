@@ -13,6 +13,7 @@ import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes } from '../play/index.js';
 import { createSpotify } from '../spotify/index.js';
+import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { coverPath, getAlbum, getArtist, listAlbums, listArtists, search, publicTrack, type AlbumListQuery } from './library.js';
 
 export interface AppOptions {
@@ -64,6 +65,27 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- scan + match pipeline
   const scanner = createScanner(db, cfg);
   const matcher = createMatcher(db, cfg);
+  const meta = createMeta(db, cfg);
+  let detailsRunning = false;
+  /** Prefetch album details in the background (one album at a time, after matching). */
+  async function prefetchDetails(): Promise<void> {
+    if (detailsRunning) return;
+    detailsRunning = true;
+    try {
+      const pending = db
+        .prepare(
+          `SELECT a.id FROM albums a LEFT JOIN album_details d ON d.album_id = a.id
+           WHERE d.album_id IS NULL AND a.source = 'local' ORDER BY a.mb_release_id IS NULL, a.added_at DESC`,
+        )
+        .all() as { id: string }[];
+      for (const { id } of pending) {
+        if (scanning) break; // a rescan/match is running; resume afterwards
+        await meta.getDetails(id).catch((e) => app.log.warn({ err: e, id }, 'details failed'));
+      }
+    } finally {
+      detailsRunning = false;
+    }
+  }
   let scanning: Promise<void> | null = null;
   let last: ScanProgress = { running: false, filesSeen: 0, albumsFound: 0, matched: 0, errors: 0 };
   function runScan(): Promise<void> {
@@ -80,6 +102,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           broadcast({ type: 'scan', progress: last });
           if (done % 10 === 0 || done === total) broadcast({ type: 'library-changed' });
         });
+        setTimeout(() => void prefetchDetails(), 1000);
         if (spotify && (await spotify.auth.status()).connected) {
           await spotify.syncSavedAlbums().catch((e) => app.log.warn({ err: e }, 'spotify sync failed'));
         }
@@ -136,9 +159,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const mbid = req.body?.musicbrainzReleaseId;
         if (!mbid || !/^[0-9a-f-]{36}$/i.test(mbid)) return reply.code(400).send({ error: 'musicbrainzReleaseId required' });
         await matcher.setRelease(req.params.id, mbid);
+        meta.invalidate(req.params.id);
         broadcast({ type: 'library-changed' });
         return getAlbum(db, req.params.id);
       });
+
+      registerMetaRoutes(r, meta);
 
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
