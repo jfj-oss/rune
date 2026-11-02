@@ -9,11 +9,14 @@ import { Prose } from '../components/album/Reception';
 import { Empty, SectionHead, SourceLink } from '../components/Rows';
 import { usePlay } from '../hooks/usePlay';
 import { encId, plural } from '../lib/format';
+import { textPreview } from '../lib/previews';
+import { usePreview } from '../store/preview';
 
 export default function ArtistPage() {
   const id = decodeURIComponent(useParams().id ?? '');
   const q = useQuery({ queryKey: ['artist', id], queryFn: () => api.artist(id) });
   const { playAlbums } = usePlay();
+  const openPreview = usePreview((s) => s.open);
   if (q.isError) return <div className="page"><Empty title="Artist not found" /></div>;
   const a = q.data;
   if (!a) return <div className="page"><div className="ahero"><div className="skel skel--title shimmer" style={{ marginTop: 120 }} /></div></div>;
@@ -51,7 +54,7 @@ export default function ArtistPage() {
             <SectionHead title="Biography" />
             <div className="bg">
               <Prose text={a.bio.value} lines={6} />
-              <SourceLink source={a.bio.source} url={a.bio.url} />
+              <SourceLink source={a.bio.source} url={a.bio.url} onPreview={() => openPreview(textPreview('Biography', a.name, a.bio!))} />
             </div>
           </section>
         ) : (

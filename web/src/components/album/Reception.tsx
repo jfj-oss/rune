@@ -1,68 +1,127 @@
 import type { AlbumDetails, CriticQuote, CriticScore } from '@liner/shared';
-import { ExternalLink } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { formatScoreValue, normalizeScore, scoreSuffix, scoreTone } from '../../lib/scores';
+import { quotePreview, scorePreview, textPreview } from '../../lib/previews';
+import { usePreview } from '../../store/preview';
 import { SourceLink } from '../Rows';
 
-/** Serif prose with a max line count and a Read more toggle. */
-export function Prose({ text, lines = 10, className = '' }: { text: string; lines?: number; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+/**
+ * Serif prose clamped to `lines`; "Read more" expands it in place (smooth height transition) into a
+ * scrollable view of the full stored text, "Show less" folds it back.
+ */
+export function Prose({ text, lines = 10, className = '', maxHeight = 560 }: { text: string; lines?: number; className?: string; maxHeight?: number }) {
+  const clip = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const id = useId();
   const [open, setOpen] = useState(false);
-  const [overflow, setOverflow] = useState(false);
+  const [dims, setDims] = useState<{ full: number; collapsed: number } | null>(null);
+  const [more, setMore] = useState(false);
+
   useLayoutEffect(() => {
-    const el = ref.current;
+    const el = inner.current;
     if (!el) return;
-    const measure = () => setOverflow(el.scrollHeight > el.clientHeight + 4 || open);
+    const measure = () => {
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || 28;
+      const next = { full: Math.ceil(el.scrollHeight), collapsed: Math.round(lh * lines) };
+      setDims((d) => (d && d.full === next.full && d.collapsed === next.collapsed ? d : next));
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [text, open, lines]);
-  const paras = text.split(/\n{2,}/);
+  }, [text, lines]);
+
+  const cap = Math.min(maxHeight, Math.round((typeof window === 'undefined' ? 800 : window.innerHeight) * 0.7));
+  const overflow = !!dims && dims.full > dims.collapsed + 4;
+  const scrollable = open && !!dims && dims.full > cap;
+  const height = !dims ? undefined : open ? Math.min(dims.full, cap) : overflow ? dims.collapsed : dims.full;
+
+  const checkMore = () => {
+    const el = clip.current;
+    if (el) setMore(el.scrollTop + el.clientHeight < el.scrollHeight - 6);
+  };
+  useLayoutEffect(() => { if (scrollable) checkMore(); else setMore(false); }, [scrollable, height]);
+
+  const toggle = () => {
+    if (open && clip.current) clip.current.scrollTo({ top: 0, behavior: 'smooth' });
+    setOpen((o) => !o);
+  };
+  const faded = (!open && overflow) || (scrollable && more);
+
   return (
     <div className={className}>
       <div
-        ref={ref}
-        className={`prose${!open ? ' prose--clamp' : ''}${!open && overflow ? ' prose--fade' : ''}`}
-        style={{ ['--lines' as string]: lines }}
+        ref={clip}
+        id={id}
+        className={`prose__clip${scrollable ? ' prose__clip--scroll' : ''}${faded ? ' prose__clip--fade' : ''}`}
+        style={{ height, overflowY: scrollable ? 'auto' : 'hidden' }}
+        onScroll={checkMore}
+        tabIndex={scrollable ? 0 : undefined}
+        aria-label={scrollable ? 'Full text, scrollable' : undefined}
       >
-        {paras.map((p, i) => <p key={i}>{p}</p>)}
+        <div ref={inner} className="prose">
+          {text.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
+        </div>
       </div>
-      {overflow && <button className="readmore" onClick={() => setOpen((o) => !o)} aria-expanded={open}>{open ? 'Show less' : 'Read more'}</button>}
+      {overflow && (
+        <button className="readmore" onClick={toggle} aria-expanded={open} aria-controls={id}>
+          {open ? 'Show less' : 'Read more'}
+          {open && scrollable && <span className="readmore__hint"> · scroll for the rest</span>}
+        </button>
+      )}
     </div>
   );
 }
 
-export function ScoreChip({ s }: { s: CriticScore }) {
+export function ScoreChip({ s, details }: { s: CriticScore; details?: AlbumDetails }) {
   const n = normalizeScore(s);
+  const open = usePreview((p) => p.open);
   return (
-    <a className={`score score--${scoreTone(n)}`} href={s.url} target="_blank" rel="noopener noreferrer" title={`${s.outlet}${s.reviewCount ? ` — ${s.reviewCount} reviews` : ''}`}>
+    <button
+      type="button"
+      className={`score score--${scoreTone(n)}`}
+      onClick={() => open(scorePreview(s, details))}
+      aria-haspopup="dialog"
+      title={`${s.outlet}${s.reviewCount ? ` — ${s.reviewCount} reviews` : ''}`}
+    >
       <b>{formatScoreValue(s)}<small>{scoreSuffix(s)}</small></b>
       <span>{s.outlet}</span>
-    </a>
+    </button>
   );
 }
 
-function ScoreRow({ s }: { s: CriticScore }) {
+function ScoreRow({ s, details }: { s: CriticScore; details: AlbumDetails }) {
   const n = normalizeScore(s);
+  const open = usePreview((p) => p.open);
   return (
-    <a className="srow" href={s.url} target="_blank" rel="noopener noreferrer">
+    <button type="button" className="srow" onClick={() => open(scorePreview(s, details))} aria-haspopup="dialog">
       <span className="srow__top">
-        <span className="srow__outlet">{s.outlet}<ExternalLink size={12} aria-hidden /></span>
+        <span className="srow__outlet">{s.outlet}<ChevronRight size={14} aria-hidden /></span>
         <b className={`srow__val srow__val--${scoreTone(n)}`}>{formatScoreValue(s)}<small>{scoreSuffix(s)}</small></b>
       </span>
       <span className="srow__bar"><i className={`srow__fill srow__fill--${scoreTone(n)}`} style={{ width: `${n}%` }} /></span>
       {s.reviewCount ? <span className="srow__meta">{s.reviewCount.toLocaleString('en-US')} reviews</span> : null}
-    </a>
+    </button>
   );
 }
 
-function QuoteCard({ q }: { q: CriticQuote }) {
+function QuoteCard({ q, details }: { q: CriticQuote; details: AlbumDetails }) {
+  const open = usePreview((p) => p.open);
+  const go = () => open(quotePreview(q, details));
   return (
-    <figure className="quote">
+    <figure
+      className="quote"
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      onClick={go}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }}
+    >
       <blockquote>“{q.quote}”</blockquote>
       <figcaption>
-        — <a href={q.url} target="_blank" rel="noopener noreferrer" className="link">{q.outlet}{q.author ? `, ${q.author}` : ''}<span aria-hidden> ↗</span></a>
+        <span>— {q.outlet}{q.author ? `, ${q.author}` : ''}</span>
+        <span className="quote__more" aria-hidden>Read in context <ChevronRight size={13} /></span>
       </figcaption>
     </figure>
   );
@@ -70,21 +129,22 @@ function QuoteCard({ q }: { q: CriticQuote }) {
 
 export function Reception({ details }: { details: AlbumDetails }) {
   const { reception, scores, quotes } = details;
+  const open = usePreview((p) => p.open);
   return (
     <div className="recep">
       <div className="recep__main">
         {reception && (
           <>
             <Prose text={reception.value} lines={10} />
-            <SourceLink source={reception.source} url={reception.url} />
+            <SourceLink source={reception.source} url={reception.url} onPreview={() => open(textPreview('Critical reception', 'Critical reception', reception))} />
           </>
         )}
-        {quotes.length > 0 && <div className="quotes">{quotes.map((q, i) => <QuoteCard key={i} q={q} />)}</div>}
+        {quotes.length > 0 && <div className="quotes">{quotes.map((q, i) => <QuoteCard key={i} q={q} details={details} />)}</div>}
       </div>
       {scores.length > 0 && (
         <aside className="recep__scores" aria-label="Critic scores">
           <h3 className="eyebrow">Scores</h3>
-          {scores.map((s) => <ScoreRow key={s.outlet} s={s} />)}
+          {scores.map((s) => <ScoreRow key={s.outlet} s={s} details={details} />)}
         </aside>
       )}
     </div>

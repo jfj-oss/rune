@@ -35,11 +35,16 @@ export function Empty({ title, children, icon }: { title: string; children?: Rea
   );
 }
 
-export function SourceLink({ source, url, prefix = 'From' }: { source: string; url: string; prefix?: string }) {
+/** "From Wikipedia ›": with `onPreview` it opens the in-app preview instead of leaving rune. */
+export function SourceLink({ source, url, prefix = 'From', onPreview }: { source: string; url: string; prefix?: string; onPreview?: () => void }) {
   return (
     <p className="sourceline">
       {prefix}{' '}
-      <a href={url} target="_blank" rel="noopener noreferrer" className="link">{source}<span aria-hidden> ↗</span></a>
+      {onPreview ? (
+        <button type="button" className="link sourceline__btn" onClick={onPreview} aria-haspopup="dialog">{source}<span aria-hidden> ›</span></button>
+      ) : (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="link">{source}<span aria-hidden> ↗</span></a>
+      )}
     </p>
   );
 }

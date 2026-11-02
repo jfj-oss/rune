@@ -51,3 +51,18 @@ export interface AlbumQuery {
   label?: string;
   year?: number;
 }
+
+// ---------- browse (GET /tracks, /genres, /labels, /years) ----------
+// Mirrors server/src/api/browse.ts; kept here because @liner/shared is frozen.
+
+/** A track plus the album fields the Tracks page needs in one round-trip. */
+export interface BrowseTrack extends Track {
+  album: { id: string; title: string; coverUrl?: string };
+}
+export interface GenreFacet { genre: string; albumCount: number; coverAlbumIds: string[] }
+export interface LabelFacet { label: string; albumCount: number }
+export interface YearFacet { year: number; albumCount: number; decade: number }
+
+export type TrackSort = 'title' | 'artist' | 'album' | 'duration' | 'added';
+export interface TrackQuery { q?: string; sort?: TrackSort; dir?: 'asc' | 'desc'; offset?: number; limit?: number }
+export interface GenreAlbumQuery { sort?: 'added' | 'artist' | 'title' | 'year'; dir?: 'asc' | 'desc'; offset?: number; limit?: number }
