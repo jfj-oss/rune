@@ -1,9 +1,10 @@
 import type { Album } from '@liner/shared';
-import { ListEnd, ListStart, MoreHorizontal, Play, User } from 'lucide-react';
+import { ListEnd, ListStart, MoreHorizontal, Play, Radio, User } from 'lucide-react';
 import { Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { albumItems } from '../../hooks/usePlay';
 import { encId, formatDuration } from '../../lib/format';
+import { startRadio } from '../../lib/radio';
 import { currentItem, usePlayer } from '../../store/player';
 import { Eq } from '../Eq';
 import { AddToPlaylistItem } from '../AddToPlaylist';
@@ -57,6 +58,7 @@ export function TrackList({ album }: { album: Album }) {
                     <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([it], true); }}>Play next</MenuItem>
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([it]); }}>Add to queue</MenuItem>
                     <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [it] }} />
+                    {t.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('track', t.id); }}>Start radio</MenuItem>}
                     {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
                   </div>
                 )}

@@ -1,10 +1,13 @@
 import { GripVertical, ListMusic, ListPlus, TriangleAlert, X } from 'lucide-react';
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { formatDuration, formatTotalLength, plural } from '../../lib/format';
+import { isLiveTrack } from '../../lib/listenTypes';
+import { liveSubtitle } from '../../lib/live';
 import { isMixedQueue } from '../../player/pc';
 import { queueName } from '../../lib/playlists';
 import { usePlayer } from '../../store/player';
 import { usePlaylistUi } from '../../store/playlistUi';
+import { useRadio } from '../../store/radio';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { Eq } from '../Eq';
@@ -14,6 +17,7 @@ const ROW = 60;
 export function QueueList() {
   const state = usePlayer((s) => s.state);
   const command = usePlayer((s) => s.command);
+  const reasons = useRadio((s) => s.reasons);
   const [drag, setDrag] = useState<{ id: string; from: number; dy: number } | null>(null);
   const startY = useRef(0);
   const { queue, index, status } = state;
@@ -48,6 +52,8 @@ export function QueueList() {
     <ul className="queue__list" aria-label="Queue">
       {queue.map((q, i) => {
         const current = i === index;
+        const live = isLiveTrack(q.track);
+        const reason = reasons[q.track.id];
         let shift = 0;
         if (drag) {
           if (i === drag.from) shift = drag.dy;
@@ -65,14 +71,15 @@ export function QueueList() {
             </button>
             <button className="qrow__main" onClick={() => void command({ type: 'jump', index: i })}>
               <span className="qrow__art">
-                <Cover album={q.album} />
+                <Cover album={q.album} src={live ? q.album.coverUrl ?? null : undefined} />
                 {current && <span className="qrow__eq"><Eq playing={status === 'playing'} /></span>}
               </span>
               <span className="qrow__txt">
                 <span className="qrow__title">{q.track.title}</span>
-                <span className="qrow__sub">{q.track.artists.map((a) => a.name).join(', ')} · {q.album.title}</span>
+                <span className="qrow__sub">{live ? liveSubtitle(state, q) || 'Internet radio' : `${q.track.artists.map((a) => a.name).join(', ')} · ${q.album.title}`}</span>
+                {reason && <span className="qrow__reason">{reason}</span>}
               </span>
-              <span className="qrow__dur">{formatDuration(q.track.durationMs)}</span>
+              <span className="qrow__dur">{live ? <span className="livepill livepill--sm"><i />LIVE</span> : formatDuration(q.track.durationMs)}</span>
             </button>
             <button className="qrow__x btn-icon" aria-label={`Remove ${q.track.title}`} onClick={() => void command({ type: 'remove', queueId: q.queueId })}>
               <X size={16} />

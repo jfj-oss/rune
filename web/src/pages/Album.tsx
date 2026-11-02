@@ -1,6 +1,6 @@
 import type { Album, AlbumDetails, Artist } from '@liner/shared';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { Copy, ListEnd, MoreHorizontal, Play, Plus, Shuffle, Wrench } from 'lucide-react';
+import { Copy, ListEnd, MoreHorizontal, Play, Plus, Radio, Shuffle, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
@@ -20,6 +20,7 @@ import { useScrollRoot } from '../hooks/scrollRoot';
 import { albumItems, usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
 import { textPreview } from '../lib/previews';
+import { startRadio } from '../lib/radio';
 import { usePreview } from '../store/preview';
 import { useUi } from '../store/ui';
 
@@ -142,6 +143,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueAlbum(album.id, true); }}>Play next</MenuItem>
                     <AddToPlaylistItem close={close} target={{ what: `${album.title} · ${plural(album.tracks.length, 'track')}`, newName: album.title, resolve: () => albumItems(album) }} />
+                    {album.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('album', album.id); }}>Start radio</MenuItem>}
                     {album.source === 'local' && <MenuItem icon={<Wrench size={16} />} onClick={() => { close(); setFixing(true); }}>Fix match</MenuItem>}
                     {album.folderPath && (
                       <MenuItem icon={<Copy size={16} />} onClick={() => { close(); void navigator.clipboard?.writeText(album.folderPath ?? '').then(() => toast('Folder path copied'), () => toast(album.folderPath ?? '')); }}>Copy folder path</MenuItem>

@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ScrollRootContext } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
+import { listenApi } from '../listenApi';
+import { isLiveTrack } from '../lib/listenTypes';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { MediaSessionBridge } from './MediaSession';
@@ -27,6 +29,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const idx = (window.history.state?.idx as number | undefined) ?? 0;
   maxIdx.current = Math.max(maxIdx.current, idx);
   const hasQueue = usePlayer((s) => s.state.queue.length > 0);
+  const nextTrack = usePlayer((s) => s.state.queue[s.state.index + 1]?.track);
   const collapsed = useUi((s) => s.sidebarCollapsed);
   const setQueue = useUi((s) => s.setQueueOpen);
   const setNp = useUi((s) => s.setNowPlayingOpen);
@@ -44,6 +47,15 @@ export function Shell({ children }: { children: ReactNode }) {
     setQueue(false);
     setNp(false);
   }, [loc.pathname, setQueue, setNp]);
+
+  // Warm the next track's waveform so it is ready the moment it starts.
+  const nextId = nextTrack?.id;
+  const nextSource = nextTrack?.source;
+  useEffect(() => {
+    if (!nextId || nextSource === 'spotify' || isLiveTrack(nextTrack)) return;
+    listenApi.prefetchPeaks(nextId, 400);
+    listenApi.prefetchPeaks(nextId, 800);
+  }, [nextId, nextSource, nextTrack]);
 
   const canBack = idx > 0;
 

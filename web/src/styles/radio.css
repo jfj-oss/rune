@@ -1,0 +1,110 @@
+/* ---------- live streams / waveform / radio page ---------- */
+
+.livepill {
+  display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 7px;
+  border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
+  color: #ffd9d6; background: color-mix(in srgb, var(--bad) 24%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 55%, transparent);
+  text-transform: uppercase; white-space: nowrap; vertical-align: middle;
+}
+.livepill i { width: 5px; height: 5px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 6px color-mix(in srgb, var(--bad) 75%, transparent); }
+.livepill--sm { height: 16px; padding: 0 5px; font-size: 9px; gap: 4px; }
+.livepill--sm i { width: 4px; height: 4px; }
+
+/* live station: no seek bar, just the badge and what is happening */
+.seek--live { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 30px; }
+.seek--np.seek--live { justify-content: flex-start; min-height: 42px; }
+.seek__live { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+
+/* ---------- peak waveform ---------- */
+.wave {
+  position: relative; width: 100%; min-width: 0; height: 30px; border-radius: 6px;
+  cursor: pointer; touch-action: none; outline: none; user-select: none;
+}
+.wave canvas { display: block; width: 100%; height: 100%; }
+.wave:hover { background: color-mix(in srgb, #fff 4%, transparent); }
+.wave:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); }
+.wave__tip {
+  position: absolute; bottom: calc(100% + 6px); transform: translateX(-50%); z-index: 6;
+  padding: 2px 7px; border-radius: 5px; background: var(--panel); border: 1px solid color-mix(in srgb, #fff 16%, transparent);
+  box-shadow: var(--shadow-pop); color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums;
+  pointer-events: none; white-space: nowrap;
+}
+.seek--np .wave { height: 54px; }
+
+.npbar__livesub { margin-left: 8px; }
+/* the station badge is a flex item in the panel: don't let it stretch edge to edge */
+.np__panel > .livepill { align-self: flex-start; }
+.np__reason { font-size: 12.5px; color: var(--text-3); margin-top: -8px; }
+.qrow__reason { font-size: 11.5px; color: color-mix(in srgb, var(--accent-2) 65%, var(--text-3)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- settings: volume levelling ---------- */
+.vlevel { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; }
+.seg--level { display: flex; width: calc(100% - 24px); margin: 0 12px; padding: 3px; }
+.seg--level button { flex: 1; padding: 0 8px; }
+.seg--level button:disabled { opacity: 0.5; cursor: default; }
+.vlevel__hint { display: flex; align-items: center; gap: 5px; padding: 0 12px; font-size: 11.5px; color: var(--text-3); }
+.vlevel__hint svg { flex: none; }
+
+/* ---------- internet radio page ---------- */
+.radio__eyebrow { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.radio__search { max-width: 720px; margin-bottom: 14px; }
+.rchips { margin-bottom: 22px; }
+.rchips .chip { text-transform: capitalize; }
+.rsec { margin-top: 26px; }
+.rsec .sechead { margin-bottom: 14px; }
+.rgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 24px 22px; }
+
+.rcard { position: relative; min-width: 0; }
+.rcard__main { display: flex; flex-direction: column; width: 100%; min-width: 0; text-align: left; }
+.rcard__art {
+  position: relative; display: block; width: 100%; border-radius: var(--r);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4); transition: transform 180ms ease, box-shadow 180ms ease;
+}
+.rcard__art .cover { width: 100%; }
+.rcard:hover .rcard__art { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.55); }
+.rcard.is-playing .rcard__art { box-shadow: 0 0 0 2px var(--accent), 0 16px 34px rgba(0, 0, 0, 0.5); }
+.rcard__shade {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: var(--r);
+  background: rgba(0, 0, 0, 0.34); opacity: 0; transition: opacity var(--t);
+}
+.rcard:hover .rcard__shade, .rcard:focus-within .rcard__shade { opacity: 1; }
+.rcard__go {
+  display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%;
+  background: var(--accent); color: #12101f; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+.rcard__go svg { margin-left: 2px; }
+.rcard__live { position: absolute; left: 8px; top: 8px; }
+.rcard__name { margin-top: 11px; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rcard__tags { font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.rcard__meta { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; }
+.rcard__meta span + span::before { content: '·'; margin-right: 7px; opacity: 0.7; }
+.rcard__fav {
+  position: absolute; right: 8px; top: 8px; display: grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 50%; background: rgba(15, 16, 19, 0.66); border: 1px solid color-mix(in srgb, #fff 16%, transparent);
+  color: var(--text); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: color var(--t), background var(--t);
+}
+.rcard__fav:hover { background: rgba(15, 16, 19, 0.88); }
+.rcard__fav.is-on { color: var(--accent-2); }
+.rcard--skel { display: flex; flex-direction: column; gap: 8px; }
+.rcard--skel .cover { width: 100%; aspect-ratio: 1; border-radius: var(--r); box-shadow: none; margin-bottom: 3px; }
+.rcard--skel .skel { height: 12px; }
+
+.rfavrow { display: flex; gap: 18px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.rfavrow::-webkit-scrollbar { display: none; }
+.rfavrow .rcard { flex: 0 0 168px; width: 168px; scroll-snap-align: start; }
+
+@media (hover: none) {
+  .rcard__shade { display: none; }
+  .rcard:hover .rcard__art { transform: none; }
+}
+@media (max-width: 899px) {
+  .rgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; }
+  .rfavrow .rcard { flex-basis: 144px; width: 144px; }
+  .rfavrow { margin-inline: calc(var(--pad) * -1); padding-inline: var(--pad); }
+  .seg--tabs { overflow-x: auto; scrollbar-width: none; }
+  .seg--tabs::-webkit-scrollbar { display: none; }
+  .seg--tabs a { flex: 0 0 auto; padding: 0 13px; }
+  .seek--np .wave { height: 46px; }
+  .rcard__name { margin-top: 9px; font-size: 13.5px; }
+}

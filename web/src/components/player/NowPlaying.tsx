@@ -6,8 +6,11 @@ import { api } from '../../api';
 import { useCoverColor } from '../../hooks/useCoverColor';
 import { useIsDesktop } from '../../hooks/useMedia';
 import { encId, formatDuration } from '../../lib/format';
+import { isLiveTrack } from '../../lib/listenTypes';
+import { liveMeta } from '../../lib/live';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
 import { usePlaylistUi } from '../../store/playlistUi';
+import { useRadio } from '../../store/radio';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
@@ -29,6 +32,11 @@ export function NowPlaying() {
   const nav = useNavigate();
   const tint = useCoverColor(cur?.album);
   const { steps, tone } = useSignalPath();
+  const live = isLiveTrack(cur?.track);
+  const meta = cur && live ? liveMeta(state, cur) : null;
+  const reason = useRadio((s) => (cur ? s.reasons[cur.track.id] : undefined));
+  const liveSub = meta ? [meta.artist, meta.title !== meta.station ? meta.station : ''].filter(Boolean).join(' · ') : '';
+  const artSrc = live ? cur?.album.coverUrl ?? null : undefined;
   const [dy, setDy] = useState(0);
   const touch = useRef<{ y: number; x: number; ok: boolean } | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -36,7 +44,7 @@ export function NowPlaying() {
   const details = useQuery({
     queryKey: ['details', cur?.album.id],
     queryFn: () => api.details(cur!.album.id),
-    enabled: open && !!cur,
+    enabled: open && !!cur && !live,
     staleTime: 5 * 60_000,
     retry: false,
   });
@@ -70,7 +78,7 @@ export function NowPlaying() {
 
   const about = details.data?.reception?.value ?? details.data?.background?.value;
   const upNext = state.queue.slice(state.index + 1, state.index + 4);
-  const title = cur?.track.title ?? 'Nothing playing';
+  const title = meta?.title ?? cur?.track.title ?? 'Nothing playing';
 
   return (
     <div
@@ -83,7 +91,7 @@ export function NowPlaying() {
       onTouchEnd={onTouchEnd}
     >
       <div className="np__bg" aria-hidden>
-        {cur && <Cover album={cur.album} size={200} className="np__bgimg" eager />}
+        {cur && <Cover album={cur.album} size={200} className="np__bgimg" eager src={artSrc} />}
         <div className="np__bgwash" />
       </div>
 
@@ -91,10 +99,14 @@ export function NowPlaying() {
         <button className="btn-icon btn-icon--lg" aria-label="Close Now Playing" onClick={() => setOpen(false)}><ChevronDown size={26} /></button>
         <div className="np__topcenter">
           <span className="eyebrow">Now playing</span>
-          {cur && <Link to={`/album/${encId(cur.album.id)}`} className="np__topalbum" onClick={() => setOpen(false)}>{cur.album.title}</Link>}
+          {cur && (meta ? (
+            <span className="np__topalbum">{meta.station}</span>
+          ) : (
+            <Link to={`/album/${encId(cur.album.id)}`} className="np__topalbum" onClick={() => setOpen(false)}>{cur.album.title}</Link>
+          ))}
         </div>
         <div className="np__topright">
-          {cur && (
+          {cur && !live && (
             <button
               className="btn-icon btn-icon--lg"
               aria-label="Add to playlist"
@@ -111,12 +123,15 @@ export function NowPlaying() {
 
       <div className="np__body" ref={bodyRef}>
         <div className="np__art">
-          {cur ? <Cover album={cur.album} size={600} eager className="np__cover" sizes="min(60vh, 50vw)" /> : <div className="cover np__cover" />}
+          {cur ? <Cover album={cur.album} size={600} eager className="np__cover" sizes="min(60vh, 50vw)" src={artSrc} /> : <div className="cover np__cover" />}
         </div>
 
         <div className="np__panel">
+          {meta && <span className="livepill"><i />LIVE</span>}
           <h1 className="np__title">{title}</h1>
-          {cur && (
+          {cur && (meta ? (
+            liveSub ? <p className="np__sub">{liveSub}</p> : null
+          ) : (
             <p className="np__sub">
               {cur.track.artists.map((a, i) => (
                 <span key={a.id}>{i > 0 && ', '}<Link className="link link--strong" to={`/artist/${encId(a.id)}`} onClick={() => setOpen(false)}>{a.name}</Link></span>
@@ -124,9 +139,10 @@ export function NowPlaying() {
               <span className="dim"> · </span>
               <Link className="link" to={`/album/${encId(cur.album.id)}`} onClick={() => setOpen(false)}>{cur.album.title}</Link>
             </p>
-          )}
+          ))}
+          {reason && <p className="np__reason">Radio pick — {reason}</p>}
 
-          <SeekBar className="seek--np" />
+          <SeekBar className="seek--np" buckets={800} />
           <div className="np__transport"><Transport big /></div>
           <div className="np__vol"><VolumeControl /></div>
 
@@ -139,20 +155,23 @@ export function NowPlaying() {
             <section className="np__sec">
               <h2 className="eyebrow">Up next</h2>
               <ul className="np__next">
-                {upNext.map((q, i) => (
-                  <li key={q.queueId}>
-                    <button onClick={() => void command({ type: 'jump', index: state.index + 1 + i })}>
-                      <Cover album={q.album} sizes="40px" />
-                      <span className="np__nexttxt"><b>{q.track.title}</b><span>{q.track.artists.map((a) => a.name).join(', ')}</span></span>
-                      <span className="np__nextdur">{formatDuration(q.track.durationMs)}</span>
-                    </button>
-                  </li>
-                ))}
+                {upNext.map((q, i) => {
+                  const qLive = isLiveTrack(q.track);
+                  return (
+                    <li key={q.queueId}>
+                      <button onClick={() => void command({ type: 'jump', index: state.index + 1 + i })}>
+                        <Cover album={q.album} sizes="40px" src={qLive ? q.album.coverUrl ?? null : undefined} />
+                        <span className="np__nexttxt"><b>{q.track.title}</b><span>{qLive ? 'Internet radio · live' : q.track.artists.map((a) => a.name).join(', ')}</span></span>
+                        <span className="np__nextdur">{qLive ? <span className="livepill livepill--sm"><i />LIVE</span> : formatDuration(q.track.durationMs)}</span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}
 
-          {cur && about && (
+          {cur && !live && about && (
             <section className="np__sec">
               <h2 className="eyebrow">About this album</h2>
               <button className="np__about" onClick={() => { setOpen(false); nav(`/album/${encId(cur.album.id)}#review`); }}>

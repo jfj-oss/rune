@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { api, isMock } from '../api';
 import { deviceName, sdkSupported } from '../lib/device';
-import type { PlayItem } from '../lib/types';
+import type { PlayItem, PlaySource } from '../lib/types';
 import { SpotifySdkEngine, type SdkStatus } from '../player/spotifySdk';
 import type { Caps } from '../player/routing';
 
@@ -11,7 +11,7 @@ export interface ChooserRequest {
   startIndex: number;
   shuffle?: boolean;
   /** Which kind of tracks could not play on the current zone. */
-  need: 'spotify' | 'local';
+  need: PlaySource;
   /** spotify:playlist:… etc. for "Open in Spotify" when the items alone don't say what to open. */
   context?: string;
 }
@@ -24,11 +24,11 @@ interface SpotifyStore {
   sdk: SdkStatus;
   chooser: ChooserRequest | null;
   /** Session memory: where the user last sent Spotify / local tracks that their zone couldn't play. */
-  choices: { spotify?: string; local?: string };
+  choices: Partial<Record<PlaySource, string>>;
   init(): Promise<void>;
   askWhere(req: ChooserRequest): void;
   closeChooser(): void;
-  remember(need: 'spotify' | 'local', zone: string | undefined): void;
+  remember(need: PlaySource, zone: string | undefined): void;
 }
 
 export const sdkName = () => `rune — ${deviceName()}`;

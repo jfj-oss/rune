@@ -20,6 +20,7 @@ export function emptyState(zone: string): PlayerState {
 export function livePosition(s: PlayerState, now = Date.now()): number {
   const cur = s.queue[s.index];
   const base = s.positionMs + (s.status === 'playing' ? now - s.updatedAt : 0);
-  const max = cur?.track.durationMs ?? base;
+  // duration 0 means a live stream: let its elapsed time grow instead of clamping to 0
+  const max = cur?.track.durationMs ? cur.track.durationMs : base;
   return Math.max(0, Math.min(base, max));
 }
