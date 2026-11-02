@@ -519,11 +519,11 @@ describe('SpotifyApi playlist/library endpoints', () => {
               paging([{ added_at: '2024-01-02T00:00:00Z', track: sampleTrack('t2') }], { total: 2, offset: 50 }),
             );
       }
-      if (url.pathname === '/v1/playlists/pl1/tracks') {
+      if (url.pathname === '/v1/playlists/pl1/items') {
         return offset === '0'
           ? jsonResponse(
               200,
-              paging([entry(sampleTrack('t1'))], { total: 2, next: 'http://api.test/v1/playlists/pl1/tracks?offset=50' }),
+              paging([entry(sampleTrack('t1'))], { total: 2, next: 'http://api.test/v1/playlists/pl1/items?offset=50' }),
             )
           : jsonResponse(200, paging([entry(sampleTrack('t2'))], { total: 2, offset: 50 }));
       }
@@ -565,7 +565,7 @@ describe('HTTP routes (injected fake Spotify API)', () => {
       switch (`${method} ${url.pathname}`) {
         case 'GET /v1/me/playlists':
           return jsonResponse(200, paging([PLAYLIST]));
-        case 'GET /v1/playlists/pl1/tracks':
+        case 'GET /v1/playlists/pl1/items':
           return jsonResponse(200, paging([entry(sampleTrack('t1'))]));
         case 'GET /v1/me/tracks':
           return jsonResponse(200, paging([{ added_at: '2024-01-01T00:00:00Z', track: sampleTrack('t2') }]));

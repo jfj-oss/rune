@@ -186,3 +186,12 @@ describe('player endpoints with opaque 200 bodies', () => {
     await expect(api.play({ uris: ['spotify:track:x'] }, 'dev')).resolves.toBeUndefined();
   });
 });
+
+describe('new playlist item shape', () => {
+  it('maps { item } entries and items.total to the old track/tracks shape', async () => {
+    const { normalizePlaylistEntry, normalizePlaylist } = await import('../src/spotify/api.js');
+    const e = normalizePlaylistEntry({ added_at: 'x', is_local: false, item: { id: 't1', name: 'T' } } as never);
+    expect((e as { track?: { id: string } }).track?.id).toBe('t1');
+    expect(normalizePlaylist({ id: 'p', name: 'P', items: { total: 7 } } as never).tracks?.total).toBe(7);
+  });
+});

@@ -35,7 +35,9 @@ export interface CreateSpotifyOptions extends SpotifyAuthOptions, ConnectZoneOpt
 
 export interface SpotifyLibrarySyncResult {
   playlists: PlaylistSyncResult;
-  saved: SyncResult;
+  /** null when skipped or rate limited (see savedRetryAfterMs). */
+  saved: SyncResult | null;
+  savedRetryAfterMs?: number;
 }
 
 export interface SpotifyModule {
@@ -45,7 +47,7 @@ export interface SpotifyModule {
   /** Pull the user's saved albums into the local DB. */
   syncSavedAlbums(): Promise<SyncResult>;
   /** Pull playlists + Liked Songs, then saved albums (keeps in_library correct). */
-  syncLibrary(opts?: { skipLiked?: boolean }): Promise<SpotifyLibrarySyncResult>;
+  syncLibrary(opts?: { skipLiked?: boolean; skipSaved?: boolean }): Promise<SpotifyLibrarySyncResult>;
   /** Spotify catalogue search, cached for identical queries. */
   searchCatalog(q: string): Promise<SearchResults>;
   /** GET /api/albums/sp:<id> for an album not yet in the DB (in_library = 0). */
@@ -77,8 +79,16 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     syncLibrary: async (syncOpts = {}) => {
       // Playlists first: saved-album cleanup must see the current playlist refs.
       const playlists = await syncPlaylists(api, db, { now, skipLiked: syncOpts.skipLiked });
-      const saved = await syncSavedAlbums(api, db, { now });
-      return { playlists, saved };
+      // Saved albums can be rate limited on their own; never lose the playlist sync for it.
+      if (syncOpts.skipSaved) return { playlists, saved: null };
+      try {
+        const saved = await syncSavedAlbums(api, db, { now });
+        return { playlists, saved };
+      } catch (err) {
+        const e = err as { status?: number; retryAfterMs?: number };
+        if (e.status === 429) return { playlists, saved: null, savedRetryAfterMs: e.retryAfterMs ?? 60 * 60_000 };
+        throw err;
+      }
     },
     searchCatalog: (q) => catalog.search(q),
     fetchAlbum: (albumId) => fetchSpotifyAlbum(api, db, albumId, { now }),

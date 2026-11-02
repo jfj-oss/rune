@@ -70,6 +70,8 @@ export interface SpotifyPlaylist {
   images?: SpotifyImage[];
   owner?: { id: string; display_name?: string | null };
   tracks?: { total: number };
+  /** Newer API shape for the same thing (see normalizePlaylist). */
+  items?: { total: number };
   snapshot_id?: string;
   uri?: string;
 }
@@ -347,17 +349,21 @@ export class SpotifyApi {
     return this.request<SpotifyPlaylist>(`/playlists/${encodeURIComponent(id)}`);
   }
 
-  playlistTracks(id: string, opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylistTrack>> {
-    return this.request<SpotifyPaging<SpotifyPlaylistTrack>>(
-      this.query(`/playlists/${encodeURIComponent(id)}/tracks`, {
+  // Spotify moved playlist contents from /playlists/:id/tracks (now 403) to
+  // /playlists/:id/items, and each entry's song from `track` to `item`.
+  async playlistTracks(id: string, opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylistTrack>> {
+    const page = await this.request<SpotifyPaging<SpotifyPlaylistTrack>>(
+      this.query(`/playlists/${encodeURIComponent(id)}/items`, {
         limit: clamp(opts.limit ?? 50, 1, 50),
         offset: opts.offset ?? 0,
       }),
     );
+    return { ...page, items: page.items.map(normalizePlaylistEntry) };
   }
 
   async allPlaylistTracks(id: string): Promise<SpotifyPlaylistTrack[]> {
-    return this.pagedAll<SpotifyPlaylistTrack>(`/playlists/${encodeURIComponent(id)}/tracks`);
+    const items = await this.pagedAll<SpotifyPlaylistTrack>(`/playlists/${encodeURIComponent(id)}/items`);
+    return items.map(normalizePlaylistEntry);
   }
 
   playlists(opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylist>> {
@@ -371,7 +377,7 @@ export class SpotifyApi {
     let offset = 0;
     for (;;) {
       const page = await this.playlists({ offset });
-      out.push(...page.items);
+      out.push(...page.items.map(normalizePlaylist));
       offset += page.items.length;
       if (!page.next || page.items.length === 0) break;
     }
@@ -479,4 +485,18 @@ type FetchResponseLike = { text(): Promise<string> };
 
 function* chunks<T>(items: T[], size: number): Generator<T[]> {
   for (let i = 0; i < items.length; i += size) yield items.slice(i, i + size);
+}
+
+
+/** Old and new playlist entry shapes → `{ track }`. */
+export function normalizePlaylistEntry(e: SpotifyPlaylistTrack): SpotifyPlaylistTrack {
+  const raw = e as SpotifyPlaylistTrack & { item?: SpotifyPlaylistTrack['track'] };
+  if (raw.track === undefined && raw.item !== undefined) return { ...raw, track: raw.item };
+  return e;
+}
+
+/** Old and new playlist object shapes → `tracks.total` always present. */
+export function normalizePlaylist(p: SpotifyPlaylist): SpotifyPlaylist {
+  if (!p.tracks && p.items) return { ...p, tracks: { total: p.items.total } };
+  return p;
 }

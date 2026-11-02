@@ -107,13 +107,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     }
     // Liked Songs has its own block so a /me/tracks rate limit never stops playlist syncs.
     const skipLiked = Number(getState('spotify.likedBlockedUntil') ?? 0) > nowMs;
+    const skipSaved = Number(getState('spotify.savedBlockedUntil') ?? 0) > nowMs;
     if (!opts.force && nowMs - Number(getState('spotify.lastSync') ?? 0) < SYNC_MIN_GAP_MS) return Promise.resolve();
     spotifySyncInFlight = (async () => {
       try {
         setState('spotify.lastSync', String(Date.now()));
-        const result = await spotify.syncLibrary({ skipLiked });
+        const result = await spotify.syncLibrary({ skipLiked, skipSaved });
         const likedRetry = result.playlists?.likedRetryAfterMs;
         if (likedRetry) setState('spotify.likedBlockedUntil', String(Date.now() + likedRetry));
+        if (result.savedRetryAfterMs) setState('spotify.savedBlockedUntil', String(Date.now() + result.savedRetryAfterMs));
         app.log.info({ result }, 'spotify library sync complete');
         broadcast({ type: 'library-changed' });
       } catch (err) {
