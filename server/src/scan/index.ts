@@ -1107,6 +1107,16 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
     'INSERT INTO search_fts (kind, ref_id, text) VALUES (?, ?, ?)',
   );
   const stmtTrackIdsInAlbum = db.prepare('SELECT id FROM tracks WHERE album_id = ?');
+  const stmtGetScanSig = db.prepare('SELECT sig FROM scan_albums WHERE album_id = ?');
+  const stmtSetScanSig = db.prepare(
+    'INSERT INTO scan_albums (album_id, sig) VALUES (?, ?) ON CONFLICT(album_id) DO UPDATE SET sig = excluded.sig',
+  );
+  const stmtIsMatched = db.prepare('SELECT mb_release_id FROM albums WHERE id = ?');
+  // Matched albums: the matcher owns title/artist/date/label/genres and track artists.
+  const stmtUpdateMatchedAlbum = db.prepare(`
+    UPDATE albums SET format = ?, folder_path = ?, cover_path = COALESCE(?, cover_path), added_at = ?
+    WHERE id = ?`);
+  const stmtTrackExists = db.prepare('SELECT 1 FROM tracks WHERE id = ?');
   const stmtDeleteTrack = db.prepare('DELETE FROM tracks WHERE id = ?');
 
   const writeAlbum = db.transaction((album: AlbumModel): number => {
@@ -1121,7 +1131,12 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       }
     }
 
-    stmtUpsertAlbum.run(
+    const matched = !!(stmtIsMatched.get(album.id) as { mb_release_id: string | null } | undefined)?.mb_release_id;
+    const preexisting = new Set<string>();
+    if (matched) {
+      for (const t of album.tracks) if (stmtTrackExists.get(t.id)) preexisting.add(t.id);
+      stmtUpdateMatchedAlbum.run(album.format ?? null, album.folderPath, coverToWrite, album.addedAt, album.id);
+    } else stmtUpsertAlbum.run(
       album.id,
       album.title,
       album.artistId,
@@ -1164,8 +1179,9 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       }
     }
 
-    stmtDeleteTrackArtists.run(album.id);
+    if (!matched) stmtDeleteTrackArtists.run(album.id);
     for (const track of album.tracks) {
+      if (matched && preexisting.has(track.id)) continue; // keep matcher's track artists
       const seen = new Set<string>();
       let position = 0;
       for (const name of track.artistNames) {
@@ -1380,9 +1396,15 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
         const existing = existingByAlbum.get(model.id);
         // If we found no local cover, keep a matcher-downloaded cover in place.
         if (!model.coverPath && existing?.coverPath) model.coverPath = existing.coverPath;
-        if (existing && existingSignature(existing) === signature(model)) continue;
+        const sig = signature(model);
+        const stored = stmtGetScanSig.get(model.id) as { sig: string } | undefined;
+        if (stored ? stored.sig === sig : existing && existingSignature(existing) === sig) {
+          if (!stored) stmtSetScanSig.run(model.id, sig);
+          continue;
+        }
 
         removedTracks += writeAlbum(model);
+        stmtSetScanSig.run(model.id, sig);
         changedAlbums++;
       }
 

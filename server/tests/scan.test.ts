@@ -379,6 +379,37 @@ describe('scanner', () => {
     expect(stats.errors).toBe(0);
   });
 
+  it('leaves matcher-owned fields alone on rescans', async () => {
+    const album = albumRow('Album One');
+    const id = String(album.id);
+    const mbArtist = 'ar:11111111-1111-1111-1111-111111111111';
+    db.prepare('INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)').run(mbArtist, 'Artist One (MB)');
+    db.prepare(
+      `UPDATE albums SET artist_id = ?, mb_release_id = 'rel-1', label = 'MB Label', genres = '["Rock"]',
+       release_date = '1999-05-01' WHERE id = ?`,
+    ).run(mbArtist, id);
+    const firstTrack = String(tracksOf(id)[0]!.id);
+    db.prepare('DELETE FROM track_artists WHERE track_id = ?').run(firstTrack);
+    db.prepare('INSERT INTO track_artists (track_id, artist_id, position) VALUES (?, ?, 0)').run(firstTrack, mbArtist);
+
+    let stats = await scanner.scan();
+    expect(stats.changedAlbums).toBe(0);
+
+    // a real file change still rewrites tracks but keeps the match
+    const file = join(albumOneFolder(), '02 - Second.flac');
+    const future = new Date(Date.now() + 20_000);
+    utimesSync(file, future, future);
+    stats = await scanner.scan();
+    expect(stats.changedAlbums).toBe(1);
+    const after = albumRow('Album One');
+    expect(after.artist_id).toBe(mbArtist);
+    expect(after.label).toBe('MB Label');
+    expect(after.genres).toBe('["Rock"]');
+    expect(after.mb_release_id).toBe('rel-1');
+    const ta = db.prepare('SELECT artist_id FROM track_artists WHERE track_id = ?').all(firstTrack) as { artist_id: string }[];
+    expect(ta.map((r) => r.artist_id)).toEqual([mbArtist]);
+  });
+
   it('reparses a file when its mtime changes', async () => {
     const file = join(albumOneFolder(), '01 - First.flac');
     const future = new Date(Date.now() + 10_000);
