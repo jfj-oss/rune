@@ -1,7 +1,9 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlaylistDetail, PlaylistSummary, Track } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, Page, Track } from '@liner/shared';
+import type { RunePlaylistDetail, RunePlaylistSummary } from '../lib/playlists';
 import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from '../lib/types';
 import { registerTitles } from './covers';
-import { inLibrary, isSaved, playlistDetail, PLAYLISTS, setSaved } from './spotify';
+import { mockPlaylists } from './playlists';
+import { inLibrary, isSaved, setSaved } from './spotify';
 import { ALBUMS, CANDIDATES, DETAILS, LOWCONF_ALBUM_ID, SUMMARIES, artistRefs, buildArtist, toSummary } from './data';
 
 registerTitles(ALBUMS);
@@ -9,7 +11,7 @@ registerTitles(ALBUMS);
 const wait = <T>(v: T, ms = 140): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
 export const MOCK_ZONES: ZoneInfo[] = [
-  { id: 'pc', name: 'This PC (speakers)', kind: 'pc' },
+  { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'mock-pc-spotify', spotifyDeviceName: 'HORSE' },
   { id: 'browser', name: 'This browser', kind: 'browser' },
   { id: 'spotify:iphone', name: 'iPhone — Spotify', kind: 'spotify' },
 ];
@@ -67,9 +69,9 @@ export const mockApi = {
   },
   async zones(): Promise<ZoneInfo[]> { return wait(MOCK_ZONES, 30); },
   async spotifyStatus() { return wait({ connected: true, user: { name: 'mock', product: 'premium' } }, 10); },
-  async playlists(): Promise<PlaylistSummary[]> { return wait(PLAYLISTS, 160); },
-  async playlist(id: string): Promise<PlaylistDetail> {
-    const p = playlistDetail(id);
+  async playlists(): Promise<RunePlaylistSummary[]> { return wait(mockPlaylists.list(), 160); },
+  async playlist(id: string): Promise<RunePlaylistDetail> {
+    const p = mockPlaylists.get(id);
     if (!p) throw new Error('not found');
     return wait(p, 220);
   },

@@ -6,6 +6,7 @@ import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { MediaSessionBridge } from './MediaSession';
 import { PlayOnSheet } from './PlayOnSheet';
+import { PlaylistDialogsHost } from './PlaylistDialogs';
 import { MobileTabs } from './MobileTabs';
 import { NowPlaying } from './player/NowPlaying';
 import { MiniPlayer } from './player/MiniPlayer';
@@ -64,6 +65,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <NowPlaying />
       <MediaSessionBridge />
       <PlayOnSheet />
+      <PlaylistDialogsHost />
       <Toast />
     </div>
   );

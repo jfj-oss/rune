@@ -2,6 +2,7 @@ import type { PlayerState, ScanProgress, ServerEvent } from '@liner/shared';
 import { api } from '../api';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import { emptyState, livePosition, type Backend } from './types';
+import type { ZoneTransport } from './zoneEngine';
 
 type Listener = (e: ServerEvent) => void;
 
@@ -93,4 +94,13 @@ export class RemoteBackend implements Backend {
       throw e;
     }
   }
+}
+
+/** Talk to one server zone directly (the pc zone's hybrid mode drives mpv and the Spotify app this way). */
+export function zoneTransport(zone: string): ZoneTransport {
+  return {
+    send: (cmd) => api.playerSend(zone, cmd),
+    get: () => api.playerState(zone),
+    subscribe: (fn) => socket.on((e) => { if (e.type === 'player' && e.state.zone === zone) fn(e.state); }),
+  };
 }

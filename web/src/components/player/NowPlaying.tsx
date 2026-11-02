@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ListMusic } from 'lucide-react';
+import { ChevronDown, ListMusic, ListPlus } from 'lucide-react';
 import { useEffect, useRef, useState, type TouchEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../api';
@@ -7,6 +7,7 @@ import { useCoverColor } from '../../hooks/useCoverColor';
 import { useIsDesktop } from '../../hooks/useMedia';
 import { encId, formatDuration } from '../../lib/format';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
+import { usePlaylistUi } from '../../store/playlistUi';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
@@ -93,6 +94,14 @@ export function NowPlaying() {
           {cur && <Link to={`/album/${encId(cur.album.id)}`} className="np__topalbum" onClick={() => setOpen(false)}>{cur.album.title}</Link>}
         </div>
         <div className="np__topright">
+          {cur && (
+            <button
+              className="btn-icon btn-icon--lg"
+              aria-label="Add to playlist"
+              title="Add to playlist"
+              onClick={() => usePlaylistUi.getState().openPicker({ title: 'Add to playlist', what: `${cur.track.title} · ${cur.track.artists.map((a) => a.name).join(', ')}`, resolve: () => [{ track: cur.track, album: cur.album }] })}
+            ><ListPlus size={22} /></button>
+          )}
           <ZonePicker placement="bottom-end" compact={!desktop} />
           {!desktop && (
             <button className="btn-icon btn-icon--lg" aria-label="Queue" onClick={() => { setOpen(false); setQueue(true); }}><ListMusic size={22} /></button>

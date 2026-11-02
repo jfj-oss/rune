@@ -1,7 +1,10 @@
-import { GripVertical, ListMusic, X } from 'lucide-react';
+import { GripVertical, ListMusic, ListPlus, TriangleAlert, X } from 'lucide-react';
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { formatDuration, formatTotalLength, plural } from '../../lib/format';
+import { isMixedQueue } from '../../player/pc';
+import { queueName } from '../../lib/playlists';
 import { usePlayer } from '../../store/player';
+import { usePlaylistUi } from '../../store/playlistUi';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { Eq } from '../Eq';
@@ -85,7 +88,14 @@ export function QueuePanel({ onClose }: { onClose(): void }) {
   const queue = usePlayer((s) => s.state.queue);
   const index = usePlayer((s) => s.state.index);
   const command = usePlayer((s) => s.command);
+  const onPc = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind === 'pc');
   const total = queue.reduce((n, q) => n + q.track.durationMs, 0);
+  const save = () => usePlaylistUi.getState().openPicker({
+    title: 'Save queue as playlist',
+    what: `The queue · ${plural(queue.length, 'track')}`,
+    newName: queueName(),
+    resolve: () => usePlayer.getState().state.queue.map((q) => ({ track: q.track, album: q.album })),
+  });
   const remaining = queue.slice(Math.max(0, index)).reduce((n, q) => n + q.track.durationMs, 0);
   return (
     <aside className="queue" aria-label="Queue">
@@ -95,10 +105,14 @@ export function QueuePanel({ onClose }: { onClose(): void }) {
           <p className="muted">{queue.length ? `${plural(queue.length, 'track')} · ${formatTotalLength(total)} · ${formatTotalLength(remaining)} left` : 'Nothing queued'}</p>
         </div>
         <div className="queue__actions">
+          {queue.length > 0 && <button className="btn-icon" aria-label="Save queue as playlist" title="Save queue as playlist" onClick={save}><ListPlus size={19} /></button>}
           {queue.length > 0 && <button className="btn btn--ghost btn--sm" onClick={() => void command({ type: 'clear' })}>Clear</button>}
           <button className="btn-icon" aria-label="Close queue" onClick={onClose}><X size={20} /></button>
         </div>
       </header>
+      {onPc && isMixedQueue(queue) && (
+        <p className="queue__note" role="note"><TriangleAlert size={14} /> Mixed queue on the PC speakers: keep a rune tab open so it can switch between local files and Spotify.</p>
+      )}
       <div className="queue__body"><QueueList /></div>
     </aside>
   );

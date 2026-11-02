@@ -1,6 +1,7 @@
 import { Check, ExternalLink, Globe, Monitor, Smartphone, Speaker } from 'lucide-react';
 import { useEffect } from 'react';
 import { plural } from '../lib/format';
+import type { ZoneInfo } from '../lib/types';
 import { playableZones, spotifyDeepLink } from '../player/routing';
 import { usePlayer } from '../store/player';
 import { capsFrom, useSpotify } from '../store/spotify';
@@ -12,6 +13,7 @@ const hint = {
   browser: 'In this browser',
   spotify: 'Spotify Connect',
 } as const;
+const hintFor = (z: ZoneInfo) => (z.kind === 'pc' && z.spotifyDeviceId ? `Local files, and Spotify through the Spotify app “${z.spotifyDeviceName ?? 'on the PC'}”` : hint[z.kind]);
 
 /** "Play on…" — shown when the selected zone can't play what was just pressed (e.g. Spotify on the PC speakers). */
 export function PlayOnSheet() {
@@ -51,7 +53,7 @@ export function PlayOnSheet() {
           return (
             <button key={z.id} className="sheet__opt" role="menuitem" onClick={() => { close(); void playOn(z.id, req); }}>
               <I size={20} />
-              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : hint[z.kind]}</small></span>
+              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : hintFor(z)}</small></span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
           );
@@ -67,6 +69,9 @@ export function PlayOnSheet() {
         <p className="sheet__note">
           {connected ? (supported ? 'Spotify Premium is needed to play inside the browser.' : 'This browser can’t play Spotify itself. Open the Spotify app on this device, then pick it above.') : 'Spotify is not connected.'}
         </p>
+      )}
+      {req.need === 'spotify' && cur?.kind === 'pc' && !cur.spotifyDeviceId && (
+        <p className="sheet__note"><b>Want Spotify on the Linux speakers?</b> Open the Spotify app on the PC to play Spotify through the Linux speakers — it then joins this zone automatically.</p>
       )}
       {options.length === 0 && !link && <p className="sheet__note">Nothing is available right now. Open Spotify on a phone or computer so it appears as a device.</p>}
       <p className="sheet__note sheet__note--dim">Your choice is remembered for this session.</p>

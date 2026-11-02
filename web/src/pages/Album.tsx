@@ -13,10 +13,11 @@ import { TrackList } from '../components/album/TrackList';
 import { MobileBack } from '../components/MobileBack';
 import { SaveButton } from '../components/SaveButton';
 import { Cover } from '../components/Cover';
+import { AddToPlaylistItem } from '../components/AddToPlaylist';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty, HScroll, SectionHead, SourceLink } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
-import { usePlay } from '../hooks/usePlay';
+import { albumItems, usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
 import { textPreview } from '../lib/previews';
 import { usePreview } from '../store/preview';
@@ -140,6 +141,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
                 {(close) => (
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueAlbum(album.id, true); }}>Play next</MenuItem>
+                    <AddToPlaylistItem close={close} target={{ what: `${album.title} · ${plural(album.tracks.length, 'track')}`, newName: album.title, resolve: () => albumItems(album) }} />
                     {album.source === 'local' && <MenuItem icon={<Wrench size={16} />} onClick={() => { close(); setFixing(true); }}>Fix match</MenuItem>}
                     {album.folderPath && (
                       <MenuItem icon={<Copy size={16} />} onClick={() => { close(); void navigator.clipboard?.writeText(album.folderPath ?? '').then(() => toast('Folder path copied'), () => toast(album.folderPath ?? '')); }}>Copy folder path</MenuItem>

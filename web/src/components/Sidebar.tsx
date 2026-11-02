@@ -1,5 +1,6 @@
-import { AudioLines, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Tags } from 'lucide-react';
+import { AudioLines, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Plus, Tags } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { usePlaylistUi } from '../store/playlistUi';
 import { useUi } from '../store/ui';
 import { Logo } from './Logo';
 
@@ -24,6 +25,7 @@ export function Sidebar() {
           <i className="side__spot" /><span>Spotify</span>
         </NavLink>
         <NavLink to="/playlists" className={item} title="Playlists"><ListMusic size={18} /><span>Playlists</span></NavLink>
+        <button className="side__item side__item--new" title="New playlist" onClick={() => usePlaylistUi.getState().openNew()}><Plus size={18} /><span>New playlist</span></button>
       </div>
       <button className="side__collapse btn-icon" onClick={toggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
         {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}

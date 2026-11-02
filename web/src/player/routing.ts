@@ -7,11 +7,25 @@ export interface Caps {
   sdk: boolean;
 }
 
-/** Can a zone of this kind play an item of this source? */
-export function zoneCanPlay(kind: ZoneInfo['kind'], source: Source, caps: Caps): boolean {
-  if (kind === 'pc') return source === 'local';
+/** A zone, or just its kind (a pc zone then has no Spotify app). */
+export type ZoneLike = ZoneInfo['kind'] | Pick<ZoneInfo, 'kind' | 'spotifyDeviceId'>;
+const kindOf = (z: ZoneLike): ZoneInfo['kind'] => (typeof z === 'string' ? z : z.kind);
+
+/** Does this pc zone have the Spotify desktop app next to it (so it can play Spotify tracks)? */
+export const pcHasSpotify = (z: ZoneLike): boolean => typeof z !== 'string' && z.kind === 'pc' && !!z.spotifyDeviceId;
+
+/** Can a zone play an item of this source? */
+export function zoneCanPlay(zone: ZoneLike, source: Source, caps: Caps): boolean {
+  const kind = kindOf(zone);
+  if (kind === 'pc') return source === 'local' || pcHasSpotify(zone);
   if (kind === 'browser') return source === 'local' || caps.sdk;
   return source === 'spotify'; // Spotify Connect device
+}
+
+/** The actionable text for "this zone can't play <source>". */
+export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: Source): string {
+  if (zone.kind === 'pc' && source === 'spotify') return 'Open the Spotify app on the PC to play Spotify through the Linux speakers';
+  return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
 }
 
 export type Routing =
@@ -22,7 +36,7 @@ export type Routing =
  * Decide what a zone can take from a list. If the item at `startIndex` cannot play there, the caller must
  * ask the user (the "Play on…" sheet); otherwise unplayable items are dropped from the list.
  */
-export function routeItems(kind: ZoneInfo['kind'], items: PlayItem[], startIndex: number, caps: Caps): Routing {
+export function routeItems(kind: ZoneLike, items: PlayItem[], startIndex: number, caps: Caps): Routing {
   const start = items[startIndex];
   if (!start) return { ok: true, items: [], startIndex: 0, dropped: 0 };
   if (!zoneCanPlay(kind, start.track.source, caps)) return { ok: false, reason: 'start', need: start.track.source };
@@ -40,11 +54,17 @@ export interface ZoneOption {
 export function playableZones(zones: ZoneInfo[], source: Source, caps: Caps): ZoneOption[] {
   const out: ZoneOption[] = [];
   for (const z of zones) {
-    if (!zoneCanPlay(z.kind, source, caps)) continue;
+    if (!zoneCanPlay(z, source, caps)) continue;
     out.push({ zone: z, label: z.kind === 'browser' && source === 'spotify' ? `${z.name} (Spotify)` : z.name });
   }
   const rank = (z: ZoneInfo) => (z.kind === 'browser' ? 0 : z.kind === 'spotify' ? 1 : 2);
   return out.sort((a, b) => rank(a.zone) - rank(b.zone));
+}
+
+/** The PC's Spotify app is folded into the pc zone, so it must not show up a second time as a Connect device. */
+export function withoutPcDevice(zones: ZoneInfo[]): ZoneInfo[] {
+  const hidden = new Set(zones.filter((z) => z.kind === 'pc' && z.spotifyDeviceId).map((z) => `spotify:${z.spotifyDeviceId}`));
+  return hidden.size ? zones.filter((z) => !(z.kind === 'spotify' && hidden.has(z.id))) : zones;
 }
 
 /** rune's own Web Playback SDK device also shows up in /api/zones as a Connect device: hide that duplicate. */
