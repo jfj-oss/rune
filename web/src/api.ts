@@ -1,4 +1,4 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, Zone } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, PlaylistDetail, PlaylistSummary, Zone } from '@liner/shared';
 import { mockCover } from './mock/covers';
 import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from './lib/types';
 
@@ -92,6 +92,36 @@ export const api = {
   },
   async playerSend(zone: Zone, cmd: PlayerCommand | { type: string }): Promise<PlayerState> {
     return http(`/player/${encodeURIComponent(zone)}`, { method: 'POST', body: JSON.stringify(cmd) });
+  },
+  // ---------- Spotify ----------
+  async spotifyStatus(): Promise<{ connected: boolean; user?: { name: string; product: string } }> {
+    if (isMock) return (await mock()).mockApi.spotifyStatus();
+    try {
+      return await http('/spotify/status');
+    } catch {
+      return { connected: false };
+    }
+  },
+  async playlists(): Promise<PlaylistSummary[]> {
+    if (isMock) return (await mock()).mockApi.playlists();
+    return http('/playlists');
+  },
+  async playlist(id: string): Promise<PlaylistDetail> {
+    if (isMock) return (await mock()).mockApi.playlist(id);
+    return http(`/playlists/${encodeURIComponent(id)}`);
+  },
+  /** Is this Spotify album saved to the user's Spotify library? */
+  async albumSaved(id: string): Promise<boolean> {
+    if (isMock) return (await mock()).mockApi.albumSaved(id);
+    try {
+      return (await http<{ saved: boolean }>(`/albums/${encodeURIComponent(id)}/saved`)).saved;
+    } catch {
+      return false;
+    }
+  },
+  async setAlbumSaved(id: string, saved: boolean): Promise<void> {
+    if (isMock) return (await mock()).mockApi.setAlbumSaved(id, saved);
+    await http(`/albums/${encodeURIComponent(id)}/save`, { method: saved ? 'POST' : 'DELETE' });
   },
   async scan(): Promise<void> {
     if (isMock) return;

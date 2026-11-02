@@ -21,11 +21,12 @@ const SORTS: { id: NonNullable<AlbumQuery['sort']>; label: string }[] = [
   { id: 'added', label: 'Date added' }, { id: 'artist', label: 'Artist' }, { id: 'title', label: 'Title' }, { id: 'year', label: 'Year' },
 ];
 
-export function LibraryTabs({ active }: { active: 'albums' | 'artists' }) {
+export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'playlists' }) {
   return (
     <div className="seg seg--tabs" role="tablist">
       <Link role="tab" aria-selected={active === 'albums'} className={active === 'albums' ? 'is-active' : ''} to="/albums">Albums</Link>
       <Link role="tab" aria-selected={active === 'artists'} className={active === 'artists' ? 'is-active' : ''} to="/artists">Artists</Link>
+      <Link role="tab" aria-selected={active === 'playlists'} className={active === 'playlists' ? 'is-active' : ''} to="/playlists">Playlists</Link>
     </div>
   );
 }
@@ -99,7 +100,11 @@ export default function Albums() {
       ) : q.isLoading ? (
         <div className="grid grid--lib">{Array.from({ length: 18 }, (_, i) => <CardSkeleton key={i} />)}</div>
       ) : total === 0 ? (
-        <Empty title="No albums here">Nothing matches these filters.</Empty>
+        source === 'spotify' ? (
+          <Empty title="No saved Spotify albums">Save an album from its page (or search Spotify) and it shows up here. Your Spotify library syncs every 30 minutes.</Empty>
+        ) : (
+          <Empty title="No albums here">Nothing matches these filters.</Empty>
+        )
       ) : (
         <VirtualAlbums items={items} total={total} view={view} onNeedMore={() => { if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage(); }} />
       )}

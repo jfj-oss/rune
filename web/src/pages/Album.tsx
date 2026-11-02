@@ -11,6 +11,7 @@ import { ArtistNotes } from '../components/album/Notes';
 import { Prose, Reception, ScoreChip } from '../components/album/Reception';
 import { TrackList } from '../components/album/TrackList';
 import { MobileBack } from '../components/MobileBack';
+import { SaveButton } from '../components/SaveButton';
 import { Cover } from '../components/Cover';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty, HScroll, SectionHead, SourceLink } from '../components/Rows';
@@ -128,6 +129,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
               <button className="btn btn--primary" onClick={() => void playAlbum(album.id)}><Play size={18} fill="currentColor" /> Play</button>
               <button className="btn" onClick={() => void playAlbum(album.id, { shuffle: true })}><Shuffle size={17} /> Shuffle</button>
               <button className="btn" onClick={() => void enqueueAlbum(album.id)}><Plus size={18} /> Queue</button>
+              {album.source === 'spotify' && <SaveButton albumId={album.id} />}
               <Popover
                 placement="bottom-start"
                 trigger={({ toggle }) => <button className="btn btn--icon" aria-label="More actions" onClick={toggle}><MoreHorizontal size={20} /></button>}

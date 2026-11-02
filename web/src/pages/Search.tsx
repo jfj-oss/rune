@@ -31,7 +31,11 @@ export default function SearchPage() {
   const data = res.data;
   const albums = data?.albums ?? [];
   const artists = data?.artists ?? [];
-  const tracks = (data?.tracks ?? []).slice(0, 8);
+  // local hits first, then Spotify catalogue hits (the server appends those; don't let 8 local ones push them out)
+  const tracks = useMemo(() => {
+    const all = data?.tracks ?? [];
+    return [...all.filter((t) => t.source !== 'spotify').slice(0, 8), ...all.filter((t) => t.source === 'spotify').slice(0, 6)];
+  }, [data]);
 
   const top = useMemo(() => {
     const lq = q.toLowerCase();
@@ -120,7 +124,7 @@ export default function SearchPage() {
               <div className="artrow">
                 {artists.map((a) => (
                   <Link key={a.id} to={`/artist/${encId(a.id)}`} className="artcard artcard--sm" {...nv(`ar:${a.id}`)}>
-                    <Avatar name={a.name} id={a.id} size={96} /><b>{a.name}</b>
+                    <Avatar name={a.name} id={a.id} size={96} /><b>{a.name}</b>{a.id.startsWith('sp:') && <span className="artcard__src"><FormatBadge source="spotify" /></span>}
                   </Link>
                 ))}
               </div>

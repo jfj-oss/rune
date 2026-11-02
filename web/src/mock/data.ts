@@ -3,7 +3,7 @@ import type { Album, AlbumDetails, AlbumSummary, Artist, ArtistRef, Credit, Sour
 import { hashString } from '../lib/color';
 import type { MatchCandidate } from '../lib/types';
 
-function rng(seed: number) {
+export function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -13,7 +13,7 @@ function rng(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const hex16 = (s: string) => (hashString(s).toString(16).padStart(8, '0') + hashString(s + '#').toString(16).padStart(8, '0')).slice(0, 16);
+export const hex16 = (s: string) => (hashString(s).toString(16).padStart(8, '0') + hashString(s + '#').toString(16).padStart(8, '0')).slice(0, 16);
 const wikiSearch = (q: string) => `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(q)}`;
 const DAY = 86_400_000;
 const NOW = Date.now();
@@ -50,7 +50,7 @@ const SIMILAR: Record<number, number[]> = {
 type Fmt = 'FLAC 24/96' | 'FLAC 16/44.1' | 'FLAC 24/192' | 'MP3 320' | 'FLAC 24/48';
 interface Seed {
   artist: number; title: string; year: number; genres: string[]; label: string;
-  fmt?: Fmt; source?: Source; tracks?: number; discs?: number; special?: 'full' | 'multi' | 'lowconf'; addedDaysAgo?: number;
+  fmt?: Fmt; source?: Source; /** Spotify catalogue album the user has NOT saved */ catalog?: boolean; tracks?: number; discs?: number; special?: 'full' | 'multi' | 'lowconf'; addedDaysAgo?: number;
 }
 const SEEDS: Seed[] = [
   { artist: 0, title: 'Glass Harbour', year: 1977, genres: ['Rock', 'Soft Rock'], label: 'Northlight Records', fmt: 'FLAC 24/96', tracks: 10, special: 'full', addedDaysAgo: 2 },
@@ -95,10 +95,16 @@ const SEEDS: Seed[] = [
   { artist: 2, title: 'Three Winters', year: 2024, genres: ['Folk'], label: 'Barnyard Tapes', source: 'spotify', tracks: 9, addedDaysAgo: 15 },
   { artist: 7, title: 'Terminal Velocity', year: 2024, genres: ['Hip-Hop'], label: 'Underpass', source: 'spotify', tracks: 12, addedDaysAgo: 40 },
   { artist: 12, title: 'Embers of the Long Night', year: 2025, genres: ['Post-Rock'], label: 'Furnace Audio', source: 'spotify', tracks: 6, addedDaysAgo: 5 },
+  // Spotify catalogue (appears in search, not saved)
+  { artist: 0, title: 'Glass Harbour (Deluxe Edition)', year: 2022, genres: ['Rock'], label: 'Northlight Records', source: 'spotify', catalog: true, tracks: 14, addedDaysAgo: 0 },
+  { artist: 0, title: 'Northern Cross EP', year: 2023, genres: ['Folk Rock'], label: 'Northlight Records', source: 'spotify', catalog: true, tracks: 5, addedDaysAgo: 0 },
+  { artist: 14, title: 'Ghost Frequencies Remixed', year: 2025, genres: ['Electronic'], label: 'Grid Lines', source: 'spotify', catalog: true, tracks: 8, addedDaysAgo: 0 },
+  { artist: 9, title: 'Glow in the Garage (Live Sessions)', year: 2025, genres: ['Indie Rock'], label: 'Cardboard Moon', source: 'spotify', catalog: true, tracks: 9, addedDaysAgo: 0 },
 ];
+const CATALOG_TITLES = new Set(SEEDS.filter((x) => x.catalog).map((x) => x.title));
 
-const WORD_A = ['Paper', 'Winter', 'Velvet', 'Copper', 'Slow', 'Hollow', 'Midnight', 'Salt', 'Glass', 'Quiet', 'Burning', 'Distant', 'Amber', 'Paper', 'Second', 'Iron', 'Soft', 'Last', 'Blue', 'Open'];
-const WORD_B = ['Radio', 'Harbour', 'Garden', 'Signal', 'Letters', 'Weather', 'Window', 'Parade', 'Orchard', 'Hours', 'Machine', 'Season', 'Road', 'Lights', 'Rooms', 'Mirror', 'Fever', 'Tide', 'Kite', 'Theory'];
+export const WORD_A = ['Paper', 'Winter', 'Velvet', 'Copper', 'Slow', 'Hollow', 'Midnight', 'Salt', 'Glass', 'Quiet', 'Burning', 'Distant', 'Amber', 'Paper', 'Second', 'Iron', 'Soft', 'Last', 'Blue', 'Open'];
+export const WORD_B = ['Radio', 'Harbour', 'Garden', 'Signal', 'Letters', 'Weather', 'Window', 'Parade', 'Orchard', 'Hours', 'Machine', 'Season', 'Road', 'Lights', 'Rooms', 'Mirror', 'Fever', 'Tide', 'Kite', 'Theory'];
 
 const GLASS_HARBOUR_TRACKS: [string, number][] = [
   ['Low Tide at Dunmore', 258_000], ['Signal Fires', 241_000], ['Glass Harbour', 312_000], ['Letters Never Sent', 223_000],
@@ -197,6 +203,8 @@ const albumsFull: Album[] = SEEDS.map((s, idx) => {
 });
 
 export const ALBUMS: Album[] = albumsFull;
+/** Mock "Spotify catalogue" albums: reachable via search, not in the user's library until saved. */
+export const CATALOG_IDS = new Set(ALBUMS.filter((a) => CATALOG_TITLES.has(a.title) && a.source === 'spotify').map((a) => a.id));
 
 export function toSummary(a: Album): AlbumSummary {
   return { id: a.id, source: a.source, title: a.title, artist: a.artist, year: a.year, coverUrl: a.coverUrl, format: a.format, addedAt: a.addedAt };

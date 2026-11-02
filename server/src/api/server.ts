@@ -17,6 +17,7 @@ import { mergeSearchResults } from '../spotify/catalog.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
+import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, registerHistoryRoutes } from '../history/index.js';
 import { coverPath, getAlbum, getArtist, listAlbums, listArtists, search, publicTrack, type AlbumListQuery } from './library.js';
@@ -277,6 +278,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       registerMetaRoutes(r, meta);
       registerArtistMetaRoutes(r, artistMeta);
       registerBrowseRoutes(r, db);
+      registerSavedRoute(r, db);
       registerFrameRoutes(r);
       registerHistoryRoutes(r, history);
 
