@@ -4,3 +4,6 @@ dist
 *.db-*
 .env
 data/
+server/config.json
+refs/
+shots/

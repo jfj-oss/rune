@@ -1,0 +1,487 @@
+[
+  {
+    "slug": "daft-punk-discovery",
+    "albumId": "la:c98690a5d35d88b1",
+    "title": "Discovery",
+    "artist": "Daft Punk",
+    "year": 2001,
+    "format": "FLAC 16/44.1",
+    "label": "Virgin",
+    "targetReleaseId": "5ad66522-edce-3a77-b5fa-7956ee879239",
+    "targetReleaseGroupId": "48117b90-a16e-34ca-a514-19c702df1158",
+    "targetTitle": "Discovery",
+    "targetArtist": "Daft Punk",
+    "targetDate": "2001-03-13",
+    "confidence": 0.98,
+    "tracks": [
+      {
+        "id": "l:d59edb75c6d949c1",
+        "title": "One More Time",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 320840,
+        "index": 0
+      },
+      {
+        "id": "l:722e867b5f4ecad1",
+        "title": "Aerodynamic",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 207533,
+        "index": 1
+      },
+      {
+        "id": "l:c4b65d78942dc691",
+        "title": "Digital Love",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 298333,
+        "index": 2
+      },
+      {
+        "id": "l:fad679ee58ad242b",
+        "title": "Harder, Better, Faster, Stronger",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 224293,
+        "index": 3
+      },
+      {
+        "id": "l:cd01d1d92d22d4fb",
+        "title": "Crescendolls",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 211640,
+        "index": 4
+      },
+      {
+        "id": "l:c6626d1b5e8df32d",
+        "title": "Nightvision",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 104466,
+        "index": 5
+      },
+      {
+        "id": "l:857fcff2872e9950",
+        "title": "Superheroes",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 237800,
+        "index": 6
+      },
+      {
+        "id": "l:511378e94f9de151",
+        "title": "High Life",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 201800,
+        "index": 7
+      },
+      {
+        "id": "l:6543696da6636e85",
+        "title": "Something About Us",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 231066,
+        "index": 8
+      },
+      {
+        "id": "l:da9eb8f993c8dbb2",
+        "title": "Voyager",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 227866,
+        "index": 9
+      },
+      {
+        "id": "l:cbe9b0f673ed9a18",
+        "title": "Veridis Quo",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 344893,
+        "index": 10
+      },
+      {
+        "id": "l:535dd88b342e23e6",
+        "title": "Short Circuit",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 206866,
+        "index": 11
+      },
+      {
+        "id": "l:d6223bfb9fb455fe",
+        "title": "Face to Face",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 240173,
+        "index": 12
+      },
+      {
+        "id": "l:66a836e66ed96e60",
+        "title": "Too Long",
+        "disc": 1,
+        "number": 14,
+        "durationMs": 600293,
+        "index": 13
+      }
+    ]
+  },
+  {
+    "slug": "alice-in-chains-jar-of-flies",
+    "albumId": "la:72d75745c8dfa85a",
+    "title": "Jar of Flies",
+    "artist": "Alice In Chains",
+    "year": 1994,
+    "format": "FLAC 16/44.1",
+    "label": "Columbia",
+    "targetReleaseId": "c97372b8-ce80-4426-a602-20e165d4541c",
+    "targetReleaseGroupId": "3b6b7688-c97b-3d11-9334-3158468074f7",
+    "targetTitle": "Jar of Flies",
+    "targetArtist": "Alice in Chains",
+    "targetDate": "1994-01-18",
+    "confidence": 0.98,
+    "tracks": [
+      {
+        "id": "l:8a08b5a09475262b",
+        "title": "Rotten Apple",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 419000,
+        "index": 0
+      },
+      {
+        "id": "l:d37b8ea21e4d51f3",
+        "title": "Nutshell",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 259000,
+        "index": 1
+      },
+      {
+        "id": "l:85d52ca4565e9524",
+        "title": "I Stay Away",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 254000,
+        "index": 2
+      },
+      {
+        "id": "l:51ffb402fae2c24c",
+        "title": "No Excuses",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 256000,
+        "index": 3
+      },
+      {
+        "id": "l:b8a02de504080749",
+        "title": "Whale & Wasp",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 157000,
+        "index": 4
+      },
+      {
+        "id": "l:d89e4d9b7387380c",
+        "title": "Don’t Follow",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 262000,
+        "index": 5
+      },
+      {
+        "id": "l:3a84b015d162ebbd",
+        "title": "Swing on This",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 245000,
+        "index": 6
+      }
+    ]
+  },
+  {
+    "slug": "bill-withers-still-bill",
+    "albumId": "la:b18189bb43ea704c",
+    "title": "Still Bill",
+    "artist": "Bill Withers",
+    "year": 1972,
+    "format": "FLAC 16/44.1",
+    "label": "Sussex",
+    "targetReleaseId": "de3fc9ac-4f6b-42a4-bbe6-f06b9ba7411c",
+    "targetReleaseGroupId": "63544e97-de86-3096-8702-250590ae5f90",
+    "targetTitle": "Still Bill",
+    "targetArtist": "Bill Withers",
+    "targetDate": "1972-05-20",
+    "confidence": 0.98,
+    "tracks": [
+      {
+        "id": "l:a914fad4bb0da6e9",
+        "title": "Lonely Town, Lonely Street",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 224760,
+        "index": 0
+      },
+      {
+        "id": "l:bcfdc3533d933a06",
+        "title": "Let Me in Your Life",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 161933,
+        "index": 1
+      },
+      {
+        "id": "l:0f4b4c373b8fb66c",
+        "title": "Who Is He (And What Is He to You)?",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 194066,
+        "index": 2
+      },
+      {
+        "id": "l:953c96f5fdd155eb",
+        "title": "Use Me",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 228000,
+        "index": 3
+      },
+      {
+        "id": "l:fbd6e37ed4126252",
+        "title": "Lean on Me",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 259906,
+        "index": 4
+      },
+      {
+        "id": "l:e25c7320b0fce8af",
+        "title": "Kissing My Love",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 230666,
+        "index": 5
+      },
+      {
+        "id": "l:ef6f495fa471dcc0",
+        "title": "I Don't Know",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 186400,
+        "index": 6
+      },
+      {
+        "id": "l:4a4186d81c830c36",
+        "title": "Another Day to Run",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 279360,
+        "index": 7
+      },
+      {
+        "id": "l:10a887ccfad8bc72",
+        "title": "I Don't Want You on My Mind",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 276706,
+        "index": 8
+      },
+      {
+        "id": "l:d3c09c1624e61f17",
+        "title": "Take It All in and Check It All Out",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 159200,
+        "index": 9
+      }
+    ]
+  },
+  {
+    "slug": "bob-marley-uprising",
+    "albumId": "la:503bdc1ba51ac487",
+    "title": "Uprising",
+    "artist": "Bob Marley & The Wailers",
+    "year": 1980,
+    "format": "FLAC 16/44.1",
+    "label": "Island",
+    "targetReleaseId": "7e807840-aca7-4863-a788-c8a0edf4b3ee",
+    "targetReleaseGroupId": "6dd29c00-7539-319d-98e0-b2f07e861497",
+    "targetTitle": "Uprising",
+    "targetArtist": "Bob Marley & The Wailers",
+    "targetDate": "1980",
+    "confidence": 0.98,
+    "tracks": [
+      {
+        "id": "l:aa9e4093acd5dae9",
+        "title": "Coming In From the Cold",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 271373,
+        "index": 0
+      },
+      {
+        "id": "l:5c1fbd587dd64126",
+        "title": "Real Situation",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 188333,
+        "index": 1
+      },
+      {
+        "id": "l:13890f768c2df42f",
+        "title": "Bad Card",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 168466,
+        "index": 2
+      },
+      {
+        "id": "l:f4bf3f46f89f6b37",
+        "title": "We and Them",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 194000,
+        "index": 3
+      },
+      {
+        "id": "l:cf3f7441e429edbc",
+        "title": "Work",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 220000,
+        "index": 4
+      },
+      {
+        "id": "l:bd8ad086e20d6445",
+        "title": "Zion Train",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 216000,
+        "index": 5
+      },
+      {
+        "id": "l:2d6459efb98aac16",
+        "title": "Pimper’s Paradise",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 207000,
+        "index": 6
+      },
+      {
+        "id": "l:c8949d46200df230",
+        "title": "Could You Be Loved",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 236000,
+        "index": 7
+      },
+      {
+        "id": "l:dd103153b305238b",
+        "title": "Forever Loving Jah",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 231973,
+        "index": 8
+      },
+      {
+        "id": "l:2774417459f3830f",
+        "title": "Redemption Song",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 228000,
+        "index": 9
+      }
+    ]
+  },
+  {
+    "slug": "blue-oyster-cult-fire-of-unknown-origin",
+    "albumId": "la:93f4d5fe7b027aab",
+    "title": "Fire of Unknown Origin",
+    "artist": "Blue Öyster Cult",
+    "year": 1981,
+    "format": "FLAC 16/44.1",
+    "label": "CBS",
+    "targetReleaseId": "b87d3426-f30a-488e-850c-30913a99c8a6",
+    "targetReleaseGroupId": "cf3efe8c-3963-30c2-a9ba-a1b1117a5b1a",
+    "targetTitle": "Fire of Unknown Origin",
+    "targetArtist": "Blue Öyster Cult",
+    "targetDate": "1981",
+    "confidence": 0.98,
+    "tracks": [
+      {
+        "id": "l:1a7c48ea94c9a0fe",
+        "title": "Fire of Unknown Origin",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 251093,
+        "index": 0
+      },
+      {
+        "id": "l:e87666deb8ab387b",
+        "title": "Burnin’ for You",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 270933,
+        "index": 1
+      },
+      {
+        "id": "l:9ee9ae3efd183cce",
+        "title": "Veteran of the Psychic Wars",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 290266,
+        "index": 2
+      },
+      {
+        "id": "l:4dc99a236bc01ef3",
+        "title": "Sole Survivor",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 245773,
+        "index": 3
+      },
+      {
+        "id": "l:fb70ef6499c15888",
+        "title": "Heavy Metal: The Black and Silver",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 199226,
+        "index": 4
+      },
+      {
+        "id": "l:f3da0e2c17d46c39",
+        "title": "Vengeance (The Pact)",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 281133,
+        "index": 5
+      },
+      {
+        "id": "l:06b04840cc5c2453",
+        "title": "After Dark",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 265706,
+        "index": 6
+      },
+      {
+        "id": "l:bfc42080bd522110",
+        "title": "Joan Crawford",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 294000,
+        "index": 7
+      },
+      {
+        "id": "l:62e27c5b0cffc97e",
+        "title": "Don’t Turn Your Back",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 247733,
+        "index": 8
+      }
+    ]
+  }
+]

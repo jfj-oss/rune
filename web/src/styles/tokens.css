@@ -1,0 +1,45 @@
+:root {
+  --bg: #0f1013;
+  --surface: #17181d;
+  --surface-2: #1f2027;
+  --surface-3: #272831;
+  --line: #2a2b33;
+  --text: #ececf1;
+  --text-2: #a4a5b0;
+  --text-3: #6d6e7a;
+  --accent: #8f7cff;
+  --accent-2: #b9adff;
+  --ok: #4fd18b;
+  --warn: #e8b04a;
+  --bad: #e5736f;
+  --spotify: #1db954;
+
+  --r: 8px;
+  --r-sm: 4px;
+  --r-lg: 14px;
+  --shadow-hero: 0 30px 70px -10px rgba(0, 0, 0, 0.6), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+
+  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --serif: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+
+  --side-w: 220px;
+  --side-w-collapsed: 64px;
+  --npbar-h: 88px;
+  --topbar-h: 56px;
+  --tabs-h: 56px;
+  --mini-h: 64px;
+  --queue-w: 380px;
+  --pad: 40px;
+
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+
+  --t: 160ms ease;
+}
+
+@media (max-width: 899px) {
+  :root { --pad: 16px; }
+}

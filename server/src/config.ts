@@ -9,6 +9,8 @@ export interface Config {
   /** mpv audio device for the PC zone, e.g. "pipewire" or "alsa/hw:1,0" */
   audioDevice: string;
   userAgent: string; // MusicBrainz requires an identifying UA
+  /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
+  spotifyClientId?: string;
 }
 
 export function loadConfig(): Config {
