@@ -799,6 +799,17 @@ export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db): void {
     }
   });
 
+  // Live count for the smart-playlist builder (nothing is saved).
+  app.post('/playlists/smart/preview', (request, reply) => {
+    try {
+      const ids = evaluateSmartSpec(db, validateSmartSpec(request.body ?? {}));
+      const sample = ids.slice(0, 5).map((id) => loadTrack(db, id)).filter((t): t is NonNullable<typeof t> => !!t).map(publicTrack);
+      return { count: ids.length, sample };
+    } catch (err) {
+      return sendInputError(reply, err);
+    }
+  });
+
   app.post<{ Body: CreateSmartPlaylistBody }>('/playlists/smart', (request, reply) => {
     try {
       reply.code(201);
