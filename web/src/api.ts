@@ -73,9 +73,10 @@ export const api = {
     if (isMock) return (await mock()).mockApi.artist(id);
     return http(`/artists/${encodeURIComponent(id)}`);
   },
-  async search(q: string): Promise<SearchResults> {
+  /** `localOnly`: just the library's hits (fast); the full search also waits for Spotify's catalogue. */
+  async search(q: string, opts: { localOnly?: boolean } = {}): Promise<SearchResults> {
     if (isMock) return (await mock()).mockApi.search(q);
-    return http(`/search${qs({ q })}`);
+    return http(`/search${qs({ q, local: opts.localOnly ? '1' : undefined })}`);
   },
   async zones(): Promise<ZoneInfo[]> {
     if (isMock) return (await mock()).mockApi.zones();

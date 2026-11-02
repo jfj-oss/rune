@@ -30,8 +30,11 @@ export default function SearchPage() {
     return () => clearTimeout(t);
   }, [local, q, desktop, setParams]);
 
+  // Library hits come back in milliseconds; Spotify's catalogue takes ~0.5 s. Show the library's
+  // first, then the full list (library + Spotify) when it arrives.
   const res = useQuery({ queryKey: ['search', q], queryFn: () => api.search(q), enabled: q.length > 0, placeholderData: (p) => p });
-  const data = res.data;
+  const quick = useQuery({ queryKey: ['search-local', q], queryFn: () => api.search(q, { localOnly: true }), enabled: q.length > 0, staleTime: 30_000 });
+  const data = res.data && !res.isPlaceholderData ? res.data : quick.data ?? res.data;
   const albums = data?.albums ?? [];
   const artists = data?.artists ?? [];
   // local hits first, then Spotify catalogue hits (the server appends those; don't let 8 local ones push them out)

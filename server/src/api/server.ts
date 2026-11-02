@@ -22,6 +22,7 @@ import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
+import { registerJsonCompression } from './compress.js';
 import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
@@ -88,6 +89,7 @@ function queryValue(v: string | string[] | undefined): string | undefined {
 
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<BuiltApp> {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
+  registerJsonCompression(app);
   await app.register(websocket);
   const startedAt = Date.now();
 
@@ -719,7 +721,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         listArtists(db, queryValue(req.query.q)),
       );
 
-      r.get<{ Querystring: { q?: string | string[] } }>('/search', async (req) => {
+      r.get<{ Querystring: { q?: string | string[]; local?: string } }>('/search', async (req) => {
         const q = (queryValue(req.query.q) ?? '').trim();
         if (!q) return { albums: [], artists: [], tracks: [] };
         // Ranked search (worker T). Hidden albums stay out of every search
@@ -752,7 +754,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             tracks: found.tracks.filter((t) => !hidden.has(t.albumId)),
           };
         }
-        if (!spotify) return local;
+        // ?local=1: library hits only (milliseconds), so the page can show them before Spotify answers
+        if (!spotify || queryValue(req.query.local) === '1') return local;
         try {
           if (!(await spotify.auth.status()).connected) return local;
           // Local hits first, then Spotify catalogue hits (60 s cache inside).
@@ -897,7 +900,18 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- web UI (built) with SPA fallback
   const dist = opts.webDist ?? new URL('../../../web/dist', import.meta.url).pathname;
   if (existsSync(join(dist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: dist, wildcard: true, index: ["index.html"] });
+    await app.register(fastifyStatic, {
+      root: dist,
+      wildcard: true,
+      index: ['index.html'],
+      // web/scripts/compress.mjs writes .br/.gz next to each file at build time
+      preCompressed: true,
+      setHeaders(res, path) {
+        // /assets/* names carry a content hash: they never change, so the browser keeps them for good;
+        // everything else (index.html, icons, manifest) is re-checked so a new build shows up at once
+        res.header('cache-control', path.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache');
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.url.startsWith('/api/') || req.url.startsWith('/assets/')) return reply.code(404).send({ error: 'not found' });
       return reply.sendFile('index.html');
