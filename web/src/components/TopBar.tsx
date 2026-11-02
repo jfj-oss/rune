@@ -1,10 +1,12 @@
-import { ChevronLeft, ChevronRight, RefreshCw, Search, Settings, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, RefreshCw, Search, Settings, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSearchNav } from '../store/searchNav';
-import { useUi } from '../store/ui';
+import { AMBIENTS, useUi, type Ambient } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
+
+const AMBIENT_LABEL: Record<Ambient, string> = { cycle: 'Cycle', blue: 'Blue', purple: 'Purple', green: 'Green', off: 'Off' };
 
 export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: boolean }) {
   const nav = useNavigate();
@@ -15,6 +17,8 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
   const input = useRef<HTMLInputElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const toast = useUi((s) => s.toast);
+  const ambient = useUi((s) => s.ambient);
+  const setAmbient = useUi((s) => s.setAmbient);
 
   useEffect(() => { setValue(urlQ); }, [urlQ]);
   useEffect(() => {
@@ -72,6 +76,14 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
         {(close) => (
           <div role="menu" className="menu">
             <MenuItem icon={<RefreshCw size={16} />} onClick={() => { close(); void api.scan().then(() => toast('Library rescan started')).catch(() => toast('Could not reach the server')); }}>Rescan library</MenuItem>
+            <div className="popover__title">Ambient colours</div>
+            {AMBIENTS.map((a) => (
+              <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>
+                <i className={`ambdot ambdot--${a}`} />
+                <span>{AMBIENT_LABEL[a]}</span>
+                {ambient === a && <Check size={16} className="menu__check" />}
+              </button>
+            ))}
           </div>
         )}
       </Popover>

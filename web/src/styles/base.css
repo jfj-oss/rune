@@ -23,8 +23,8 @@ img { display: block; max-width: 100%; }
 :focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; border-radius: var(--r-sm); }
 ::selection { background: color-mix(in srgb, var(--accent) 45%, transparent); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2c2d36; border-radius: 6px; border: 2px solid var(--bg); }
-::-webkit-scrollbar-thumb:hover { background: #3a3b46; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .eyebrow {
@@ -100,7 +100,8 @@ a.chip:hover, button.chip:hover { background: color-mix(in srgb, #fff 14%, trans
 /* ---------- popovers / menus ---------- */
 .pop { position: relative; display: inline-flex; }
 .pop__panel {
-  position: absolute; z-index: 90; min-width: 220px; padding: 6px; background: var(--surface-2); border: 1px solid var(--line);
+  position: absolute; z-index: 90; min-width: 220px; padding: 6px; background: var(--panel); border: 1px solid color-mix(in srgb, #fff 14%, transparent);
+  backdrop-filter: blur(28px) saturate(170%); -webkit-backdrop-filter: blur(28px) saturate(170%);
   border-radius: 12px; box-shadow: var(--shadow-pop); animation: popin 140ms ease;
 }
 .pop__panel--bottom-end { top: calc(100% + 8px); right: 0; }

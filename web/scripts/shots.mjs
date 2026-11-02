@@ -23,7 +23,10 @@ async function waitUp() {
   throw new Error('preview did not start');
 }
 
-const ARGS = ['--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'];
+const ARGS = ['--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--mute-audio'];
+// usage: node scripts/shots.mjs [all|glass|perf]   (default all = original set + glass + perf)
+const MODE = process.argv[2] ?? 'all';
+const want = (m) => MODE === 'all' || MODE === m;
 const shot = async (page, name, opts = {}) => {
   await page.waitForTimeout(opts.wait ?? 450);
   await page.screenshot({ path: join(out, name + '.png'), ...opts.shot });
@@ -32,11 +35,12 @@ const shot = async (page, name, opts = {}) => {
 const scrollMain = (page, sel, extra = -70) =>
   page.evaluate(([s, e]) => { const m = document.querySelector('#main'); const t = document.querySelector(s); if (m && t) m.scrollTop = t.getBoundingClientRect().top - m.getBoundingClientRect().top + m.scrollTop + e; }, [sel, extra]);
 
-let browser;
+let browser, browserGL;
 try {
   await waitUp();
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ARGS });
 
+  if (MODE === 'all') {
   // ---------- desktop ----------
   {
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
@@ -164,7 +168,107 @@ try {
     await shot(page, 'mobile-search', { wait: 800 });
     await ctx.close();
   }
+  }
+
+  // ---------- v1.1 glass + ambient: every phase, mock mode ----------
+  if (want('glass')) {
+    browserGL = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true, args: ARGS.map((a) => (a === '--use-angle=vulkan' ? '--use-angle=gl' : a)).filter((a) => a !== '--enable-features=Vulkan') });
+    const gp = await browserGL.newPage();
+    console.log('GL browser renderer:', await gp.evaluate(() => { const c = document.createElement('canvas'); const gl = c.getContext('webgl'); const e = gl?.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : 'n/a'; }));
+    await gp.close();
+    const MOBILE = {
+      viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    };
+    for (const phase of ['blue', 'purple', 'green']) {
+      const force = (ctx) => ctx.addInitScript((p) => { try { localStorage.setItem('rune.ambient', p); } catch { /* ignore */ } }, phase);
+      // desktop
+      {
+        const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 });
+        await force(ctx);
+        const page = await ctx.newPage();
+        page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
+        await page.goto(`${BASE}/?mock=1`);
+        await page.waitForSelector('.card__title');
+        await shot(page, `glass-desktop-home-${phase}`, { wait: 800 });
+        await page.click('.side a[href="/albums"]');
+        await page.waitForSelector('.vgrid .card__title');
+        await page.evaluate(() => { document.querySelector('#main').scrollTop = 420; });
+        await shot(page, `glass-desktop-albums-${phase}`, { wait: 700 });
+        await page.locator('.card__title', { hasText: /^Glass Harbour$/ }).first().click();
+        await page.waitForSelector('.quote');
+        await shot(page, `glass-desktop-album-${phase}`, { wait: 900 });
+        await page.evaluate(() => { document.querySelector('#main').scrollTop = 620; });
+        await shot(page, `glass-desktop-album-scrolled-${phase}`, { wait: 600 });
+        if (phase === 'purple') {
+          await page.click('button[aria-label="Settings"]');
+          await shot(page, 'glass-desktop-settings-menu', { wait: 300 });
+        }
+        await ctx.close();
+      }
+      // mobile
+      {
+        // This Chromium + ANGLE/Vulkan build drops backdrop-filter at devicePixelRatio >= 2 (reproduced with a bare <div>),
+        // so the 3x mobile captures use ANGLE/GL (still the NVIDIA GPU, never SwiftShader).
+        const ctx = await browserGL.newContext(MOBILE);
+        await force(ctx);
+        const page = await ctx.newPage();
+        page.on('pageerror', (e) => console.log('MOBILE PAGEERROR', e.message));
+        await page.goto(`${BASE}/?mock=1`);
+        await page.waitForSelector('.card__title');
+        await page.waitForSelector('.mini');
+        await shot(page, `glass-mobile-home-${phase}`, { wait: 900 });
+        await page.locator('.card__title', { hasText: /^Glass Harbour$/ }).first().click();
+        await page.waitForSelector('.quote');
+        await shot(page, `glass-mobile-album-${phase}`, { wait: 900 });
+        await page.evaluate(() => { document.querySelector('#main').scrollTop = 520; });
+        await shot(page, `glass-mobile-album-scrolled-${phase}`, { wait: 600 });
+        await ctx.close();
+      }
+    }
+  }
+
+  // ---------- animation cost: cycle running (forced into a crossfade) while scrolling the albums grid ----------
+  if (want('perf')) {
+    const sample = async (label, ambient, vp, extra = {}) => {
+      const ctx = await browser.newContext({ viewport: vp, deviceScaleFactor: 1, ...extra });
+      await ctx.addInitScript((a) => { try { localStorage.setItem('rune.ambient', a); } catch { /* ignore */ } }, ambient);
+      const page = await ctx.newPage();
+      await page.goto(`${BASE}/albums?mock=1`);
+      await page.waitForSelector('.vgrid .card__title');
+      await page.waitForTimeout(500);
+      const r = await page.evaluate(async () => {
+        // park the cycle in the middle of the blue->purple fade and keep it there for the whole run (it still animates 12 s)
+        for (const a of document.getAnimations()) if (/amb-/.test(a.animationName ?? '')) a.currentTime = 20000;
+        const m = document.querySelector('#main');
+        const dts = []; let last = performance.now(); const t0 = last; let y = 0, dir = 1;
+        await new Promise((res) => {
+          const tick = (now) => {
+            dts.push(now - last); last = now;
+            y += dir * 14; if (y > m.scrollHeight - m.clientHeight - 5 || y < 0) dir = -dir;
+            m.scrollTop = y;
+            if (now - t0 < 5000) requestAnimationFrame(tick); else res();
+          };
+          requestAnimationFrame(tick);
+        });
+        dts.shift();
+        const sorted = [...dts].sort((a, b) => a - b);
+        const avg = dts.reduce((a, b) => a + b, 0) / dts.length;
+        return { frames: dts.length, avg, p95: sorted[Math.floor(sorted.length * 0.95)], worst: sorted[sorted.length - 1], over20: dts.filter((d) => d > 20).length, over33: dts.filter((d) => d > 33.4).length, anims: document.getAnimations().length };
+      });
+      console.log(`PERF ${label}: frames=${r.frames} avg=${r.avg.toFixed(2)}ms p95=${r.p95.toFixed(1)}ms worst=${r.worst.toFixed(1)}ms >20ms=${r.over20} >33ms=${r.over33} runningAnimations=${r.anims}`);
+      await ctx.close();
+    };
+    const D = { width: 1600, height: 1000 };
+    const M = { width: 390, height: 844 };
+    await sample('desktop cycle (mid-fade)', 'cycle', D);
+    await sample('desktop static purple (baseline)', 'purple', D);
+    await sample('desktop ambient off (baseline)', 'off', D);
+    await sample('mobile 390x844 cycle (mid-fade)', 'cycle', M, { isMobile: true, hasTouch: true });
+    await sample('mobile static purple (baseline)', 'purple', M, { isMobile: true, hasTouch: true });
+  }
 } finally {
+  await browserGL?.close();
   await browser?.close();
   stop();
 }

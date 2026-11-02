@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { Ambient } from './components/Ambient';
 import { Shell } from './components/Shell';
 import AlbumPage from './pages/Album';
 import Albums from './pages/Albums';
@@ -19,6 +20,7 @@ export default function App() {
   useEffect(() => { void usePlayer.getState().init(); }, []);
   return (
     <QueryClientProvider client={client}>
+      <Ambient />
       <BrowserRouter>
         <Shell>
           <Routes>
