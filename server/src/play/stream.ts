@@ -14,8 +14,8 @@
 //
 // ffmpeg is killed as soon as the HTTP client disconnects.
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { extname } from 'node:path';
+import { createReadStream, existsSync, statSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
@@ -116,9 +116,10 @@ function contentTypeFor(path: string): string {
   }
 }
 
-function ffmpegArgs(track: StoredTrack, fmt: 'flac' | 'aac', kbps: number): string[] {
+function ffmpegArgs(track: StoredTrack, fmt: 'flac' | 'aac', kbps: number, offsetMs = 0): string[] {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
-  const startMs = track.cue_start_ms;
+  // offsetMs lets clients seek inside transcoded streams (they reload with ?t=).
+  const startMs = track.cue_start_ms != null || offsetMs > 0 ? (track.cue_start_ms ?? 0) + offsetMs : null;
   const endMs = track.cue_end_ms;
   if (startMs != null) {
     // Input seeking before -i is fast; ffmpeg accurately trims to the timestamp.
@@ -140,14 +141,53 @@ function seconds(ms: number): string {
   return String(Number((ms / 1000).toFixed(6)));
 }
 
-export function registerStreamRoutes(app: FastifyInstance, db: Db, _cfg: Config): void {
+const cacheJobs = new Map<string, Promise<string | null>>();
+
+/**
+ * Transcode a whole track (or cue slice) once into <dataDir>/transcode and reuse it.
+ * A finished file can be served with byte ranges, which Safari requires for <audio>
+ * and which makes seeking work everywhere.
+ */
+export function cachedTranscode(cfg: Config, track: StoredTrack, fmt: 'flac' | 'aac', kbps: number): Promise<string | null> {
+  const dir = join(cfg.dataDir, 'transcode');
+  mkdirSync(dir, { recursive: true });
+  const mtime = Math.round(statSync(track.path!).mtimeMs);
+  const ext = fmt === 'flac' ? 'flac' : 'm4a';
+  const out = join(dir, `${track.id.replace(/[^a-z0-9]/gi, '_')}-${fmt}${fmt === 'aac' ? kbps : ''}-${mtime}.${ext}`);
+  if (existsSync(out)) return Promise.resolve(out);
+  let job = cacheJobs.get(out);
+  if (!job) {
+    const tmp = out + '.part';
+    const base = ffmpegArgs(track, fmt, kbps).slice(0, -1); // drop pipe:1
+    const fmtIdx = base.lastIndexOf('-f');
+    if (fmt === 'aac') base.splice(fmtIdx, 2, '-movflags', '+faststart', '-f', 'mp4');
+    job = new Promise<string | null>((resolve) => {
+      const child = spawn('ffmpeg', ['-y', ...base, tmp], { stdio: 'ignore' });
+      child.on('error', () => resolve(null));
+      child.on('close', (code) => {
+        if (code === 0) {
+          renameSync(tmp, out);
+          resolve(out);
+        } else {
+          rmSync(tmp, { force: true });
+          resolve(null);
+        }
+      });
+    }).finally(() => cacheJobs.delete(out));
+    cacheJobs.set(out, job);
+  }
+  return job;
+}
+
+export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config): void {
   const getTrack = db.prepare(
     'SELECT id, path, cue_start_ms, cue_end_ms, format, source FROM tracks WHERE id = ?',
   );
 
   app.get('/api/stream/:trackId', async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
-    const query = request.query as { fmt?: string; kbps?: string };
+    const query = request.query as { fmt?: string; kbps?: string; t?: string; live?: string };
+    const offsetMs = Math.max(0, Number.parseInt(query.t ?? '0', 10) || 0);
 
     const fmtRaw = (query.fmt ?? 'orig').toLowerCase();
     if (fmtRaw !== 'orig' && fmtRaw !== 'flac' && fmtRaw !== 'aac') {
@@ -166,12 +206,16 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, _cfg: Config)
     }
 
     const isCue = track.cue_start_ms != null;
-    if (fmt === 'orig' && !isCue) {
+    if (fmt === 'orig' && !isCue && offsetMs === 0) {
       return serveFile(request.method, request.headers.range, reply, track.path);
     }
     // Cue tracks are always resliced; orig means "lossless FLAC" in that case.
     const outFmt: 'flac' | 'aac' = fmt === 'aac' ? 'aac' : 'flac';
-    return serveTranscode(request.method, reply, track, outFmt, kbps);
+    if (offsetMs === 0 && query.live !== '1') {
+      const file = await cachedTranscode(cfg, track, outFmt, kbps);
+      if (file) return serveFile(request.method, request.headers.range, reply, file);
+    }
+    return serveTranscode(request.method, reply, track, outFmt, kbps, offsetMs);
   });
 }
 
@@ -330,6 +374,7 @@ function serveTranscode(
   track: StoredTrack,
   fmt: 'flac' | 'aac',
   kbps: number,
+  offsetMs = 0,
 ): void {
   const contentType = fmt === 'flac' ? 'audio/flac' : 'audio/aac';
   const headers = {
@@ -345,7 +390,7 @@ function serveTranscode(
     return;
   }
 
-  const child = spawn('ffmpeg', ffmpegArgs(track, fmt, kbps), {
+  const child = spawn('ffmpeg', ffmpegArgs(track, fmt, kbps, offsetMs), {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const pid = child.pid;

@@ -26,10 +26,15 @@ export class MockEngine implements Engine {
   onError() {}
 }
 
+/** Lossless by default: the server sends the original file (cue tracks as a cached FLAC
+ *  slice), always with byte ranges so Safari can play and seek. 'aac' = data saver. */
 function pickFormat(): { fmt: string; kbps: number } {
-  const a = document.createElement('audio');
-  if (a.canPlayType('audio/ogg; codecs="opus"')) return { fmt: 'opus', kbps: 192 };
-  return { fmt: 'aac', kbps: 256 };
+  try {
+    if (localStorage.getItem('rune.dataSaver') === '1') return { fmt: 'aac', kbps: 256 };
+  } catch {
+    /* storage blocked */
+  }
+  return { fmt: 'orig', kbps: 256 };
 }
 
 export class AudioEngine implements Engine {

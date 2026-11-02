@@ -172,7 +172,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
       r.get('/zones', async () => {
         const zones: { id: Zone; name: string; kind: 'pc' | 'browser' | 'spotify' }[] = [];
-        if (pc) zones.push({ id: 'pc', name: 'This PC (speakers)', kind: 'pc' });
+        if (pc) zones.push({ id: 'pc', name: 'Linux PC speakers', kind: 'pc' });
         if (spotify && (await spotify.auth.status()).connected) {
           try {
             zones.push(...(await spotify.zones.listZones()));

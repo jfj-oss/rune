@@ -11,9 +11,19 @@ import { loadLocal, saveLocal, useUi } from './ui';
 const backends = new Map<Zone, Backend>();
 let unsub: (() => void) | null = null;
 
+function deviceName(): string {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'This iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)) return 'This iPad';
+  if (/Macintosh/.test(ua)) return 'This Mac';
+  if (/Android/.test(ua)) return 'This phone';
+  return 'This computer';
+}
+const BROWSER_ZONE: ZoneInfo = { id: 'browser', name: deviceName(), kind: 'browser' };
+
 const FALLBACK_ZONES: ZoneInfo[] = [
-  { id: 'pc', name: 'This PC (speakers)', kind: 'pc' },
-  { id: 'browser', name: 'This browser', kind: 'browser' },
+  { id: 'pc', name: 'Linux PC speakers', kind: 'pc' },
+  BROWSER_ZONE,
 ];
 
 interface PlayerStore {
@@ -81,6 +91,8 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       let zones = FALLBACK_ZONES;
       try { zones = await api.zones(); } catch { /* server offline: keep fallback */ }
       if (!zones.length) zones = FALLBACK_ZONES;
+      // The browser zone lives in this tab, so the server never lists it.
+      if (!isMock && !zones.some((z) => z.kind === 'browser')) zones = [...zones, BROWSER_ZONE];
       const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches;
       const saved = loadLocal<string | null>('rune.zone', null);
       const pick = zones.find((z) => z.id === saved) ?? zones.find((z) => z.kind === (mobile ? 'browser' : 'pc')) ?? zones[0]!;

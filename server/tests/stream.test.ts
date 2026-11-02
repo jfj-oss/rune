@@ -292,6 +292,25 @@ describe('GET /api/stream transcoding', () => {
     expect(Math.abs(packetDuration(out) - 4.0)).toBeLessThanOrEqual(0.1);
   });
 
+  it('serves cached cue slices with byte ranges (Safari needs them)', async () => {
+    const full = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=flac' });
+    expect(full.headers['accept-ranges']).toBe('bytes');
+    const size = Number(full.headers['content-length']);
+    expect(size).toBeGreaterThan(1000);
+    const part = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=flac', headers: { range: 'bytes=0-1' } });
+    expect(part.statusCode).toBe(206);
+    expect(part.rawPayload.length).toBe(2);
+    expect(part.headers['content-range']).toBe(`bytes 0-1/${size}`);
+  });
+
+  it('seeks inside transcoded streams with ?t=', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=flac&t=1500' });
+    expect(res.statusCode).toBe(200);
+    const out = join(dir, 'cue-offset.flac');
+    writeFileSync(out, res.rawPayload);
+    expect(Math.abs(packetDuration(out) - 2.5)).toBeLessThanOrEqual(0.1);
+  });
+
   it('also slices a cue track for fmt=orig (orig means lossless)', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue' });
     expect(res.statusCode).toBe(200);
@@ -311,7 +330,7 @@ describe('GET /api/stream transcoding', () => {
   });
 
   it('streams a decodable AAC (ADTS) cue slice', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=aac&kbps=128' });
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=aac&kbps=128&live=1' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('audio/aac');
     const out = join(dir, 'cue.aac');
@@ -340,7 +359,7 @@ describe('client disconnect', () => {
   it('kills ffmpeg when the HTTP client goes away', async () => {
     const address = await app.listen({ port: 0, host: '127.0.0.1' });
     const controller = new AbortController();
-    const response = await fetch(`${address}/api/stream/l:long?fmt=aac&kbps=128`, {
+    const response = await fetch(`${address}/api/stream/l:long?fmt=aac&kbps=128&live=1`, {
       signal: controller.signal,
     });
     expect(response.status).toBe(200);
