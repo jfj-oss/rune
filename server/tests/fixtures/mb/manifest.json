@@ -1,0 +1,127 @@
+{
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Discovery%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "5c24a735ce70029d2378cb43a83c63be2b712bb0.json",
+    "status": 200,
+    "fetchedAt": 1793587790520
+  },
+  "https://musicbrainz.org/ws/2/release/5ad66522-edce-3a77-b5fa-7956ee879239?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b6e72dd5ed011d287f85f38fd632d74e5fb6b652.json",
+    "status": 200,
+    "fetchedAt": 1793587793747
+  },
+  "https://musicbrainz.org/ws/2/release/4375a6b0-cd50-4f59-be32-13161c0fc448?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "8ac7dd55406324a82fbd4f50e70b16fa3b111e16.json",
+    "status": 200,
+    "fetchedAt": 1793587805216
+  },
+  "https://musicbrainz.org/ws/2/release/bd3bb36e-16c8-438f-850e-dfbf4d1478f0?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "4fc3f27691a0e2f2f031b05820dc02fc823f0134.json",
+    "status": 200,
+    "fetchedAt": 1793587795388
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Unknown+Album%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "0ac0fcf2eb89383690247f09c7646942148e5b04.json",
+    "status": 200,
+    "fetchedAt": 1793587795887
+  },
+  "https://musicbrainz.org/ws/2/recording/?query=recording%3A%22One+More+Time%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "59bd63b8d13f1ca35307f3f024a9e13455bf2d0e.json",
+    "status": 200,
+    "fetchedAt": 1793587800416
+  },
+  "https://musicbrainz.org/ws/2/recording/?query=recording%3A%22Aerodynamic%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "99b98683923e1634bd037876d5b39fe75cbfb8f6.json",
+    "status": 200,
+    "fetchedAt": 1793587801220
+  },
+  "https://musicbrainz.org/ws/2/release/098060d4-ba3c-469d-88b0-08642261c7ab?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "22b53f1440e90b004d9aa3c0634208e0896c08e4.json",
+    "status": 200,
+    "fetchedAt": 1793587802395
+  },
+  "https://musicbrainz.org/ws/2/release/ab5ca495-8983-41b9-86b4-46a981d173be?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "631997afbca1855804b8b4361fb37109a39f9b03.json",
+    "status": 200,
+    "fetchedAt": 1793587806161
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Jar+of+Flies%22+AND+artist%3A%22Alice+In+Chains%22&fmt=json&limit=15": {
+    "file": "c23046c650c3dedef7aac113f0e21f38f896547e.json",
+    "status": 200,
+    "fetchedAt": 1793587806610
+  },
+  "https://musicbrainz.org/ws/2/release/c97372b8-ce80-4426-a602-20e165d4541c?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "9ffcd6cff82dfbd6108d5ea3a7955ebb8ce6dafa.json",
+    "status": 200,
+    "fetchedAt": 1793587807604
+  },
+  "https://musicbrainz.org/ws/2/release/909c135d-99ed-4584-ab06-53a85134832f?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b7e70d17366829f28c943ea55a1b7c9f4a4a7bc7.json",
+    "status": 200,
+    "fetchedAt": 1793587808605
+  },
+  "https://musicbrainz.org/ws/2/release/d4434c0f-4a25-3c88-9138-f4fffa8ddf88?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "34fdcc4d59e62d5ac646ec8b4b8885c510c6a1e0.json",
+    "status": 200,
+    "fetchedAt": 1793587810325
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Still+Bill%22+AND+artist%3A%22Bill+Withers%22&fmt=json&limit=15": {
+    "file": "feef1997d76b39129b4f59cd1941f106561dccdb.json",
+    "status": 200,
+    "fetchedAt": 1793587812158
+  },
+  "https://musicbrainz.org/ws/2/release/de3fc9ac-4f6b-42a4-bbe6-f06b9ba7411c?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b8050c6afba34d4131a299d3c9e40787cf261ea1.json",
+    "status": 200,
+    "fetchedAt": 1793587812292
+  },
+  "https://musicbrainz.org/ws/2/release/61b5df83-e3d8-486f-b0a3-b7157700db5a?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "d2f7ad20c3eae19aac17ae9e7cb0cf9594055c1f.json",
+    "status": 200,
+    "fetchedAt": 1793587814466
+  },
+  "https://musicbrainz.org/ws/2/release/df37bd58-2839-409e-b801-cca898a91233?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "9b0fbebccbe8f88d423e868a8c6c057691554e05.json",
+    "status": 200,
+    "fetchedAt": 1793587814741
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Uprising%22+AND+artist%3A%22Bob+Marley+%5C%26+The+Wailers%22&fmt=json&limit=15": {
+    "file": "dc781a8f0cddfc8e68d44ef184735a3fd3981fa2.json",
+    "status": 200,
+    "fetchedAt": 1793587815602
+  },
+  "https://musicbrainz.org/ws/2/release/7e807840-aca7-4863-a788-c8a0edf4b3ee?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "6ecf90e2df58fdac7317f69ae453734d97966f98.json",
+    "status": 200,
+    "fetchedAt": 1793587816722
+  },
+  "https://musicbrainz.org/ws/2/release/6e96d2fd-6725-4b7f-8f9e-f54c5f70d24a?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "18f349ba178ea7d64260a1481cf3c0345603daf1.json",
+    "status": 200,
+    "fetchedAt": 1793587817722
+  },
+  "https://musicbrainz.org/ws/2/release/8f44e072-3c19-4b86-a434-a34e23b3ded2?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "df3f97744361b3e26fdbe091a97f84e0280827b1.json",
+    "status": 200,
+    "fetchedAt": 1793587818725
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Fire+of+Unknown+Origin%22+AND+artist%3A%22Blue+%C3%96yster+Cult%22&fmt=json&limit=15": {
+    "file": "b2ee75852e807ab5ee2161f869473f596186e89f.json",
+    "status": 200,
+    "fetchedAt": 1793587819606
+  },
+  "https://musicbrainz.org/ws/2/release/b87d3426-f30a-488e-850c-30913a99c8a6?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "f6144b78ee7b1c4dc1a6f76a6ff194b457ea490c.json",
+    "status": 200,
+    "fetchedAt": 1793587820598
+  },
+  "https://musicbrainz.org/ws/2/release/e33c8b19-6fd7-31ba-ad13-66c5a9938067?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "a449233e103077dc7ac95820b6784e75bd29eef7.json",
+    "status": 200,
+    "fetchedAt": 1793587821597
+  },
+  "https://musicbrainz.org/ws/2/release/b5657a2e-db31-4b5b-933e-552a3cf5c218?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "ef2041f42252847b50d2f9e32789ed63dde7f130.json",
+    "status": 200,
+    "fetchedAt": 1793587822603
+  }
+}
