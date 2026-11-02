@@ -13,7 +13,7 @@ import type { IAudioMetadata } from 'music-metadata';
 import type { ScanProgress } from '@liner/shared';
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
-import { ids } from '../db/index.js';
+import { ids, normalizeName } from '../db/index.js';
 import type { CreateScanner, Scanner } from '../modules.js';
 import { decodeCue, parseCue, type CueSheet } from './cue.js';
 import { cleanFolderName, cleanTrackTitle, formatDisplay } from './names.js';
@@ -340,6 +340,304 @@ function albumTagOf(rec: FileRecord): string {
   return cueTitle ?? '';
 }
 
+// ---------------------------------------------------------------- tag merge
+//
+// Real libraries write the same album into one folder with slightly different
+// tags: six files say "X" while one says "Chicago X"; another file may say
+// "14:59" while the rest say "14:59 (Deluxe Edition)". Splitting those into
+// separate albums loses the album (and any match fixed on it), so tag groups
+// inside one folder are merged when:
+//
+//   - their titles are equal after punctuation/case normalisation ("14:59" = "14 59"),
+//   - one title is a word-aligned suffix of the other ("X" vs "Chicago X"),
+//   - they differ only by edition/disc noise ("[Deluxe]", "(Disc 1)", "Remastered"),
+//   - or one group is a single track and the folder's majority group has the
+//     same album artist and year.
+//
+// Title rules additionally require compatible album artist/year (a missing tag
+// on one side is allowed; a conflict blocks the merge) so a folder holding two
+// clearly different releases by different artists still splits. The surviving
+// album keeps the majority group's key, hence its id, so matched data survives.
+//
+// "Substring" is deliberately implemented as a *suffix* match: "X" is a suffix
+// of "Chicago X", whereas a prefix (say "Grace" vs "Grace Around the World")
+// is usually a genuinely different release and must keep splitting.
+
+const EDITION_NOISE_WORD =
+  "(?:deluxe|expanded|special|limited|collector'?s?|legacy|anniversary|remaster(?:ed)?|reissue|bonus|edition|version|disc|cd|disk)";
+/** Bracketed content that is pure release/edition noise, e.g. "(Deluxe Edition)", "[Disc 2]", "(2013 Remaster)". */
+const EDITION_PAREN_INNER_RE = new RegExp(
+  `(?:^|\\s)${EDITION_NOISE_WORD}(?:\\s|$)|\\b(?:19|20)\\d{2}\\b`,
+  'i',
+);
+const TRAILING_EDITION_RE = new RegExp(
+  `(?:\\s*[-–]\\s*|\\s+)(?:(?:19|20)\\d{2}\\s+)?${EDITION_NOISE_WORD}(?:\\s+${EDITION_NOISE_WORD})*\\s*$`,
+  'i',
+);
+
+/** Drop edition/disc/remaster noise so reissue names compare equal. */
+function stripEditionNoise(title: string): string {
+  let s = title.replace(/[\[(]([^)\]]*)[)\]]/g, (match, inner: string) =>
+    EDITION_PAREN_INNER_RE.test(inner) ? ' ' : match,
+  );
+  for (let i = 0; i < 3; i++) {
+    const next = s.replace(TRAILING_EDITION_RE, '');
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/** Case/diacritic/punctuation-insensitive tokens for title comparison. */
+function titleTokens(title: string): string[] {
+  return title
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isTokenSuffix(short: readonly string[], long: readonly string[]): boolean {
+  if (short.length === 0 || short.length >= long.length) return false;
+  const offset = long.length - short.length;
+  return short.every((token, i) => token === long[offset + i]);
+}
+
+function titlesSimilar(a: string, b: string): boolean {
+  const at = titleTokens(stripEditionNoise(a));
+  const bt = titleTokens(stripEditionNoise(b));
+  if (at.length === 0 || bt.length === 0) return false;
+  if (at.join(' ') === bt.join(' ')) return true;
+  return at.length < bt.length ? isTokenSuffix(at, bt) : isTokenSuffix(bt, at);
+}
+
+function titlesEqual(a: string, b: string): boolean {
+  const at = titleTokens(stripEditionNoise(a));
+  const bt = titleTokens(stripEditionNoise(b));
+  return at.length > 0 && at.join(' ') === bt.join(' ');
+}
+
+interface TagGroup {
+  key: string;
+  records: FileRecord[];
+}
+
+/** Album artist used only for merge compatibility; falls back to a lone artist tag. */
+function tagGroupArtist(records: readonly FileRecord[]): string | undefined {
+  const values: string[] = [];
+  for (const rec of records) {
+    const value = rec.meta.albumartist ?? (rec.meta.artists.length === 1 ? rec.meta.artists[0] : undefined);
+    if (value?.trim()) values.push(value);
+  }
+  const mode = modeOf(values);
+  return mode ? normalizeName(mode) : undefined;
+}
+
+function tagGroupYear(records: readonly FileRecord[]): number | undefined {
+  return modeOfNumbers(
+    records
+      .map((r) => r.meta.year)
+      .filter((y): y is number => typeof y === 'number'),
+  );
+}
+
+function artistsCompatible(a: readonly FileRecord[], b: readonly FileRecord[]): boolean {
+  const left = tagGroupArtist(a);
+  const right = tagGroupArtist(b);
+  return left === undefined || right === undefined || left === right;
+}
+
+function yearsCompatible(a: readonly FileRecord[], b: readonly FileRecord[]): boolean {
+  const left = tagGroupYear(a);
+  const right = tagGroupYear(b);
+  return left === undefined || right === undefined || left === right;
+}
+
+function artistAndYearMatch(a: readonly FileRecord[], b: readonly FileRecord[]): boolean {
+  const leftArtist = tagGroupArtist(a);
+  const rightArtist = tagGroupArtist(b);
+  const leftYear = tagGroupYear(a);
+  const rightYear = tagGroupYear(b);
+  return (
+    leftArtist !== undefined &&
+    rightArtist !== undefined &&
+    leftArtist === rightArtist &&
+    leftYear !== undefined &&
+    rightYear !== undefined &&
+    leftYear === rightYear
+  );
+}
+
+/** Most records wins; equal sizes prefer the longer (more complete) title. */
+function pickMajority(groups: readonly TagGroup[]): TagGroup {
+  let best = groups[0]!;
+  for (const group of groups.slice(1)) {
+    if (
+      group.records.length > best.records.length ||
+      (group.records.length === best.records.length && group.key.length > best.key.length)
+    ) {
+      best = group;
+    }
+  }
+  return best;
+}
+
+function shouldMergeTagGroups(a: TagGroup, b: TagGroup, majority: TagGroup): boolean {
+  // A lone stray track joins the folder's majority album when artist and year
+  // agree, even if its album tag is unrelated: it is almost always a bonus or
+  // duplicate file whose tag was edited by hand.
+  const single = a.records.length === 1 ? a : b.records.length === 1 ? b : undefined;
+  const other = single === a ? b : a;
+  if (
+    single &&
+    other === majority &&
+    other.records.length >= 2 &&
+    artistAndYearMatch(single.records, other.records)
+  ) {
+    return true;
+  }
+
+  // Title-based rules must not bridge two releases with conflicting metadata.
+  if (!artistsCompatible(a.records, b.records) || !yearsCompatible(a.records, b.records)) {
+    return false;
+  }
+  return titlesSimilar(a.key, b.key);
+}
+
+/** Merge similar tag groups in one folder, keeping the majority group's key. */
+function mergeTagGroups(folder: string, tagged: Map<string, FileRecord[]>): AlbumGroup[] {
+  const groups: TagGroup[] = [...tagged].map(([key, records]) => ({ key, records }));
+  const majority = pickMajority(groups);
+
+  const parent = groups.map((_, i) => i);
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root]!;
+    while (parent[i] !== root) {
+      const next = parent[i]!;
+      parent[i] = root;
+      i = next;
+    }
+    return root;
+  };
+  const union = (i: number, j: number): void => {
+    const a = find(i);
+    const b = find(j);
+    if (a !== b) parent[b] = a;
+  };
+
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      if (shouldMergeTagGroups(groups[i]!, groups[j]!, majority)) union(i, j);
+    }
+  }
+
+  const components = new Map<number, TagGroup[]>();
+  for (let i = 0; i < groups.length; i++) {
+    const root = find(i);
+    const list = components.get(root);
+    if (list) list.push(groups[i]!);
+    else components.set(root, [groups[i]!]);
+  }
+
+  const out: AlbumGroup[] = [];
+  for (const component of components.values()) {
+    if (component.length === 1) {
+      const only = component[0]!;
+      out.push({ folder, groupKey: only.key, records: only.records });
+      continue;
+    }
+    const survivor = pickMajority(component);
+    const records = component.flatMap((g) => g.records);
+    records.sort((a, b) => a.path.localeCompare(b.path));
+    out.push({ folder, groupKey: survivor.key, records });
+  }
+  return out;
+}
+
+/** Title tag of an album group (mode of its file tags, falling back to its key). */
+function groupTitleTag(group: AlbumGroup): string | undefined {
+  return modeOf(group.records.map(albumTagOf).filter(Boolean)) ?? group.groupKey;
+}
+
+function normalizedTrackTitle(title: string | undefined): string | undefined {
+  if (!title) return undefined;
+  const tokens = titleTokens(stripEditionNoise(title));
+  return tokens.length > 0 ? tokens.join(' ') : undefined;
+}
+
+/**
+ * True when this record is a copy of one of the target album's tracks: same
+ * disc, number and title (edition words ignored). Used to only merge a stray
+ * one-track folder into a real album when it really is a duplicate file.
+ */
+function isDuplicateOfAlbumTrack(rec: FileRecord, target: readonly FileRecord[]): boolean {
+  const title = normalizedTrackTitle(rec.meta.title);
+  const number = rec.meta.trackNo;
+  if (!title || !number) return false;
+  const disc = rec.meta.discNo ?? 1;
+  return target.some(
+    (other) =>
+      other.meta.trackNo === number &&
+      (other.meta.discNo ?? 1) === disc &&
+      normalizedTrackTitle(other.meta.title) === title,
+  );
+}
+
+/**
+ * Some libraries store one track of an album in its own folder (a stray
+ * download, or a single whose file still carries the album tag). When that
+ * folder holds exactly one file, and exactly one other single-album folder has
+ * the same title/album artist/year and already contains the same track, fold
+ * the stray file into that album. The album's own folder (and id) survives.
+ *
+ * This is deliberately strict: the target must be unambiguous, both years must
+ * be tagged, and the file must duplicate a track that is already there. A
+ * genuinely separate one-track release has no matching track and stays split.
+ */
+function mergeStraySingleFolders(groups: AlbumGroup[]): AlbumGroup[] {
+  const groupsPerFolder = new Map<string, number>();
+  for (const group of groups) {
+    groupsPerFolder.set(group.folder, (groupsPerFolder.get(group.folder) ?? 0) + 1);
+  }
+  const aloneInFolder = (group: AlbumGroup): boolean => groupsPerFolder.get(group.folder) === 1;
+
+  const majors = groups.filter((g) => g.records.length >= 2 && aloneInFolder(g));
+  const removed = new Set<AlbumGroup>();
+
+  for (const single of groups) {
+    if (single.records.length !== 1 || !aloneInFolder(single)) continue;
+    const rec = single.records[0]!;
+    if (!albumTagOf(rec)) continue; // no tag to compare: leave it alone
+
+    const title = groupTitleTag(single);
+    const artist = tagGroupArtist(single.records);
+    const year = tagGroupYear(single.records);
+    if (!title || !artist || year === undefined) continue;
+
+    const candidates = majors.filter((major) => {
+      if (removed.has(major)) return false;
+      const majorTitle = groupTitleTag(major);
+      if (!majorTitle || !titlesEqual(title, majorTitle)) return false;
+      if (tagGroupArtist(major.records) !== artist) return false;
+      if (tagGroupYear(major.records) !== year) return false;
+      return isDuplicateOfAlbumTrack(rec, major.records);
+    });
+    if (candidates.length !== 1) continue;
+
+    const target = candidates[0]!;
+    target.records.push(rec);
+    target.records.sort((a, b) => a.path.localeCompare(b.path));
+    removed.add(single);
+  }
+
+  return groups.filter((group) => !removed.has(group));
+}
+
 function resolveAlbumFolder(
   dir: string,
   roots: Set<string>,
@@ -402,11 +700,16 @@ function groupAlbums(records: FileRecord[]): AlbumGroup[] {
       }
       largest!.push(...untagged);
     }
-    for (const [key, list] of tagged) {
-      list.sort((a, b) => a.path.localeCompare(b.path));
-      groups.push({ folder, groupKey: key, records: list });
-    }
+    for (const list of tagged.values()) list.sort((a, b) => a.path.localeCompare(b.path));
+    groups.push(...mergeTagGroups(folder, tagged));
   }
+
+  // Only after per-folder merging: fold a stray one-track folder into the one
+  // unambiguous album folder it duplicates (e.g. Sugar Ray's "14:59" single
+  // file living beside the full album).
+  const merged = mergeStraySingleFolders(groups);
+  groups.length = 0;
+  groups.push(...merged);
 
   groups.sort((a, b) =>
     a.folder === b.folder
@@ -1431,6 +1734,11 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
           "DELETE FROM albums WHERE source = 'local' AND id NOT IN (SELECT album_id FROM tracks)",
         )
         .run().changes;
+      // A merged/split folder stops producing the losing album id. Drop its
+      // stored signature too: otherwise, if that id ever comes back, the
+      // scanner would compare against a stale signature and skip writing rows
+      // that no longer exist in the albums table.
+      db.exec('DELETE FROM scan_albums WHERE album_id NOT IN (SELECT id FROM albums)');
 
       db.exec('CREATE TEMP TABLE IF NOT EXISTS scan_seen_paths (path TEXT PRIMARY KEY)');
       db.exec('DELETE FROM scan_seen_paths');
