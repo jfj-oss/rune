@@ -37,7 +37,13 @@ function loadAmbient(): Ambient {
   } catch { /* storage blocked */ }
   return isAmbient(v) ? v : 'dither';
 }
-function applyAmbient(a: Ambient) { document.documentElement.dataset.ambient = a; }
+/** Page colour behind everything; iOS home-screen apps also paint their status/home-bar strips with it. */
+const PAGE_BG: Partial<Record<Ambient, string>> = { off: '#0f1013' };
+function applyAmbient(a: Ambient) {
+  document.documentElement.dataset.ambient = a;
+  const bg = a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#00161c';
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute('content', bg);
+}
 
 interface UiStore {
   ambient: Ambient;

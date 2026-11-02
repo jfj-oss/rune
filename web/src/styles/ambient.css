@@ -62,7 +62,9 @@
 /* ---------- Dither ambient ----------
    Pure black base + a low-res WebGL canvas (components/DitherBackdrop) upscaled with crisp pixels so the grain stays sharp. */
 :root[data-ambient^='dither'] .ambient { background: #000; }
-:root[data-ambient^='dither'] body { background: #000; }
+:root[data-ambient^='dither'], :root[data-ambient^='dither'] body { background: #000; }
+/* html matches the ambient's base colour too: iOS paints a home-screen app's status/home-bar strips with it */
+:root:not([data-ambient^='dither']):not([data-ambient='off']) { background: #00161c; }
 /* secondary text a step brighter (as on the glass), so it keeps WCAG AA over the dithered colour; see MASK in lib/dither */
 :root[data-ambient^='dither'] { --text-2: #d3d4de; --text-3: #c2c3d1; }
 :root[data-ambient^='dither'] .search:not(:focus-within) { background: rgba(0, 0, 0, 0.5); }
