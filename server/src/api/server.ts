@@ -15,6 +15,7 @@ import { createPcZone, registerStreamRoutes } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
+import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, registerHistoryRoutes } from '../history/index.js';
@@ -128,6 +129,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const scanner = createScanner(db, cfg);
   const matcher = createMatcher(db, cfg);
   const meta = createMeta(db, cfg);
+  const artistMeta = createArtistMeta(db, cfg);
   let detailsRunning = false;
   /** Prefetch album details in the background (one album at a time, after matching). */
   async function prefetchDetails(): Promise<void> {
@@ -273,6 +275,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
 
       registerMetaRoutes(r, meta);
+      registerArtistMetaRoutes(r, artistMeta);
       registerBrowseRoutes(r, db);
       registerFrameRoutes(r);
       registerHistoryRoutes(r, history);
