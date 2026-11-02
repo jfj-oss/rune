@@ -9,6 +9,7 @@ import { getAlbum, publicTrack } from '../api/library.js';
 import { loadTrack } from '../play/rows.js';
 import type {
   SpotifyAlbum,
+  SpotifyPaging,
   SpotifyPlaylist,
   SpotifyPlaylistTrack,
   SpotifySavedTrack,
@@ -218,6 +219,8 @@ export interface PlaylistSyncSource {
   allPlaylists(): Promise<SpotifyPlaylist[]>;
   allPlaylistTracks(playlistId: string): Promise<SpotifyPlaylistTrack[]>;
   allSavedTracks(): Promise<SpotifySavedTrack[]>;
+  /** One-page Liked Songs probe (total + newest added_at). Optional for test fakes. */
+  savedTracks?(opts?: { offset?: number; limit?: number }): Promise<SpotifyPaging<SpotifySavedTrack>>;
 }
 
 export interface PlaylistSyncOptions {
@@ -248,6 +251,41 @@ function ownerName(p: SpotifyPlaylist): string | null {
   return p.owner?.display_name || p.owner?.id || null;
 }
 
+// ---------- Liked Songs change probe ----------
+
+const LIKED_STAMP_KEY = 'spotify.likedStamp';
+const LIKED_FULL_AT_KEY = 'spotify.likedFullAt';
+/** A full Liked Songs pass costs ~100 requests: only redo it daily (or when the probe changed). */
+export const LIKED_FULL_SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+
+function ensureAppState(db: Db): void {
+  db.exec('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+}
+
+function getAppState(db: Db, key: string): string | undefined {
+  return (db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+}
+
+function setAppState(db: Db, key: string, value: string): void {
+  db.prepare(
+    'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).run(key, value);
+}
+
+/** `total:newestAddedAt` identifies the Liked Songs list without downloading it. */
+export function likedStamp(total: number, newestAddedAt: string | undefined): string {
+  return `${total}:${newestAddedAt ?? ''}`;
+}
+
+function newestAddedAt(items: SpotifySavedTrack[]): string | undefined {
+  let newest: string | undefined;
+  for (const item of items) {
+    if (!item.added_at) continue;
+    if (newest === undefined || item.added_at > newest) newest = item.added_at;
+  }
+  return newest;
+}
+
 /**
  * Upsert the user's playlists (+ Liked Songs) and their tracks. Tracks are only
  * refetched when Spotify's snapshot_id changed; metadata/order always refreshes.
@@ -259,21 +297,38 @@ export async function syncPlaylists(
 ): Promise<PlaylistSyncResult> {
   ensureSpotifySchema(db);
   ensureSpotifyLibrarySchema(db);
+  ensureAppState(db);
   const now = opts.now ?? Date.now;
 
   // Network first: better-sqlite3 transactions must be synchronous.
   // Liked Songs is the heavy part (~100 requests for ~4,600 songs) and is what Spotify
-  // rate-limits first; it must never block the user's playlists from syncing.
+  // rate-limits first; it must never block the user's playlists from syncing. A one-track
+  // probe (total + newest added_at) avoids that pass entirely while the list is unchanged.
   let likedRetryAfterMs: number | undefined;
+  let likedProbeStamp: string | undefined;
   const likedPromise: Promise<SpotifySavedTrack[] | null> = opts.skipLiked
     ? Promise.resolve(null)
-    : source.allSavedTracks().catch((err: { status?: number; retryAfterMs?: number }) => {
-        if (err?.status === 429) {
-          likedRetryAfterMs = err.retryAfterMs ?? 60 * 60_000;
-          return null;
+    : (async () => {
+        try {
+          if (source.savedTracks) {
+            const probe = await source.savedTracks({ limit: 1 });
+            likedProbeStamp = likedStamp(probe.total, probe.items?.[0]?.added_at);
+            const stored = getAppState(db, LIKED_STAMP_KEY);
+            const lastFull = Number(getAppState(db, LIKED_FULL_AT_KEY) ?? 0);
+            // Probe says nothing changed and the last full pass is still fresh: skip it.
+            if (stored === likedProbeStamp && now() - lastFull < LIKED_FULL_SYNC_TTL_MS) return null;
+          }
+          const liked = await source.allSavedTracks();
+          likedProbeStamp ??= likedStamp(liked.length, newestAddedAt(liked));
+          return liked;
+        } catch (err) {
+          if ((err as { status?: number })?.status === 429) {
+            likedRetryAfterMs = (err as { retryAfterMs?: number }).retryAfterMs ?? 60 * 60_000;
+            return null;
+          }
+          throw err;
         }
-        throw err;
-      });
+      })();
   const [playlists, liked] = await Promise.all([source.allPlaylists(), likedPromise]);
 
   const previous = new Map<string, { snapshot_id: string | null }>();
@@ -417,6 +472,11 @@ export async function syncPlaylists(
   });
 
   tx();
+  // Remember what a full pass saw, so the next probe can skip it.
+  if (liked !== null && likedProbeStamp !== undefined) {
+    setAppState(db, LIKED_STAMP_KEY, likedProbeStamp);
+    setAppState(db, LIKED_FULL_AT_KEY, String(now()));
+  }
   return result;
 }
 
