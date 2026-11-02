@@ -27,10 +27,42 @@ class Socket {
     if (!this.ws) this.open();
     return () => { this.listeners.delete(fn); };
   }
+  private emit(ev: ServerEvent) {
+    for (const f of this.listeners) f(ev);
+  }
+
+  /** Last full queue per zone and its fingerprint, to fill in slim player events. */
+  private queues = new Map<string, { rev: string; queue: PlayerState['queue'] }>();
+  private fetching = new Set<string>();
+  private restoreQueue(ev: Extract<ServerEvent, { type: 'player' }>) {
+    const zone = ev.state.zone;
+    if (Array.isArray(ev.state.queue)) {
+      if (ev.queueRev) this.queues.set(zone, { rev: ev.queueRev, queue: ev.state.queue });
+      this.emit(ev);
+      return;
+    }
+    const known = this.queues.get(zone);
+    if (known && known.rev === ev.queueRev) {
+      this.emit({ ...ev, state: { ...ev.state, queue: known.queue } });
+      return;
+    }
+    // a queue we never saw (joined mid-way, or missed an event): fetch the full state once
+    if (this.fetching.has(zone)) return;
+    this.fetching.add(zone);
+    void api.playerState(zone)
+      .then((state) => {
+        if (ev.queueRev) this.queues.set(zone, { rev: ev.queueRev, queue: state.queue });
+        this.emit({ type: 'player', state, queueRev: ev.queueRev });
+      })
+      .catch(() => undefined)
+      .finally(() => this.fetching.delete(zone));
+  }
+
   private open() {
     if (this.closed) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
+    // slim=1: player events leave out an unchanged queue (see restoreQueue)
+    const ws = new WebSocket(`${proto}://${location.host}/api/ws?slim=1`);
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;
@@ -41,11 +73,13 @@ class Socket {
     ws.onmessage = (m) => {
       try {
         const ev = JSON.parse(String(m.data)) as ServerEvent;
-        for (const f of this.listeners) f(ev);
+        if (ev.type === 'player') { this.restoreQueue(ev); return; }
+        this.emit(ev);
       } catch { /* ignore malformed */ }
     };
     ws.onclose = () => {
       this.connected = false;
+      this.queues.clear(); // events were missed: the next one for each zone must carry or fetch the queue
       this.ws = null;
       if (this.closed || !this.listeners.size) return;
       const delay = Math.min(10_000, 500 * 2 ** this.retry++);

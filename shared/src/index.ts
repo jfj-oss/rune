@@ -161,7 +161,9 @@ export type PlayerCommand =
 
 /** Websocket /api/ws messages server → client */
 export type ServerEvent =
-  | { type: 'player'; state: PlayerState }
+  /** `queueRev` fingerprints `state.queue`. Clients that connect with `/api/ws?slim=1` get the queue only
+   *  when it changed; otherwise `state.queue` is absent on the wire and the client reuses its copy. */
+  | { type: 'player'; state: PlayerState; queueRev?: string }
   | { type: 'scan'; progress: ScanProgress }
   | { type: 'library-changed' };
 

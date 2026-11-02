@@ -109,12 +109,25 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   ensureRadioSchema(db);
 
   // ---------- live events
-  const clients = new Set<{ send: (s: string) => void }>();
+  const clients = new Set<{ send: (s: string) => void; slim?: boolean }>();
+  /** Per zone: the queue fingerprint last broadcast (slim clients then get position updates without it). */
+  const sentQueueRev = new Map<string, string>();
   const broadcast = (ev: ServerEvent) => {
-    const s = JSON.stringify(ev);
+    let full: string;
+    let slim: string | null = null;
+    if (ev.type === 'player') {
+      // a Spotify zone emits every second while playing; its queue (10–400 KB) rarely changes
+      const queueRev = fingerprint(JSON.stringify(ev.state.queue));
+      full = JSON.stringify({ ...ev, queueRev });
+      if (sentQueueRev.get(ev.state.zone) === queueRev) {
+        const { queue: _queue, ...rest } = ev.state;
+        slim = JSON.stringify({ type: 'player', state: rest, queueRev });
+      }
+      sentQueueRev.set(ev.state.zone, queueRev);
+    } else full = JSON.stringify(ev);
     for (const c of clients) {
       try {
-        c.send(s);
+        c.send(c.slim && slim ? slim : full);
       } catch {
         /* dropped */
       }
@@ -516,10 +529,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- routes
   await app.register(
     async (r) => {
-      r.get('/ws', { websocket: true }, (socket) => {
-        clients.add(socket);
+      r.get<{ Querystring: { slim?: string } }>('/ws', { websocket: true }, (socket, req) => {
+        const client = socket as typeof socket & { slim?: boolean };
+        client.slim = req.query.slim === '1';
+        clients.add(client);
         socket.on('close', () => clients.delete(socket));
-        if (pc) socket.send(JSON.stringify({ type: 'player', state: sanitize(pc.state()) } satisfies ServerEvent));
+        if (pc) {
+          const state = sanitize(pc.state());
+          socket.send(JSON.stringify({ type: 'player', state, queueRev: fingerprint(JSON.stringify(state.queue)) } satisfies ServerEvent));
+        }
         socket.send(JSON.stringify({ type: 'scan', progress: last } satisfies ServerEvent));
       });
 
@@ -1026,4 +1044,14 @@ function thumbnail(cfg: Config, albumId: string, src: string, size: number): Pro
     thumbJobs.set(out, job);
   }
   return job;
+}
+
+/** Short FNV-1a fingerprint of a string (queue revisions on the live socket). */
+function fingerprint(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(36)}.${text.length.toString(36)}`;
 }
