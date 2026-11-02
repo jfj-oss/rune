@@ -423,9 +423,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- web UI (built) with SPA fallback
   const dist = opts.webDist ?? new URL('../../../web/dist', import.meta.url).pathname;
   if (existsSync(join(dist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: dist, wildcard: false });
+    await app.register(fastifyStatic, { root: dist, wildcard: true, index: ["index.html"] });
     app.setNotFoundHandler((req, reply) => {
-      if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not found' });
+      if (req.url.startsWith('/api/') || req.url.startsWith('/assets/')) return reply.code(404).send({ error: 'not found' });
       return reply.sendFile('index.html');
     });
   }
