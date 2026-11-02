@@ -260,10 +260,9 @@ export async function syncPlaylists(
   const [playlists, liked] = await Promise.all([source.allPlaylists(), source.allSavedTracks()]);
 
   const previous = new Map<string, { snapshot_id: string | null }>();
-  for (const row of db.prepare('SELECT id, snapshot_id FROM playlists').all() as {
-    id: string;
-    snapshot_id: string | null;
-  }[]) {
+  for (const row of db
+    .prepare("SELECT id, snapshot_id FROM playlists WHERE source = 'spotify'")
+    .all() as { id: string; snapshot_id: string | null }[]) {
     previous.set(row.id, row);
   }
 
@@ -385,7 +384,11 @@ export async function syncPlaylists(
     });
 
     // ---- Playlists that disappeared from Spotify ----
-    for (const row of db.prepare('SELECT id FROM playlists').all() as { id: string }[]) {
+    // Only synced Spotify rows participate: rune-owned playlists (source 'local',
+    // ids 'pl:rune:…') live in the same table and must survive a sync.
+    for (const row of db
+      .prepare("SELECT id FROM playlists WHERE source = 'spotify'")
+      .all() as { id: string }[]) {
       if (keep.has(row.id)) continue;
       db.prepare('DELETE FROM playlists WHERE id = ?').run(row.id); // entries cascade
       result.removed++;
