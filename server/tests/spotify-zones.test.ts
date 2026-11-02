@@ -315,3 +315,13 @@ describe('sharedPlaybackReads', () => {
     expect(api.currentPlaybackCalls).toBe(3);
   });
 });
+
+describe('placeholder queue entries', () => {
+  it('fills a blank started entry with what /me/player says about the playing track', () => {
+    const placeholder = { queueId: 'spq:0:sp:t1', track: { id: 'sp:t1', albumId: 'sp:unknown', source: 'spotify' as const, title: '', artists: [], disc: 1, number: 1, durationMs: 0 }, album: { id: 'sp:unknown', title: '' } };
+    const state = mapPlaybackState('spotify:dev1', playbackState(sampleTrack('t1', 1, 'Come Together')), undefined, [placeholder]);
+    expect(state.queue[0]?.track.title).toBe('Come Together');
+    expect(state.queue[0]?.album.title).toBe('Abbey Road');
+    expect(state.index).toBe(0);
+  });
+});

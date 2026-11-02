@@ -123,6 +123,21 @@ describe('SpotifyApi transport', () => {
     expect(calls.map((c) => c.url.searchParams.get('offset'))).toEqual(['0', '2']);
   });
 
+  it('looks tracks up one by one after Spotify refuses the batch endpoint', async () => {
+    const { fetch, calls } = fakeFetch((url) => {
+      if (url.pathname === '/v1/tracks') return jsonResponse(403, { error: { status: 403, message: 'Forbidden' } });
+      const m = /^\/v1\/tracks\/(.+)$/.exec(url.pathname);
+      if (m) return jsonResponse(200, { id: m[1], name: `T ${m[1]}` });
+      return jsonResponse(404, {});
+    });
+    const api = new SpotifyApi({ fetch, baseUrl: BASE, getToken: async () => 'tok' });
+    const got = await api.tracks(['a', 'b', 'c'], { maxSingles: 2 });
+    expect(got.map((t) => t.id)).toEqual(['a', 'b']);
+    // the refusal is remembered: no second batch attempt
+    await api.tracks(['d']);
+    expect(calls.filter((c) => c.url.pathname === '/v1/tracks')).toHaveLength(1);
+  });
+
   it('pages artist albums with include_groups', async () => {
     const { fetch, calls } = fakeFetch((url) => {
       if (url.pathname === '/v1/artists/spbeatles/albums') {

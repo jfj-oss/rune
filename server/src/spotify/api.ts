@@ -401,18 +401,37 @@ export class SpotifyApi {
     );
   }
 
-  tracks(ids: string[]): Promise<SpotifyTrack[]> {
+  /**
+   * Several tracks by id. Spotify refuses the batch endpoint (`/tracks?ids=`, 403) for
+   * development-mode apps since 2026, so after a 403 this looks tracks up one by one,
+   * at most `maxSingles` of them (the rest are simply left out).
+   */
+  async tracks(ids: string[], opts: { maxSingles?: number } = {}): Promise<SpotifyTrack[]> {
     const out: SpotifyTrack[] = [];
-    return (async () => {
-      for (const chunk of chunks(ids, 50)) {
-        const res = await this.request<{ tracks: (SpotifyTrack | null)[] }>(
-          this.query('/tracks', { ids: chunk.join(',') }),
-        );
-        for (const t of res.tracks) if (t) out.push(t);
+    if (!this.batchTracksRefused) {
+      try {
+        for (const chunk of chunks(ids, 50)) {
+          const res = await this.request<{ tracks: (SpotifyTrack | null)[] }>(this.query('/tracks', { ids: chunk.join(',') }));
+          for (const t of res.tracks) if (t) out.push(t);
+        }
+        return out;
+      } catch (err) {
+        if ((err as { status?: number }).status !== 403) throw err;
+        this.batchTracksRefused = true;
       }
-      return out;
-    })();
+    }
+    for (const id of ids.slice(0, opts.maxSingles ?? 20)) {
+      try {
+        out.push(await this.request<SpotifyTrack>(`/tracks/${encodeURIComponent(id)}`));
+      } catch (err) {
+        if ((err as { status?: number }).status === 429) throw err;
+        /* unknown / unavailable track: skip it */
+      }
+    }
+    return out;
   }
+  private batchTracksRefused = false;
+
 
   me(): Promise<SpotifyUser> {
     return this.request<SpotifyUser>('/me');

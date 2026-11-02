@@ -19,7 +19,7 @@ import {
 /** Subset of SpotifyApi used by zones (a fake is injected in tests). */
 export interface SpotifyZoneApi {
   devices(): Promise<SpotifyDevice[]>;
-  tracks(ids: string[]): Promise<SpotifyTrack[]>;
+  tracks(ids: string[], opts?: { maxSingles?: number }): Promise<SpotifyTrack[]>;
   currentPlayback(): Promise<SpotifyPlaybackState | null>;
   queue(): Promise<SpotifyQueue>;
   play(body: SpotifyPlayBody, deviceId?: string): Promise<void>;
@@ -102,10 +102,17 @@ export function mapPlaybackState(
   const items: QueueItem[] = [];
   const seen = new Set<string>();
 
+  // What Spotify itself says about the playing / upcoming tracks: complete data that can
+  // replace placeholders in the list we started (when the track lookup failed).
+  const real = new Map<string, SpotifyTrack>();
+  if (playback?.item?.id) real.set(spotifyTrackId(playback.item.id), playback.item);
+  for (const sp of spotifyQueue?.queue ?? []) if (sp?.id && !real.has(spotifyTrackId(sp.id))) real.set(spotifyTrackId(sp.id), sp);
+
   for (const item of startedQueue) {
     if (seen.has(item.track.id)) continue;
     seen.add(item.track.id);
-    items.push(item);
+    const full = !item.track.title ? real.get(item.track.id) : undefined;
+    items.push(full ? queueItemFromSpotify(full, items.length) : item);
   }
 
   const current = playback.item;
@@ -220,7 +227,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         await this.api.play(body, device);
         this.claim();
         if (cmd.paused) await this.api.pause(device).catch(() => undefined);
-        this.startedQueue = await this.fetchStartedQueue(spotifyIds);
+        this.startedQueue = await this.fetchStartedQueue(spotifyIds, cmd.startIndex ?? 0);
         return this.settle();
       }
       case 'enqueue': {
@@ -305,11 +312,15 @@ export class SpotifyConnectZone implements PlaybackZone {
     return id.slice(3);
   }
 
-  private async fetchStartedQueue(spotifyIds: string[]): Promise<QueueItem[]> {
+  private async fetchStartedQueue(spotifyIds: string[], startIndex = 0): Promise<QueueItem[]> {
     if (spotifyIds.length === 0) return [];
     let tracks: SpotifyTrack[] = [];
+    // The songs around the one being started first: when only one-by-one lookups are allowed,
+    // those are the ones that get looked up (Spotify's own "up next" fills in later ones).
+    const from = Math.max(0, Math.min(startIndex, spotifyIds.length - 1) - 2);
+    const ordered = [...spotifyIds.slice(from), ...spotifyIds.slice(0, from)];
     try {
-      tracks = await this.api.tracks(spotifyIds);
+      tracks = await this.api.tracks(ordered, { maxSingles: 8 });
     } catch {
       // Metadata is cosmetic for the queue; fall back to placeholders.
     }
@@ -536,7 +547,7 @@ export function sharedPlaybackReads(api: SpotifyZoneApi, now: () => number = Dat
   };
   return {
     devices: () => api.devices(),
-    tracks: (ids) => api.tracks(ids),
+    tracks: (ids, o) => api.tracks(ids, o),
     currentPlayback: () => read(playback, (s) => (playback = s), () => api.currentPlayback()),
     queue: () => read(queue, (s) => (queue = s), () => api.queue()),
     play: (body, deviceId) => write(() => api.play(body, deviceId)),
