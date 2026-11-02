@@ -133,7 +133,7 @@ describe('SpotifyApi transport', () => {
     const api = new SpotifyApi({ fetch, baseUrl: BASE, getToken: async () => 'tok' });
     await expect(api.allArtistAlbums('spbeatles')).resolves.toHaveLength(1);
     expect(calls[0]?.url.searchParams.get('include_groups')).toBe('album,single');
-    expect(calls[0]?.url.searchParams.get('limit')).toBe('50');
+    expect(calls[0]?.url.searchParams.get('limit')).toBe('10');
   });
 
   it('sends play bodies as JSON with the device query param', async () => {

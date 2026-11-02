@@ -1,4 +1,5 @@
 // Public entry point for the Spotify integration.
+import { SpotifyArtistPages, type SpotifyArtistPage } from './artist.js';
 import type { FastifyInstance } from 'fastify';
 import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
 import type { Db } from '../db/index.js';
@@ -52,6 +53,8 @@ export interface SpotifyModule {
   searchCatalog(q: string): Promise<SearchResults>;
   /** GET /api/albums/sp:<id> for an album not yet in the DB (in_library = 0). */
   fetchAlbum(albumId: string): Promise<Album | undefined>;
+  /** Spotify artist + discography for GET /api/artists/ar:sp:<id> (null for other ids). */
+  artistPage(artistId: string): Promise<SpotifyArtistPage> | null;
   /** Save/unsave an album on Spotify and flip albums.in_library. */
   setAlbumSaved(albumId: string, saved: boolean): Promise<Album | undefined>;
   listPlaylists(): PlaylistSummary[];
@@ -70,6 +73,7 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
   const zones = createSpotifyZones(api, opts);
   const catalog = new SpotifyCatalog(api, { ttlMs: opts.catalogTtlMs, now: opts.now });
   const now = opts.now ?? Date.now;
+  const artistPages = new SpotifyArtistPages(api, now);
 
   return {
     auth,
@@ -92,6 +96,7 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     },
     searchCatalog: (q) => catalog.search(q),
     fetchAlbum: (albumId) => fetchSpotifyAlbum(api, db, albumId, { now }),
+    artistPage: (artistId) => artistPages.get(artistId),
     setAlbumSaved: async (albumId, saved) => {
       if (saved && !getAlbum(db, albumId)) {
         await fetchSpotifyAlbum(api, db, albumId, { now });

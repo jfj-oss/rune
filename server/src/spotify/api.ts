@@ -9,6 +9,8 @@ export interface SpotifyImage {
   width?: number | null;
 }
 
+const ARTIST_ALBUMS_PAGE = 10;
+
 export interface SpotifyArtist {
   id: string;
   name: string;
@@ -269,7 +271,8 @@ export class SpotifyApi {
   albumTracks(id: string, opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyTrack>> {
     return this.request<SpotifyPaging<SpotifyTrack>>(
       this.query(`/albums/${encodeURIComponent(id)}/tracks`, {
-        limit: clamp(opts.limit ?? 50, 1, 50),
+        // Spotify caps this endpoint at 10 per page for development-mode apps (400 "Invalid limit" above).
+        limit: clamp(opts.limit ?? ARTIST_ALBUMS_PAGE, 1, ARTIST_ALBUMS_PAGE),
         offset: opts.offset ?? 0,
       }),
     );
@@ -287,14 +290,21 @@ export class SpotifyApi {
     return this.request<SpotifyPaging<SpotifyAlbum>>(
       this.query(`/artists/${encodeURIComponent(id)}/albums`, {
         include_groups: opts.includeGroups ?? 'album,single',
-        limit: clamp(opts.limit ?? 50, 1, 50),
+        // Spotify caps this endpoint at 10 per page for development-mode apps (400 "Invalid limit" above).
+        limit: clamp(opts.limit ?? ARTIST_ALBUMS_PAGE, 1, ARTIST_ALBUMS_PAGE),
         offset: opts.offset ?? 0,
       }),
     );
   }
 
-  allArtistAlbums(id: string, includeGroups = 'album,single'): Promise<SpotifyAlbum[]> {
-    return this.pagedAll<SpotifyAlbum>(`/artists/${encodeURIComponent(id)}/albums`, { include_groups: includeGroups });
+  async allArtistAlbums(id: string, includeGroups = 'album,single', maxPages = 5): Promise<SpotifyAlbum[]> {
+    const out: SpotifyAlbum[] = [];
+    for (let page = 0; page < maxPages; page++) {
+      const res = await this.artistAlbums(id, { includeGroups, offset: out.length });
+      out.push(...res.items);
+      if (!res.next || res.items.length === 0) break;
+    }
+    return out;
   }
 
   /** All saved albums, following pagination. */
@@ -354,7 +364,8 @@ export class SpotifyApi {
   async playlistTracks(id: string, opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylistTrack>> {
     const page = await this.request<SpotifyPaging<SpotifyPlaylistTrack>>(
       this.query(`/playlists/${encodeURIComponent(id)}/items`, {
-        limit: clamp(opts.limit ?? 50, 1, 50),
+        // Spotify caps this endpoint at 10 per page for development-mode apps (400 "Invalid limit" above).
+        limit: clamp(opts.limit ?? ARTIST_ALBUMS_PAGE, 1, ARTIST_ALBUMS_PAGE),
         offset: opts.offset ?? 0,
       }),
     );

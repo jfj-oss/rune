@@ -566,6 +566,27 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
+        // Spotify artists (search results, playlist artists): add their Spotify discography.
+        const remote = spotify?.artistPage(req.params.id);
+        if (remote) {
+          try {
+            if ((await spotify!.auth.status()).connected) {
+              const sp = await remote;
+              const have = new Set([...(a?.albums ?? []), ...(a?.appearsOn ?? [])].map((x) => x.id));
+              return {
+                id: req.params.id,
+                name: a?.name ?? sp.name,
+                ...(a?.imageUrl ?? sp.imageUrl ? { imageUrl: a?.imageUrl ?? sp.imageUrl } : {}),
+                albums: [...(a?.albums ?? []), ...sp.albums.filter((x) => !have.has(x.id))],
+                appearsOn: a?.appearsOn ?? [],
+                similar: a?.similar ?? [],
+                ...(a?.musicbrainzArtistId ? { musicbrainzArtistId: a.musicbrainzArtistId } : {}),
+              };
+            }
+          } catch (err) {
+            app.log.warn({ err, artistId: req.params.id }, 'spotify artist fetch failed');
+          }
+        }
         return a ?? reply.code(404).send({ error: 'not found' });
       });
       r.get<{ Querystring: { q?: string | string[] } }>('/artists', async (req) =>
