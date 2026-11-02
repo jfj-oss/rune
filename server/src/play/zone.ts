@@ -10,6 +10,8 @@ import type { PlayerCommand, PlayerState, QueueItem, Track } from '@liner/shared
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
 import type { PlaybackZone } from '../modules.js';
+import { markStationPlayed, resolveRadioStreamUrlForTrack } from '../iradio/playback.js';
+import { nowPlayingFromMetadata } from '../iradio/nowplaying.js';
 import { MpvIpc, type MpvArg, type MpvMessage } from './mpv-ipc.js';
 import {
   createQueue,
@@ -56,6 +58,9 @@ const OBSERVED_PROPERTIES: [number, string][] = [
   [5, 'eof-reached'],
   [6, 'audio-params'],
   [7, 'audio-out-params'],
+  // Live radio: ICY headers and the stream title mpv derives from them.
+  [8, 'metadata'],
+  [9, 'media-title'],
 ];
 
 const POSITION_EMIT_INTERVAL_MS = 1_000;
@@ -99,6 +104,8 @@ class PcZoneImpl implements PcZone {
     eofReached?: boolean;
     audioParams?: MpvParams;
     audioOutParams?: MpvParams;
+    metadata?: Record<string, unknown>;
+    mediaTitle?: string;
   } = {};
 
   /** Serializes commands and window maintenance so races cannot interleave. */
@@ -123,6 +130,7 @@ class PcZoneImpl implements PcZone {
 
   state(): PlayerState {
     const item = currentItem(this.q);
+    const nowPlaying = this.buildNowPlaying(item?.track);
     return {
       zone: this.zone,
       status: this.status,
@@ -133,6 +141,7 @@ class PcZoneImpl implements PcZone {
       shuffle: this.q.shuffle,
       repeat: this.q.repeat,
       signalPath: this.buildSignalPath(item?.track),
+      ...(nowPlaying ? { nowPlaying } : {}),
       updatedAt: Date.now(),
     };
   }
@@ -368,6 +377,19 @@ class PcZoneImpl implements PcZone {
         this.emitChange();
         break;
       }
+      case 'metadata': {
+        this.props.metadata = isStringRecord(msg.data) ? msg.data : undefined;
+        this.emitChange();
+        break;
+      }
+      case 'media-title': {
+        const title = typeof msg.data === 'string' ? msg.data : undefined;
+        if (title !== this.props.mediaTitle) {
+          this.props.mediaTitle = title;
+          this.emitChange();
+        }
+        break;
+      }
       default:
         break;
     }
@@ -399,9 +421,18 @@ class PcZoneImpl implements PcZone {
     if (queueIndex < 0) return;
 
     const changed = pos !== this.currentMpvPos || queueIndex !== this.q.index;
+    const previousIndex = this.q.index;
     this.currentMpvPos = pos;
     if (queueIndex !== this.q.index) {
       this.q = queueJump(this.q, queueIndex);
+    }
+    if (changed && queueIndex !== previousIndex) {
+      // mpv advanced from a local track into a preloaded live radio entry;
+      // that transition is a real play too.
+      const playing = currentItem(this.q);
+      if (playing && isRadioTrack(playing.track)) {
+        void markStationPlayed(this.db, this.cfg, playing.track.id).catch(() => undefined);
+      }
     }
     if (changed) {
       // time-pos for the new file arrives right after this; don't report stale
@@ -459,7 +490,9 @@ class PcZoneImpl implements PcZone {
     if (!item) return 0;
     const offsetMs = item.track.cue?.startMs ?? 0;
     const durationMs = item.track.durationMs;
-    return Math.min(durationMs, Math.max(0, Math.round(timePosSec * 1_000 - offsetMs)));
+    const position = Math.max(0, Math.round(timePosSec * 1_000 - offsetMs));
+    // Live radio has duration 0 and keeps counting up; don't clamp it to zero.
+    return durationMs > 0 ? Math.min(durationMs, position) : position;
   }
 
   // ------------------------------------------------------------- queue -> mpv
@@ -471,6 +504,7 @@ class PcZoneImpl implements PcZone {
    * mpv can ignore while the file is still being opened.
    */
   private fileOptions(track: Track, startMs = 0): string | undefined {
+    if (isRadioTrack(track)) return undefined; // a live stream has no start/end
     const parts: string[] = [];
     if (track.cue) {
       const absoluteStart = (track.cue.startMs + Math.max(0, startMs)) / 1_000;
@@ -489,8 +523,16 @@ class PcZoneImpl implements PcZone {
   ): Promise<void> {
     const ipc = this.ipc;
     if (!ipc) throw new Error('mpv is not running');
-    const path = trackPath(item.track);
-    if (!path) throw new Error(`track ${item.track.id} has no local file`);
+    let path = trackPath(item.track);
+    if (isRadioTrack(item.track)) {
+      // The queued URL may be a .pls/.m3u wrapper; resolve it before handing it
+      // to mpv (mpv cannot play every playlist flavour remote servers use).
+      const resolved = await resolveRadioStreamUrlForTrack(this.db, this.cfg, item.track.id).catch(
+        () => undefined,
+      );
+      if (resolved) path = resolved;
+    }
+    if (!path) throw new Error(`track ${item.track.id} has no local file or stream URL`);
     const args: MpvArg[] = ['loadfile', path, flag];
     const options = this.fileOptions(item.track, startMs);
     if (options) args.push(-1, options);
@@ -525,8 +567,14 @@ class PcZoneImpl implements PcZone {
       // be ignored while mpv is still opening the file).
       await this.appendEntry(item, 'replace', startPosition);
       this.currentMpvPos = 0;
-      for (const upcoming of upcomingEntries(this.q, 2)) {
-        await this.appendEntry(upcoming, 'append-play');
+      if (isRadioTrack(item.track)) {
+        // A live stream never ends; there is nothing to preload gaplessly.
+        // Count the play only once mpv accepted the stream.
+        void markStationPlayed(this.db, this.cfg, item.track.id).catch(() => undefined);
+      } else {
+        for (const upcoming of upcomingEntries(this.q, 2)) {
+          await this.appendEntry(upcoming, 'append-play');
+        }
       }
       if (opts.paused) {
         this.props.pause = true;
@@ -550,6 +598,9 @@ class PcZoneImpl implements PcZone {
     const ipc = this.ipc;
     if (!ipc || this.closed || this.rebuilding) return;
     if (this.currentMpvPos < 0 || this.q.index < 0) return;
+    // The mpv playlist holds exactly the playing live stream for radio.
+    const current = currentItem(this.q);
+    if (current && isRadioTrack(current.track)) return;
 
     const desired = upcomingEntries(this.q, 2).map((e) => e.queueId);
     const existing = this.window.slice(this.currentMpvPos + 1).map((e) => e.queueId);
@@ -730,6 +781,8 @@ class PcZoneImpl implements PcZone {
 
   private async cmdSeek(positionMs: number): Promise<void> {
     const item = currentItem(this.q);
+    // Live radio (duration 0) is not seekable; drop the command silently.
+    if (item && isRadioTrack(item.track)) return;
     const duration = item?.track.durationMs ?? 0;
     const pos = Math.min(duration, Math.max(0, Math.round(positionMs)));
     this.positionMs = pos;
@@ -863,6 +916,10 @@ class PcZoneImpl implements PcZone {
     if (out && typeof out.samplerate === 'number') {
       parts.push(`${this.deviceLabel()} ${rateLabel(out.samplerate)}`);
     }
+    if (isRadioTrack(track)) {
+      parts.push('live stream');
+      return parts;
+    }
     const active = this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
     if (active && out && input) {
       if (
@@ -882,6 +939,16 @@ class PcZoneImpl implements PcZone {
     return parts;
   }
 
+  private buildNowPlaying(track?: Track): PlayerState['nowPlaying'] | undefined {
+    if (!track || !isRadioTrack(track)) return undefined;
+    return nowPlayingFromMetadata(
+      this.props.metadata,
+      this.props.mediaTitle,
+      track.title,
+      trackPath(track),
+    );
+  }
+
   private deviceLabel(): string {
     const device = this.cfg.audioDevice;
     if (device === 'pipewire') return 'PipeWire';
@@ -890,9 +957,28 @@ class PcZoneImpl implements PcZone {
   }
 }
 
-/** Upcoming QueueItems from pure queue state (wraps / repeats per repeat mode). */
+/**
+ * Upcoming QueueItems from pure queue state (wraps / repeats per repeat mode).
+ * A live radio entry ends the window: it is appended so playback can advance
+ * into it, but nothing after it is preloaded (no gapless pairing around a live
+ * stream, and no extra station connections).
+ */
 function upcomingEntries(q: QueueState, count: number): QueueItem[] {
-  return queueUpcoming(q, count).map((entry) => entry.item);
+  const out: QueueItem[] = [];
+  for (const entry of queueUpcoming(q, count)) {
+    out.push(entry.item);
+    if (isRadioTrack(entry.item.track)) break;
+  }
+  return out;
+}
+
+/** Radio tracks are the only ones whose runtime source is 'radio'. */
+export function isRadioTrack(track: Track): boolean {
+  return (track as { source?: unknown }).source === 'radio';
+}
+
+function isStringRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function trimSeconds(n: number): string {

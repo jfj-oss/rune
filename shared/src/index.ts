@@ -139,6 +139,8 @@ export interface PlayerState {
   repeat: 'off' | 'all' | 'one';
   /** signal path for the PC zone, e.g. ["FLAC 24/96", "mpv", "PipeWire 96 kHz", "bit-perfect"] */
   signalPath?: string[];
+  /** ICY "now playing" metadata for live radio (PC zone; absent for normal tracks). */
+  nowPlaying?: { title?: string; artist?: string; station?: string };
   updatedAt: number;
 }
 
