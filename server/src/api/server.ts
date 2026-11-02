@@ -164,7 +164,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           broadcast({ type: 'scan', progress: last });
           if (done % 10 === 0 || done === total) broadcast({ type: 'library-changed' });
         });
-        setTimeout(() => void prefetchDetails(), 1000);
         if (spotify && (await spotify.auth.status()).connected) {
           await runSpotifySync();
         }
@@ -175,6 +174,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         broadcast({ type: 'scan', progress: last });
         broadcast({ type: 'library-changed' });
         scanning = null;
+        // after scanning is cleared — prefetchDetails stops while a scan runs
+        setTimeout(() => void prefetchDetails(), 1000);
       }
     })();
     return scanning;
