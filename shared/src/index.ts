@@ -171,3 +171,6 @@ export interface ScanProgress {
   currentPath?: string;
   errors: number;
 }
+
+// ---------- Listening history ----------
+export * from './history.js';
