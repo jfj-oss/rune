@@ -1341,7 +1341,8 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       }
 
       // ---- 4. group and build album models
-      const groups = groupAlbums(records);
+      // Unreadable files (damaged / zeroed) stay in the cache but never become tracks.
+      const groups = groupAlbums(records.filter((r) => !r.meta.error));
       const models: AlbumModel[] = [];
       let cueAlbums = 0;
       const existingByAlbum = new Map<string, ExistingAlbum | undefined>();
