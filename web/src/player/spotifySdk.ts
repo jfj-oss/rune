@@ -59,6 +59,9 @@ export type SdkPhase = 'off' | 'loading' | 'ready' | 'error';
 export interface SdkStatus { phase: SdkPhase; deviceId: string | null; error?: string }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** After load(): how long SDK positions are checked against where the new track can be. */
+const STALE_WINDOW_MS = 8000;
+const STALE_SLACK_MS = 3000;
 
 /** Spotify playback inside this browser tab, driven through the Web Playback SDK. */
 export class SpotifySdkEngine implements Engine {
@@ -79,6 +82,9 @@ export class SpotifySdkEngine implements Engine {
   private poll: ReturnType<typeof setInterval> | null = null;
   /** After load(), ignore "paused" events until playback really started (they describe an earlier play of the same track). */
   private awaitUntil = 0;
+  private loadAt = 0;
+  private loadStartMs = 0;
+  private stateLogs = 0;
 
   constructor(readonly deviceName: string) {}
 
@@ -164,6 +170,17 @@ export class SpotifySdkEngine implements Engine {
     const t = s.track_window.current_track;
     const want = spotifyIdOf(cur.track.id);
     if (t.id !== want && t.linked_from?.id !== want) return; // an older track's event: ignore
+    // Right after a track change the SDK can still report the PREVIOUS song's position under the
+    // new song: ignore positions far from where the new song can be, or the bar jumps back.
+    const sinceLoad = Date.now() - this.loadAt;
+    if (sinceLoad < STALE_WINDOW_MS) {
+      const expected = this.loadStartMs + (s.paused ? 0 : sinceLoad);
+      if (this.stateLogs < 4) {
+        this.stateLogs++;
+        clientLog('info', 'spotify sdk: state after load', { track: want, position: s.position, paused: s.paused, expected, sinceLoad });
+      }
+      if (Math.abs(s.position - expected) > STALE_SLACK_MS + sinceLoad) return;
+    }
     if (Date.now() < this.awaitUntil) {
       if (s.paused) return;
       this.awaitUntil = 0;
@@ -195,6 +212,9 @@ export class SpotifySdkEngine implements Engine {
     this.snap = null;
     this.pos = { ms: startMs, at: Date.now(), playing: false };
     this.awaitUntil = autoplay ? Date.now() + 6000 : 0;
+    this.loadAt = Date.now();
+    this.loadStartMs = startMs;
+    this.stateLogs = 0;
     // Safari/Chrome autoplay rules: this runs inside the user's click, before any await.
     void this.player?.activateElement?.().catch(() => undefined);
     void this.start(track, startMs, autoplay, seq);
@@ -261,6 +281,7 @@ export class SpotifySdkEngine implements Engine {
     void this.player?.pause().catch(() => undefined);
   }
   seek(ms: number) {
+    this.loadAt = 0; // a deliberate jump: positions far from the load point are real now
     this.pos = { ms, at: Date.now(), playing: this.pos.playing };
     if (this.snap) this.snap = { ...this.snap, positionMs: ms, at: Date.now() };
     void this.player?.seek(Math.max(0, Math.round(ms))).catch(() => undefined);
