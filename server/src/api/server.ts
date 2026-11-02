@@ -14,6 +14,7 @@ import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes, type PcZone } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
+import { spotifyAlbumIsFull } from '../spotify/library.js';
 import { createLinking, registerLinkRoutes, ensureLinkSchema } from '../spotify/linking.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
@@ -449,10 +450,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         let album = getAlbum(db, req.params.id);
         // Spotify albums referenced by search/playlists may not be stored yet:
         // fetch on demand (in_library = 0) and return the stored row.
-        if (!album && spotify && req.params.id.startsWith('sp:')) {
+        // Albums known only through a playlist / liked song hold just those tracks: fetch the
+        // full tracklist once (one Spotify call per album, ever).
+        if (spotify && req.params.id.startsWith('sp:') && (!album || !spotifyAlbumIsFull(db, req.params.id))) {
           try {
             if ((await spotify.auth.status()).connected) {
-              album = await spotify.fetchAlbum(req.params.id);
+              album = (await spotify.fetchAlbum(req.params.id)) ?? album;
             }
           } catch (err) {
             app.log.warn({ err, albumId: req.params.id }, 'on-demand spotify album fetch failed');

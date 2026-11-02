@@ -12,6 +12,7 @@ import { ensureSpotifySchema } from '../src/spotify/auth.js';
 import { SpotifyCatalog, mergeSearchResults } from '../src/spotify/catalog.js';
 import {
   fetchSpotifyAlbum,
+  spotifyAlbumIsFull,
   getPlaylist,
   listPlaylists,
   setSpotifyAlbumSaved,
@@ -457,6 +458,8 @@ describe('on-demand album fetch + save/unsave', () => {
     expect(inLibrary(db, 'sp:fetchme')).toBe(0);
     expect(listAlbums(db, {}).total).toBe(0);
     expect(listAlbums(db, { inLibrary: false }).total).toBe(1);
+    expect(spotifyAlbumIsFull(db, 'sp:fetchme')).toBe(true);
+    expect(spotifyAlbumIsFull(db, 'sp:other')).toBe(false);
 
     // Non-Spotify ids are not fetched.
     await expect(fetchSpotifyAlbum(api, db, 'la:local')).resolves.toBeUndefined();

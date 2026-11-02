@@ -525,6 +525,7 @@ export async function fetchSpotifyAlbum(
   ensureSpotifySchema(db);
   ensureSpotifyLibrarySchema(db);
   const now = opts.now ?? Date.now;
+  ensureFullTable(db);
   const spId = spotifyIdOf(albumId);
   const sp = await api.album(spId);
 
@@ -543,7 +544,18 @@ export async function fetchSpotifyAlbum(
     indexArtists(ctx);
   });
   tx();
+  db.prepare('INSERT OR REPLACE INTO spotify_album_full (album_id, fetched_at) VALUES (?, ?)').run(spotifyAlbumId(sp.id), now());
   return getAlbum(db, spotifyAlbumId(sp.id));
+}
+
+/** Albums first seen through a playlist only hold the tracks that playlist had: has the full tracklist been fetched? */
+export function spotifyAlbumIsFull(db: Db, albumId: string): boolean {
+  ensureFullTable(db);
+  return !!db.prepare('SELECT 1 FROM spotify_album_full WHERE album_id = ?').get(albumId);
+}
+
+function ensureFullTable(db: Db): void {
+  db.exec('CREATE TABLE IF NOT EXISTS spotify_album_full (album_id TEXT PRIMARY KEY, fetched_at INTEGER NOT NULL)');
 }
 
 export interface AlbumSaveApi {
