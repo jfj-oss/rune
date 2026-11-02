@@ -4,7 +4,7 @@ import { tileGradient } from '../lib/color';
 import { initials } from '../lib/format';
 
 interface Props {
-  album: { id: string; title?: string };
+  album: { id: string; title?: string; coverUrl?: string };
   size?: 200 | 600 | 'full';
   sizes?: string;
   className?: string;
@@ -16,7 +16,8 @@ interface Props {
 export function Cover({ album, size = 200, sizes, className = '', eager, alt = '' }: Props) {
   const [state, setState] = useState<'loading' | 'ok' | 'err'>('loading');
   const src = coverSrc(album, size);
-  const srcSet = size === 200 ? `${coverSrc(album, 200)} 200w, ${coverSrc(album, 600)} 600w` : undefined;
+  const external = src.startsWith('http');
+  const srcSet = size === 200 && !external ? `${coverSrc(album, 200)} 200w, ${coverSrc(album, 600)} 600w` : undefined;
   return (
     <div className={`cover ${className}`} style={{ background: tileGradient(album.id) }} data-state={state}>
       <span className="cover__ini" aria-hidden>{initials(album.title ?? '?')}</span>

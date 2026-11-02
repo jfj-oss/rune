@@ -130,7 +130,9 @@ export const api = {
   },
 };
 
-export function coverSrc(a: { id: string; title?: string }, size: 200 | 600 | 'full' = 200): string {
+export function coverSrc(a: { id: string; title?: string; coverUrl?: string }, size: 200 | 600 | 'full' = 200): string {
   if (isMock) return mockCover(a.id, a.title ?? '');
+  // Spotify catalogue albums not stored in rune (artist pages, search): the image lives on Spotify's CDN.
+  if (a.coverUrl && /^https?:\/\//.test(a.coverUrl)) return a.coverUrl;
   return `/api/cover/${encodeURIComponent(a.id)}?size=${size}`;
 }
