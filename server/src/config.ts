@@ -18,6 +18,10 @@ export interface Config {
   publicUrl?: string;
   /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
   spotifyClientId?: string;
+  /** Name of the Spotify Connect device that represents this PC (default 'HORSE',
+   *  the Spotify desktop app on the same machine). GET /api/zones matches it so the
+   *  UI can route Spotify tracks to the PC's Spotify app. */
+  pcSpotifyDevice?: string;
 }
 
 export function loadConfig(): Config {
@@ -30,6 +34,7 @@ export function loadConfig(): Config {
     audioDevice: 'pipewire',
     userAgent: 'Liner/0.1 ( personal music player, self-hosted )',
     normalize: 'album',
+    pcSpotifyDevice: 'HORSE',
     ...user,
   };
   // Overrides for running a second, silent instance (tests / smoke checks).
