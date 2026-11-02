@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
-import { ArrowDownWideNarrow, Check, Copy, Disc3, Download, GripVertical, HardDrive, ListEnd, ListOrdered, ListPlus, ListStart, Lock, MoreHorizontal, Play, Plus, Radio, Shuffle, Sparkles, Trash2, User, X } from 'lucide-react';
+import { ArrowDownWideNarrow, Check, Copy, Download, GripVertical, HardDrive, ListEnd, ListOrdered, ListPlus, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
-import { AddToPlaylistItem } from '../components/AddToPlaylist';
 import { Cover } from '../components/Cover';
 import { Dialog } from '../components/Dialog';
 import { Eq } from '../components/Eq';
@@ -13,12 +12,12 @@ import { MobileBack } from '../components/MobileBack';
 import { MenuItem, Popover } from '../components/Popover';
 import { PlaylistCover } from '../components/PlaylistCover';
 import { Empty } from '../components/Rows';
+import { TrackMenuItems, trackMenuHandler } from '../components/TrackMenu';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { usePlaylistActions } from '../hooks/usePlaylistEdit';
 import { isLiked, playlistItem, playlistItems, playlistUri, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, formatDuration, formatTotalLength, plural } from '../lib/format';
 import { hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, orderPlaylist, rowEditable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
-import { startRadio } from '../lib/radio';
 import { currentItem, usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
 
@@ -177,11 +176,9 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
   const root = useScrollRoot();
   const wrap = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
-  const nav = useNavigate();
   const actions = usePlaylistActions();
   const state = usePlayer((s) => s.state);
   const playItems = usePlayer((s) => s.playItems);
-  const enqueueItems = usePlayer((s) => s.enqueueItems);
   const cur = currentItem(state);
   const ctx = playlistUri(d.id);
   const n = d.tracks.length;
@@ -323,6 +320,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
           const i = row.index;
           const t = d.tracks[i]!;
           const playing = cur?.track.id === t.id && state.queue[state.index]?.track.id === t.id;
+          const item = playlistItem(t);
           const go = () => void playItems(items, i, { context: ctx });
           const mine = rowEditable(d, t); // rune playlists: every row; Spotify playlists: only rune's local rows
           const overlay = isOverlayRow(d.id, t) && !isRunePlaylist(d.id);
@@ -347,6 +345,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
                 if (editable && mine && (selectMode || sel.size > 0 || e.shiftKey || e.metaKey || e.ctrlKey)) pick(i, e);
                 else go();
               }}
+              onContextMenu={trackMenuHandler(item)}
             >
  {editable && !mine && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
               {editable && mine && reorder && (
@@ -382,15 +381,11 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
                 trigger={({ toggle }) => <button className="btn-icon" aria-label={`More for ${t.title}`} onClick={toggle}><MoreHorizontal size={18} /></button>}
               >
                 {(close) => (
-                  <div role="menu" className="menu">
-                    <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([playlistItem(t)], true); }}>Play next</MenuItem>
-                    <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([playlistItem(t)]); }}>Add to queue</MenuItem>
-                    <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [playlistItem(t)] }} />
-                    {t.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('track', t.id); }}>Start radio</MenuItem>}
-                    <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
-                    {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
-                    {editable && mine && <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>Remove from playlist</MenuItem>}
-                  </div>
+                  <TrackMenuItems
+                    item={item}
+                    close={close}
+                    extra={editable && mine ? <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>Remove from playlist</MenuItem> : undefined}
+                  />
                 )}
               </Popover>
             </div>

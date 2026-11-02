@@ -1,18 +1,17 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, Disc3, ListEnd, ListStart, MoreHorizontal, Play, Radio, Search, User, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, MoreHorizontal, Play, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { browseApi } from '../browseApi';
 import { Cover } from '../components/Cover';
 import { Eq } from '../components/Eq';
-import { AddToPlaylistItem } from '../components/AddToPlaylist';
-import { MenuItem, Popover } from '../components/Popover';
+import { Popover } from '../components/Popover';
 import { Empty } from '../components/Rows';
+import { TrackMenuItems, trackMenuHandler } from '../components/TrackMenu';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
 import { encId, formatDuration, plural } from '../lib/format';
-import { startRadio } from '../lib/radio';
 import type { BrowseTrack, PlayItem, TrackSort } from '../lib/types';
 import { currentItem, usePlayer } from '../store/player';
 import { LibraryTabs } from './Albums';
@@ -178,13 +177,12 @@ function VirtualTracks({ items, total, desktop, onNeedMore }: { items: BrowseTra
 }
 
 function TrackRow({ t, playing, isPlaying, desktop, onPlay }: { t: BrowseTrack; playing: boolean; isPlaying: boolean; desktop: boolean; onPlay(): void }) {
-  const nav = useNavigate();
-  const enqueueItems = usePlayer((s) => s.enqueueItems);
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const item = toItem(t);
   const artists = t.artists.map((a, k) => <span key={a.id}>{k > 0 && ', '}<Link to={`/artist/${encId(a.id)}`} className="link" onClick={stop}>{a.name}</Link></span>);
   const albumLink = <Link to={`/album/${encId(t.album.id)}`} className="link" onClick={stop}>{t.album.title}</Link>;
   return (
-    <div className={`tk${playing ? ' is-playing' : ''}`} role="row" onClick={onPlay}>
+    <div className={`tk${playing ? ' is-playing' : ''}`} role="row" onClick={onPlay} onContextMenu={trackMenuHandler(item)}>
       <button className="tk__art" aria-label={`Play ${t.title}`} onClick={(e) => { stop(e); onPlay(); }}>
         <Cover album={{ id: t.album.id, title: t.album.title }} sizes="40px" />
         <span className="tk__ov">{playing ? <Eq playing={isPlaying} /> : <Play size={16} fill="currentColor" />}</span>
@@ -201,16 +199,7 @@ function TrackRow({ t, playing, isPlaying, desktop, onPlay }: { t: BrowseTrack; 
           placement="bottom-end"
           trigger={({ toggle }) => <button className="btn-icon" aria-label={`More for ${t.title}`} onClick={toggle}><MoreHorizontal size={18} /></button>}
         >
-          {(close) => (
-            <div role="menu" className="menu">
-              <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)], true); }}>Play next</MenuItem>
-              <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)]); }}>Add to queue</MenuItem>
-              <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [toItem(t)] }} />
-              {t.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('track', t.id); }}>Start radio</MenuItem>}
-              <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
-              {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
-            </div>
-          )}
+          {(close) => <TrackMenuItems item={item} close={close} />}
         </Popover>
       </span>
     </div>

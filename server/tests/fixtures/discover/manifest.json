@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-11-02T05:11:04.185Z",
+  "files": {
+    "lb-similar-artists.json": "https://labs.api.listenbrainz.org/similar-artists/json?artist_mbids=a74b1b7f-71a5-4011-9441-d0b5e4122711&algorithm=session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30",
+    "lb-similar-recordings.json": "https://labs.api.listenbrainz.org/similar-recordings/json?recording_mbids=1a67e215-a19e-40c9-9b12-732de134bf5f&algorithm=session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30",
+    "mb-isrc.json": "https://musicbrainz.org/ws/2/isrc/USUG11904206?fmt=json",
+    "mb-recording-search.json": "https://musicbrainz.org/ws/2/recording/?query=recording%3A%22Blinding+Lights%22+AND+artist%3A%22The+Weeknd%22&fmt=json&limit=5",
+    "mb-artist-search.json": "https://musicbrainz.org/ws/2/artist/?query=artist%3A%22Radiohead%22&fmt=json&limit=5"
+  }
+}

@@ -4,6 +4,7 @@ import { ScrollRootContext } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
 import { listenApi } from '../listenApi';
 import { isLiveTrack } from '../lib/listenTypes';
+import { useDiscoverUi } from '../store/discoverUi';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { MediaSessionBridge } from './MediaSession';
@@ -11,6 +12,8 @@ import { KeyboardShortcuts } from './Shortcuts';
 import { PlayOnSheet } from './PlayOnSheet';
 import { PlaylistDialogsHost } from './PlaylistDialogs';
 import { MobileTabs } from './MobileTabs';
+import { SongRadio } from './SongRadio';
+import { TrackContextMenu } from './TrackMenu';
 import { NowPlaying } from './player/NowPlaying';
 import { MiniPlayer } from './player/MiniPlayer';
 import { NowPlayingBar } from './player/NowPlayingBar';
@@ -46,6 +49,8 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setQueue(false);
     setNp(false);
+    useDiscoverUi.getState().closeTrackMenu();
+    useDiscoverUi.getState().closeRadio();
   }, [loc.pathname, setQueue, setNp]);
 
   // Warm the next track's waveform so it is ready the moment it starts.
@@ -80,6 +85,8 @@ export function Shell({ children }: { children: ReactNode }) {
       <KeyboardShortcuts />
       <PlayOnSheet />
       <PlaylistDialogsHost />
+      <TrackContextMenu />
+      <SongRadio />
       <Toast />
     </div>
   );

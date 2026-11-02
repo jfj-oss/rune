@@ -1,4 +1,4 @@
-import { AudioLines, ChartColumn, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Plus, Radio, Tags, Users } from 'lucide-react';
+import { AudioLines, ChartColumn, Compass, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Plus, Radio, Tags, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { usePlaylistUi } from '../store/playlistUi';
 import { useUi } from '../store/ui';
@@ -19,6 +19,7 @@ export function Sidebar() {
         <NavLink to="/people" className={item} title="People"><Users size={18} /><span>People</span></NavLink>
         <NavLink to="/tracks" className={item} title="Tracks"><AudioLines size={18} /><span>Tracks</span></NavLink>
         <NavLink to="/genres" className={item} title="Genres"><Tags size={18} /><span>Genres</span></NavLink>
+        <NavLink to="/discover" className={item} title="Discover"><Compass size={18} /><span>Discover</span></NavLink>
         <NavLink to="/radio" className={item} title="Radio"><Radio size={18} /><span>Radio</span></NavLink>
         <NavLink to="/stats" className={item} title="Stats"><ChartColumn size={18} /><span>Stats</span></NavLink>
       </div>

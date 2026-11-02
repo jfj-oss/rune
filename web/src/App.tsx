@@ -8,6 +8,7 @@ import Albums from './pages/Albums';
 import ArtistPage from './pages/Artist';
 import Artists from './pages/Artists';
 import Duplicates from './pages/Duplicates';
+import Discover from './pages/Discover';
 import Genres, { GenrePage } from './pages/Genres';
 import Home from './pages/Home';
 import People from './pages/People';
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="/genres" element={<Genres />} />
             <Route path="/genres/:genre" element={<GenrePage />} />
             <Route path="/radio" element={<RadioPage />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/playlists" element={<Playlists />} />
             <Route path="/playlist/:id" element={<PlaylistPage />} />
             <Route path="*" element={<Placeholder title="Not found" />} />

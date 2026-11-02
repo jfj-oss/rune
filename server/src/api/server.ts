@@ -13,6 +13,7 @@ import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes, type PcZone } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
+import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { normalizeName } from '../db/index.js';
 import { spotifyAlbumIsFull } from '../spotify/library.js';
@@ -153,6 +154,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // Linking shares the Spotify API (and its 429/Retry-After handling) with the
   // library sync; MusicBrainz goes through the shared client in src/match/mb.ts.
   const linking = spotify ? createLinking(db, cfg, { api: spotify.api }) : undefined;
+  // New songs + song radio: ListenBrainz similarity → Spotify catalogue, through
+  // a small persisted request budget shared by every discovery call.
+  const discover = createDiscover(db, cfg, spotify, {
+    onWarn: (msg, err) => app.log.warn({ err }, msg),
+  });
 
   // One Spotify sync at a time; scan/scheduler/login/manual all share it.
   // Persisted throttle: restarts must not resync (a full Liked Songs pass is ~100
@@ -616,6 +622,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       registerEditionsRoutes(r, editions);
       registerStatsRoutes(r, db);
       registerSearchRoutes(r, searchIndex);
+      registerDiscoverRoutes(r, discover);
       if (linking) registerLinkRoutes(r, linking);
 
       // Ops endpoint (task contract: GET /api/health). Everything is injected so

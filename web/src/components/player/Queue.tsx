@@ -1,4 +1,4 @@
-import { GripVertical, ListMusic, ListPlus, TriangleAlert, X } from 'lucide-react';
+import { GripVertical, ListMusic, ListPlus, MoreHorizontal, TriangleAlert, X } from 'lucide-react';
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { formatDuration, formatTotalLength, plural } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
@@ -11,6 +11,8 @@ import { useRadio } from '../../store/radio';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { Eq } from '../Eq';
+import { MenuItem, Popover } from '../Popover';
+import { TrackMenuItems, trackMenuHandler } from '../TrackMenu';
 
 const ROW = 60;
 
@@ -65,6 +67,7 @@ export function QueueList() {
             key={q.queueId}
             className={`qrow${current ? ' is-current' : ''}${drag?.id === q.queueId ? ' is-dragging' : ''}`}
             style={{ height: ROW, transform: shift ? `translateY(${shift}px)` : undefined, transition: drag && drag.id !== q.queueId ? 'transform 150ms ease' : undefined }}
+            onContextMenu={trackMenuHandler({ track: q.track, album: q.album })}
           >
             <button className="qrow__grip" aria-label="Drag to reorder" onPointerDown={(e) => onDown(e, q.queueId, i)} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={() => setDrag(null)}>
               <GripVertical size={16} />
@@ -84,6 +87,19 @@ export function QueueList() {
             <button className="qrow__x btn-icon" aria-label={`Remove ${q.track.title}`} onClick={() => void command({ type: 'remove', queueId: q.queueId })}>
               <X size={16} />
             </button>
+            <Popover
+              className="qrow__menu"
+              placement="bottom-end"
+              trigger={({ toggle }) => <button className="btn-icon" aria-label={`More for ${q.track.title}`} onClick={toggle}><MoreHorizontal size={18} /></button>}
+            >
+              {(close) => (
+                <TrackMenuItems
+                  item={{ track: q.track, album: q.album }}
+                  close={close}
+                  extra={<MenuItem icon={<X size={16} />} danger onClick={() => { close(); void command({ type: 'remove', queueId: q.queueId }); }}>Remove from queue</MenuItem>}
+                />
+              )}
+            </Popover>
           </li>
         );
       })}

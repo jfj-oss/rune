@@ -12,6 +12,7 @@ import './styles/ambient.css';
 import './styles/spotify.css';
 import './styles/playlists.css';
 import './styles/radio.css';
+import './styles/newsongs.css';
 import './styles/discover.css';
 
 installClientLog();
