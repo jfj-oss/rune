@@ -136,7 +136,7 @@ describe('waveAt', () => {
     expect(waveAt(-1).amt).toBe(0);
     expect(waveAt(0).amt).toBeCloseTo(0, 5);
     expect(waveAt(WAVE.rise * 0.5).dir).toBe(1);
-    expect(WAVE.length).toBeCloseTo(8.4, 5);
+    expect(WAVE.length).toBeCloseTo(12.4, 5);
     // the way out starts gently too: the first quarter grows less than the second
     const out = (q: number) => waveAt(q * WAVE.rise).amt;
     expect(out(0.25)).toBeLessThan(out(0.5) - out(0.25));
@@ -148,8 +148,23 @@ describe('waveAt', () => {
     const at = (q: number) => waveAt(WAVE.rise + WAVE.hold + q * WAVE.fall).amt;
     expect(1 - at(0.25)).toBeLessThan(at(0.25) - at(0.5));
     expect(waveAt(WAVE.rise + WAVE.hold + 0.1).dir).toBe(-1);
-    // and lands softly
-    expect(at(0.99)).toBeLessThan(0.002);
+    // it reaches rest still moving (the crash) ...
+    expect(at(0.95)).toBeGreaterThan(0.05);
+    // ... then bounces: dips below rest, comes back a little above it, and ends exactly at rest
+    const b0 = WAVE.rise + WAVE.hold + WAVE.fall;
+    const bounce = Array.from({ length: 400 }, (_, i) => waveAt(b0 + (i / 400) * WAVE.bounce).amt);
+    const low = Math.min(...bounce), lowAt = bounce.indexOf(low);
+    const high = Math.max(...bounce.slice(lowAt));
+    expect(low).toBeLessThan(-0.1);
+    expect(low).toBeGreaterThan(-0.25);
+    expect(high).toBeGreaterThan(0.02);
+    expect(high).toBeLessThan(-low);
+    // no kink where the crash turns into the bounce: same speed on both sides
+    const e = 1e-3;
+    const before = (waveAt(b0 - e).amt - waveAt(b0 - 2 * e).amt) / e;
+    const after = (waveAt(b0 + 2 * e).amt - waveAt(b0 + e).amt) / e;
+    expect(Math.abs(before - after)).toBeLessThan(0.02);
+    expect(Math.abs(waveAt(WAVE.length - 0.01).amt)).toBeLessThan(0.002);
     expect(waveAt(WAVE.length).amt).toBe(0);
   });
 

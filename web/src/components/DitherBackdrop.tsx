@@ -75,7 +75,7 @@ void main() {
   // new-song wave: the shapes already on screen swell outwards (lifting the field fills their faint edges
   // first) and draw back in. A gentle ripple rides the growing edge; its phase follows the swell itself
   // (out while growing, back while shrinking), so it never jumps or flickers.
-  if (u_wave > 0.0) {
+  if (u_wave != 0.0) { // below 0 (the bounce after the crash) the shapes shrink a little below rest
     // e = peak^amt: the covered area grows evenly with the swell
     float grown = pow(max(f, 0.0), pow(u_wexp, u_wave));
     float edge = smoothstep(0.05, 0.3, grown) * (1.0 - smoothstep(0.6, 0.95, grown));
@@ -281,7 +281,7 @@ export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
         frames++; if (dt > 40) slow++;
         if (frames >= 120) { if (slow > 40) { coarse = 1; size(); } frames = slow = 0; }
       }
-      const frameMs = backdropFrameMs(playing, nowPlayingOpen, currentWave().amt > 0);
+      const frameMs = backdropFrameMs(playing, nowPlayingOpen, currentWave().amt !== 0);
       if (now - last < frameMs - 2) return;
       last = now;
       paint();

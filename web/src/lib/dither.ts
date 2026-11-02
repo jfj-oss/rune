@@ -278,7 +278,12 @@ export function ditherHueOf(css: string): DitherHue | null {
  * The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes grow from where they
  * are. `amt` 0..1 (how far out), `dir` +1 swelling, 0 holding, -1 drawing back.
  */
-export const WAVE = { rise: 3.4, hold: 1.6, fall: 3.4, ripple: 0.035, get length() { return this.rise + this.hold + this.fall; } };
+export const WAVE = {
+  rise: 3.4, hold: 1.6, fall: 3.4,
+  /** After the crash: a damped bounce (dips below rest, comes back a little above, settles). */
+  bounce: 4.0, bouncePeriod: 3.2, bounceDamping: 0.3, ripple: 0.035,
+  get length() { return this.rise + this.hold + this.fall + this.bounce; },
+};
 
 /**
  * Field exponent at the peak for a screen shape (width / height). Measured with field() over many frames,
@@ -291,15 +296,25 @@ export function wavePeakExponent(aspect: number): number {
 }
 
 export function waveAt(dt: number): { amt: number; dir: number; t: number } {
-  const { rise, hold, fall, length } = WAVE;
+  const { rise, hold, fall, bounce, length } = WAVE;
   if (!(dt >= 0) || dt >= length) return { amt: 0, dir: 1, t: 0 };
   // out: starts gently, builds, and eases into the peak (like a swell of water, not a jolt)
   if (dt < rise) return { amt: 0.5 - 0.5 * Math.cos(Math.PI * (dt / rise)), dir: 1, t: dt };
   // a moment at full size
   if (dt < rise + hold) return { amt: 1, dir: 0, t: dt };
-  // back: the mirror of the way out, building speed gradually and settling softly at rest
-  const q = (dt - rise - hold) / fall;
-  return { amt: 0.5 + 0.5 * Math.cos(Math.PI * q), dir: -1, t: dt };
+  // back: starts gently and builds speed, reaching rest still moving (the crash)
+  if (dt < rise + hold + fall) {
+    const q = (dt - rise - hold) / fall;
+    return { amt: Math.cos((Math.PI / 2) * q), dir: -1, t: dt };
+  }
+  // the bounce: a damped spring that starts at the crash's speed (no kink), dips below rest, comes back
+  // a little above it, and fades out to exactly rest
+  const t = dt - rise - hold - fall;
+  const wd = (2 * Math.PI) / WAVE.bouncePeriod;
+  const w = wd / Math.sqrt(1 - WAVE.bounceDamping ** 2);
+  const v0 = Math.PI / (2 * fall); // speed of the crash (per second)
+  const fade = 1 - smoothstep(bounce * 0.7, bounce, t);
+  return { amt: -(v0 / wd) * Math.exp(-WAVE.bounceDamping * w * t) * Math.sin(wd * t) * fade, dir: 0, t: dt };
 }
 
 /** Parse `rgb(r g b)`, `rgb(r, g, b)` or `hsl(h s% l%)` (as useCoverColor gives) to 0..255 RGB. */
