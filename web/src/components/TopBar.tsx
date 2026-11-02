@@ -6,13 +6,9 @@ import { listenApi } from '../listenApi';
 import type { NormalizeMode } from '../lib/listenTypes';
 import { useSearchNav } from '../store/searchNav';
 import { useRadio } from '../store/radio';
-import { AMBIENTS, DITHER_AMBIENTS, useUi, type Ambient } from '../store/ui';
+import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
 
-const AMBIENT_LABEL: Record<Ambient, string> = {
-  cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off',
-  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-cycle': 'Dither · Cycle',
-};
 
 export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: boolean }) {
   const nav = useNavigate();

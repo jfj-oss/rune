@@ -193,3 +193,11 @@ button.note__track:hover { text-decoration: underline; text-underline-offset: 3p
 
 /* one click on a track row plays it */
 .trow, .prow, .tlist__row--click { cursor: pointer; }
+/* small find-in-albums box in the library toolbar */
+.libsearch { display: inline-flex; align-items: center; gap: 6px; height: 36px; width: 210px; padding: 0 8px 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 999px; color: var(--text-3); }
+.libsearch:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--text-2); }
+.libsearch input { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0; color: var(--text); font-size: 13.5px; }
+.libsearch input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.libsearch button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--text-3); }
+.libsearch button:hover { color: var(--text); background: color-mix(in srgb, #fff 8%, transparent); }
+@media (max-width: 899px) { .libsearch { width: 100%; order: -1; } }

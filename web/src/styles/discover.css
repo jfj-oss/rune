@@ -269,3 +269,10 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
   .seg--tabs { flex-wrap: wrap; gap: 2px; border-radius: 18px; padding: 4px; }
   .seg--tabs a { flex: 1 1 22%; min-width: 0; height: 30px; padding: 0 8px; font-size: 12.5px; white-space: nowrap; }
 }
+/* Settings → Background */
+.ambientpick { margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
+.ambientpick__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.ambientpick__item { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); font-size: 13.5px; color: var(--text-2); text-align: left; }
+.ambientpick__item span { flex: 1; }
+.ambientpick__item:hover { background: color-mix(in srgb, #fff 6%, transparent); color: var(--text); }
+.ambientpick__item.is-current { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--text); }

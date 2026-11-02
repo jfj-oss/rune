@@ -1,7 +1,7 @@
 import type { AlbumSummary } from '@liner/shared';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Activity, ChevronDown, Copy, LayoutGrid, List, MoreHorizontal, X } from 'lucide-react';
+import { Activity, ChevronDown, Copy, LayoutGrid, List, MoreHorizontal, Search, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -23,8 +23,8 @@ const SORTS: { id: NonNullable<AlbumQuery['sort']>; label: string }[] = [
   { id: 'added', label: 'Date added' }, { id: 'artist', label: 'Artist' }, { id: 'title', label: 'Title' }, { id: 'year', label: 'Year' },
 ];
 
-export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'people' | 'tracks' | 'genres' | 'radio' | 'playlists' | 'discover' | 'stats' }) {
-  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['people', 'People'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['radio', 'Radio'], ['playlists', 'Playlists'], ['discover', 'Discover'], ['stats', 'Stats']] as const;
+export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'people' | 'tracks' | 'genres' | 'radio' | 'playlists' | 'discover' | 'stats' | 'settings' }) {
+  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['people', 'People'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['radio', 'Radio'], ['playlists', 'Playlists'], ['discover', 'Discover'], ['stats', 'Stats'], ['settings', 'Settings']] as const;
   return (
     <div className="seg seg--tabs" role="tablist">
       {tabs.map(([id, label]) => (
@@ -99,6 +99,34 @@ function YearList({ current, onPick }: { current?: number; onPick(v?: string): v
   );
 }
 
+/** Small find-in-albums box: matches album titles, artists and song titles (server-side), kept in `?q=`. */
+function AlbumSearch({ value, onChange }: { value: string; onChange(v: string): void }) {
+  const [text, setText] = useState(value);
+  const ref = useRef<HTMLInputElement>(null);
+  // follow outside changes (back/forward, cleared filters)
+  useEffect(() => { setText(value); }, [value]);
+  useEffect(() => {
+    if (text.trim() === value) return;
+    const t = setTimeout(() => onChange(text.trim()), 220);
+    return () => clearTimeout(t);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <label className="libsearch">
+      <Search size={15} aria-hidden />
+      <input
+        ref={ref}
+        type="search"
+        value={text}
+        placeholder="Find in albums"
+        aria-label="Find in albums"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape' && text) { e.stopPropagation(); setText(''); onChange(''); } }}
+      />
+      {text && <button type="button" aria-label="Clear search" onClick={() => { setText(''); onChange(''); ref.current?.focus(); }}><X size={14} /></button>}
+    </label>
+  );
+}
+
 export default function Albums() {
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
@@ -108,6 +136,7 @@ export default function Albums() {
   const genre = params.get('genre') ?? undefined;
   const label = params.get('label') ?? undefined;
   const year = params.get('year') ? Number(params.get('year')) : undefined;
+  const text = params.get('q') ?? '';
   const [viewPref, setViewState] = useState<'grid' | 'list'>(() => loadLocal('rune.view', 'grid'));
   const view = desktop ? viewPref : 'grid';
   const setView = (v: 'grid' | 'list') => { setViewState(v); saveLocal('rune.view', v); };
@@ -118,11 +147,12 @@ export default function Albums() {
     setParams(next, { replace: true });
   };
 
-  const query: AlbumQuery = { sort, source, genre, label, year };
+  const query: AlbumQuery = { sort, source, genre, label, year, q: text || undefined };
   const q = useInfiniteQuery({
     queryKey: ['albums', 'library', query],
     initialPageParam: 0,
     queryFn: ({ pageParam }) => api.albums({ ...query, offset: pageParam, limit: PAGE }),
+    placeholderData: (prev) => prev, // keep the grid while a new search loads
     getNextPageParam: (last, all) => { const n = all.reduce((s, p) => s + p.items.length, 0); return n < last.total ? n : undefined; },
   });
   const items: AlbumSummary[] = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
@@ -136,7 +166,7 @@ export default function Albums() {
       <header className="libhead">
         <div>
           <h1 className="pagehead__title">{genre ?? label ?? (year ? String(year) : source === 'spotify' ? 'Spotify' : 'Albums')}</h1>
-          <p className="pagehead__sub">{q.isLoading ? ' ' : plural(total, 'album')}</p>
+          <p className="pagehead__sub">{q.isLoading ? ' ' : text ? `${plural(total, 'album')} matching “${text}”` : plural(total, 'album')}</p>
         </div>
       </header>
       <div className="toolbar">
@@ -147,6 +177,7 @@ export default function Albums() {
             </button>
           ))}
         </div>
+        <AlbumSearch value={text} onChange={(v) => set('q', v || undefined)} />
         <FacetFilters label={label} year={year} onPick={set} />
         {chips.map(([k, v]) => (
           <button key={k} className="chip chip--removable" onClick={() => set(k)} aria-label={`Remove ${k} filter`}>{k}: {v}<X size={12} /></button>
@@ -183,7 +214,7 @@ export default function Albums() {
         source === 'spotify' ? (
           <Empty title="No saved Spotify albums">Save an album from its page (or search Spotify) and it shows up here. Your Spotify library syncs every 30 minutes.</Empty>
         ) : (
-          <Empty title="No albums here">Nothing matches these filters.</Empty>
+          <Empty title="No albums here">{text ? `No album, artist or song matches “${text}”.` : 'Nothing matches these filters.'}</Empty>
         )
       ) : (
         <VirtualAlbums items={items} total={total} view={view} onNeedMore={() => { if (q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage(); }} />

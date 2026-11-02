@@ -1,21 +1,47 @@
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Database, HardDrive, Plug, RefreshCw, Server } from 'lucide-react';
+import { Activity, Check, Database, HardDrive, Palette, Plug, RefreshCw, Server } from 'lucide-react';
 import { Empty } from '../components/Rows';
 import { discoverApi } from '../discoverApi';
+import { useIsDesktop } from '../hooks/useMedia';
+import { LibraryTabs } from './Albums';
 import { formatBytes, formatListening, formatStamp } from '../lib/discover';
+import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
+
+/** Background picker (the desktop top-bar menu has the same list); shared by every device. */
+function AmbientPicker() {
+  const ambient = useUi((s) => s.ambient);
+  const setAmbient = useUi((s) => s.setAmbient);
+  return (
+    <section className="statuscard ambientpick">
+      <h2 className="statuscard__head"><Palette size={17} /> Background</h2>
+      <p className="muted">Shared by all your devices.</p>
+      <div className="ambientpick__list" role="radiogroup" aria-label="Background">
+        {[...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
+          <button key={a} role="radio" aria-checked={ambient === a} className={`ambientpick__item${ambient === a ? ' is-current' : ''}`} onClick={() => setAmbient(a)}>
+            <i className={`ambdot ambdot--${a}`} />
+            <span>{AMBIENT_LABEL[a]}</span>
+            {ambient === a && <Check size={15} />}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 const OPTIONAL_JOB_LABEL: Record<string, string> = { matching: 'Metadata matching', details: 'Album details', loudness: 'Loudness analysis' };
 
 export default function Settings() {
   const q = useQuery({ queryKey: ['health'], queryFn: () => discoverApi.health(), refetchInterval: 30_000 });
   const h = q.data;
+  const desktop = useIsDesktop();
 
   return (
     <div className="page page--settings">
+      {!desktop && <LibraryTabs active="settings" />}
       <header className="libhead">
         <div>
           <h1 className="pagehead__title">Settings</h1>
-          <p className="pagehead__sub">Server status</p>
+          <p className="pagehead__sub">Background and server status</p>
         </div>
         <div className="libhead__actions">
           <button className="btn btn--sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
@@ -23,6 +49,8 @@ export default function Settings() {
           </button>
         </div>
       </header>
+
+      <AmbientPicker />
 
       {q.isError ? (
         <Empty title="Could not reach the rune server" icon={<Server size={28} />}>

@@ -681,6 +681,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { enabled };
       });
 
+      // The app background (ambient) is shared by every device: picked on the Mac, the phone follows.
+      r.get('/settings/ambient', async () => ({ ambient: getState('ui.ambient') ?? null }));
+      r.post<{ Body: { ambient?: unknown } }>('/settings/ambient', async (req, reply) => {
+        const a = req.body?.ambient;
+        if (typeof a !== 'string' || !/^[a-z]{1,12}(-[a-z]{1,12})?$/.test(a)) return reply.code(400).send({ error: 'ambient name required' });
+        setState('ui.ambient', a);
+        return { ambient: a };
+      });
+
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
         // Spotify artists (search results, playlist artists): add their Spotify discography.

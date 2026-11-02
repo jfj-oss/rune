@@ -66,6 +66,7 @@
 /* secondary text a step brighter (as on the glass), so it keeps WCAG AA over the dithered colour; see MASK in lib/dither */
 :root[data-ambient^='dither'] { --text-2: #d3d4de; --text-3: #c2c3d1; }
 :root[data-ambient^='dither'] .search:not(:focus-within) { background: rgba(0, 0, 0, 0.5); }
+:root[data-ambient^='dither'] :is(.libsearch, .toolbar .chip, .toolbar .seg, .toolbar .select, .toolbar .btn--icon, .seg--tabs) { background: rgba(0, 0, 0, 0.6); }
 /* on a pure-black base the sidebar glass dims what it blurs, like the bottom bars, so it never glows brighter than the page */
 :root[data-ambient^='dither'] .side { -webkit-backdrop-filter: blur(32px) saturate(165%) brightness(0.6); backdrop-filter: blur(32px) saturate(165%) brightness(0.6); }
 .ambient__dither { position: absolute; left: 0; top: 0; display: block; image-rendering: pixelated; }
