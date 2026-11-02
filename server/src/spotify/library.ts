@@ -268,11 +268,23 @@ export async function syncPlaylists(
   }
 
   const fetched = new Map<string, SpotifyPlaylistTrack[]>();
+  const skipped: string[] = [];
   for (const p of playlists) {
     if (!p.id) continue;
     const prev = previous.get(playlistId(p.id));
     if (prev && p.snapshot_id && prev.snapshot_id === p.snapshot_id) continue;
-    fetched.set(p.id, await source.allPlaylistTracks(p.id));
+    try {
+      fetched.set(p.id, await source.allPlaylistTracks(p.id));
+    } catch (err) {
+      // Spotify returns 403 for playlists it owns (Discover Weekly, editorial, "Made
+      // for you") to apps in development mode. Skip those instead of failing the sync.
+      const status = (err as { status?: number }).status;
+      if (status === 403 || status === 404) {
+        skipped.push(p.name ?? p.id);
+        continue;
+      }
+      throw err;
+    }
   }
 
   const result: PlaylistSyncResult = { playlists: 0, tracks: 0, liked: 0, removed: 0 };

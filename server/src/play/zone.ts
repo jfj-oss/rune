@@ -331,6 +331,11 @@ class PcZoneImpl implements PcZone {
         const t = typeof msg.data === 'number' ? msg.data : undefined;
         this.props.timePos = t;
         if (t !== undefined) this.positionMs = this.positionFromMpv(t);
+        // Self-heal: time moving while we think we're stopped means a stale idle won.
+        if (t !== undefined && this.status === 'stopped' && !this.rebuilding && this.window.length > 0 && this.q.index >= 0) {
+          this.status = this.props.pause ? 'paused' : 'playing';
+          this.emitChange();
+        }
         this.schedulePositionEmit();
         break;
       }
@@ -414,6 +419,22 @@ class PcZoneImpl implements PcZone {
     // A freshly spawned mpv reports idle before we restore playback; don't let
     // that reset the position/status the respawn is about to restore.
     if (this.rebuilding || this.restoring || this.closed) return;
+    // The idle event from 'stop'/'playlist-clear' during a track switch can arrive
+    // after startPlayback has already loaded the new file. Confirm with mpv first.
+    if (this.window.length > 0 && this.ipc) {
+      const ipc = this.ipc;
+      void ipc
+        .command(['get_property', 'idle-active'])
+        .then((res) => {
+          if (res.data === true && !this.rebuilding && !this.restoring && !this.closed) this.applyIdle();
+        })
+        .catch(() => undefined);
+      return;
+    }
+    this.applyIdle();
+  }
+
+  private applyIdle(): void {
     this.currentMpvPos = -1;
     this.window = [];
     this.props.timePos = undefined;
