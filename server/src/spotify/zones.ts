@@ -43,6 +43,8 @@ export interface ConnectZoneOptions {
   pollMsIdleUnwatched?: number;
   /** Whether at least one websocket client is connected. Undefined = always watched. */
   hasClients?: () => boolean;
+  /** Songs rune already has (title, artists, album, cover) by 'sp:' id: shown at once, no Spotify lookup. */
+  knownTracks?: (ids: string[]) => QueueItem[];
   now?: () => number;
 }
 
@@ -216,6 +218,7 @@ export class SpotifyConnectZone implements PlaybackZone {
   private readonly pollMsPlayingUnwatched: number;
   private readonly pollMsIdleUnwatched: number;
   private readonly hasClients: (() => boolean) | undefined;
+  private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
   private readonly now: () => number;
   private snapshot: PlayerState;
   private startedQueue: QueueItem[] = [];
@@ -248,6 +251,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.pollMsPlayingUnwatched = opts.pollMsPlayingUnwatched ?? 15_000;
     this.pollMsIdleUnwatched = opts.pollMsIdleUnwatched ?? 30_000;
     this.hasClients = opts.hasClients;
+    this.knownTracks = opts.knownTracks;
     this.now = opts.now ?? Date.now;
     this.snapshot = emptyPlayerState(this.zone, this.now);
   }
@@ -285,9 +289,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         // songs is fetched in the background (the command must not wait for it).
         const start = Math.max(0, Math.min(cmd.startIndex ?? 0, spotifyIds.length - 1));
         const rev = ++this.startedRev;
-        this.startedQueue = spotifyIds.map((id, position) =>
-          placeholderQueueItem(placeholderTrack(spotifyTrackId(id)), position),
-        );
+        this.startedQueue = this.seedQueue(spotifyIds);
         this.showStarted(start, cmd.positionMs ?? 0, cmd.paused === true);
         void this.fetchStartedQueue(spotifyIds, start)
           .then((queue) => {
@@ -387,12 +389,32 @@ export class SpotifyConnectZone implements PlaybackZone {
     return id.slice(3);
   }
 
+  /** The queue we just sent, filled from rune's own database where it can be; placeholders otherwise. */
+  private seedQueue(spotifyIds: string[]): QueueItem[] {
+    let known = new Map<string, QueueItem>();
+    try {
+      known = new Map((this.knownTracks?.(spotifyIds.map(spotifyTrackId)) ?? []).map((q) => [q.track.id, q]));
+    } catch {
+      // the database is a shortcut only
+    }
+    return spotifyIds.map((id, position) => {
+      const k = known.get(spotifyTrackId(id));
+      return k ? { ...k, queueId: `spq:${position}:${k.track.id}` } : placeholderQueueItem(placeholderTrack(spotifyTrackId(id)), position);
+    });
+  }
+
   private async fetchStartedQueue(spotifyIds: string[], startIndex = 0): Promise<QueueItem[]> {
     if (spotifyIds.length === 0) return [];
+    // what rune already knows needs no Spotify request
+    const seeded = this.seedQueue(spotifyIds);
+    if (seeded.every((q) => !!q.track.title)) return seeded;
     // The songs around the one being started first: those are the ones that get looked up
     // (Spotify's own "up next" fills in later ones).
     const from = Math.max(0, Math.min(startIndex, spotifyIds.length - 1) - 2);
-    const ordered = [...spotifyIds.slice(from), ...spotifyIds.slice(0, from)].slice(0, STARTED_LOOKUPS);
+    const unknown = new Set(seeded.filter((q) => !q.track.title).map((q) => q.track.id));
+    const ordered = [...spotifyIds.slice(from), ...spotifyIds.slice(0, from)]
+      .filter((id) => unknown.has(spotifyTrackId(id)))
+      .slice(0, STARTED_LOOKUPS);
     const byId = new Map<string, SpotifyTrack>();
     try {
       // Single GET /tracks/{id} lookups (development-mode apps may not use /tracks?ids=),
@@ -412,8 +434,7 @@ export class SpotifyConnectZone implements PlaybackZone {
 
     return spotifyIds.map((id, position) => {
       const sp = byId.get(id);
-      if (!sp) return placeholderQueueItem(placeholderTrack(spotifyTrackId(id)), position);
-      return queueItemFromSpotify(sp, position);
+      return sp ? queueItemFromSpotify(sp, position) : seeded[position]!;
     });
   }
 

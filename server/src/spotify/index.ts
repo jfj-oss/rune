@@ -1,4 +1,5 @@
 // Public entry point for the Spotify integration.
+import { loadQueueItems } from '../play/rows.js';
 import { SpotifyArtistPages, type SpotifyArtistPage } from './artist.js';
 import type { FastifyInstance } from 'fastify';
 import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
@@ -72,7 +73,8 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     baseUrl: opts.endpoints?.api,
     getToken: (force) => auth.getAccessToken(force),
   });
-  const zones = createSpotifyZones(api, opts);
+  // songs rune has stored (played, saved, in playlists) start with their titles + covers, no lookup
+  const zones = createSpotifyZones(api, { knownTracks: (ids) => loadQueueItems(db, ids), ...opts });
   const catalog = new SpotifyCatalog(api, { ttlMs: opts.catalogTtlMs, now: opts.now });
   const now = opts.now ?? Date.now;
   const artistPages = new SpotifyArtistPages(api, now);

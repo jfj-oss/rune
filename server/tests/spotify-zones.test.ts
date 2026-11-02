@@ -358,6 +358,27 @@ describe('Spotify Connect zones', () => {
     await zone.close();
   });
 
+  it("'play' shows songs rune already has at once and only looks up the unknown ones", async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    api.queueData = { currently_playing: sampleTrack('t1'), queue: [] };
+    api.tracksData.set('t3', sampleTrack('t3', 3, 'Maxwell'));
+    const known = (ids: string[]) =>
+      ids.filter((id) => id !== 'sp:t3').map((id, i) => ({
+        queueId: `db${i}`,
+        track: { ...mapTrack(sampleTrack(id.slice(3), i + 1, `Known ${id}`)) },
+        album: { id: 'sp:abbey', title: 'Abbey Road' },
+      }));
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { knownTracks: known });
+    const states: ReturnType<typeof zone.state>[] = [];
+    zone.onChange((st) => states.push(st));
+    await zone.command({ type: 'play', trackIds: ['sp:t1', 'sp:t2', 'sp:t3'], startIndex: 0 });
+    expect(states[0]?.queue.map((q) => q.track.title)).toEqual(['Known sp:t1', 'Known sp:t2', '']);
+    await vi.waitFor(() => expect(zone.state().queue[2]?.track.title).toBe('Maxwell'));
+    expect(api.trackCalls).toBe(1); // only t3 was asked from Spotify
+    zone.close();
+  });
+
   it("returns from 'play' before slow metadata lookups finish and fills titles when they arrive", async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();
