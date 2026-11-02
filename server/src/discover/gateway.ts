@@ -147,18 +147,16 @@ export class SpotifyGateway {
     if (hit) return hit.value.track ?? undefined;
     let track: SpotifyTrackWithExtras | null = null;
     try {
-      const res = await this.call(() =>
-        this.api.request<{ tracks?: (SpotifyTrackWithExtras | null)[] }>(
-          `/tracks?ids=${encodeURIComponent(spotifyId)}`,
-        ),
+      // GET /tracks/{id}: development-mode apps are refused the batch `/tracks?ids=` endpoint.
+      track = await this.call(() =>
+        this.api.request<SpotifyTrackWithExtras>(`/tracks/${encodeURIComponent(spotifyId)}`),
       );
-      track = res?.tracks?.[0] ?? null;
     } catch (err) {
       if (err instanceof DiscoverBlockedError) throw err;
       if (!isRefusal(err)) throw err;
-      return undefined;
+      // Refusals (403/404) are cached too: a retry within the TTL will not ask again.
     }
-    this.cache.set(key, { track });
+    this.cache.set(key, { track: track ?? null });
     return track ?? undefined;
   }
 
