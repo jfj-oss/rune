@@ -42,6 +42,8 @@ export interface ConnectZoneOptions {
 /** How long a just-played zone ignores /me/player still naming the previous device. */
 const CLAIM_MS = 5000;
 const SETTLE_TRIES = 4;
+/** How long a just-set volume wins over /me/player still reporting the old one. */
+const VOLUME_HOLD_MS = 4000;
 const SETTLE_GAP_MS = 350;
 
 const EMPTY_ALBUM = { id: 'sp:unknown', title: '', coverUrl: undefined } as const;
@@ -175,6 +177,7 @@ export class SpotifyConnectZone implements PlaybackZone {
   private inFlight: Promise<void> | null = null;
   private closed = false;
   private claimUntil = 0;
+  private volumeHold: { volume: number; until: number } | null = null;
   private lastActiveDevice: string | null = null;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
@@ -259,6 +262,10 @@ export class SpotifyConnectZone implements PlaybackZone {
         );
       case 'volume':
         await this.api.setVolume(cmd.volume, device);
+        // Spotify keeps reporting the previous level for a moment: don't bounce back to it.
+        this.volumeHold = { volume: Math.round(cmd.volume), until: this.now() + VOLUME_HOLD_MS };
+        this.snapshot = { ...this.snapshot, volume: this.volumeHold.volume };
+        for (const cb of this.listeners) cb(this.snapshot);
         return this.refresh();
       case 'shuffle':
         await this.api.setShuffle(cmd.on, device);
@@ -363,6 +370,11 @@ export class SpotifyConnectZone implements PlaybackZone {
     } else {
       next = mapPlaybackState(this.zone, playback, queue, this.startedQueue, this.now);
       this.claimUntil = 0;
+    }
+    const hold = this.volumeHold;
+    if (hold) {
+      if (this.now() >= hold.until || Math.abs(next.volume - hold.volume) <= 1) this.volumeHold = null;
+      else next = { ...next, volume: hold.volume };
     }
     if (!sameState(next, this.snapshot)) {
       this.snapshot = next;

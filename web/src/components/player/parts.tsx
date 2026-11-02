@@ -1,5 +1,5 @@
 import { ArrowRight, Check, Monitor, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Smartphone, Speaker, Volume1, Volume2, VolumeX, Globe } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatDuration } from '../../lib/format';
 import { usePosition } from '../../hooks/usePosition';
 import type { ZoneInfo } from '../../lib/types';
@@ -90,7 +90,19 @@ export function VolumeControl({ className = '' }: { className?: string }) {
   const zoneKind = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind);
   const command = usePlayer((s) => s.command);
   const [local, setLocal] = useState<number | null>(null);
-  const v = local ?? volume;
+  // After a change, keep showing the chosen level until the zone reports it back: Spotify devices
+  // answer with the OLD level for a second or two, which made the slider jump back and forth.
+  const [held, setHeld] = useState<{ v: number; until: number } | null>(null);
+  const holding = held && Date.now() < held.until && Math.abs(volume - held.v) > 1;
+  const v = local ?? (holding ? held.v : volume);
+  const sendTimer = useRef<{ t: ReturnType<typeof setTimeout> | null; last: number; pending: number | null }>({ t: null, last: 0, pending: null });
+  useEffect(() => {
+    if (!held) return;
+    const left = held.until - Date.now();
+    if (left <= 0 || Math.abs(volume - held.v) <= 1) { setHeld(null); return; }
+    const t = setTimeout(() => setHeld(null), left);
+    return () => clearTimeout(t);
+  }, [held, volume]);
   if (v > 0) lastAudible = v;
   const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
   // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone.
@@ -98,10 +110,21 @@ export function VolumeControl({ className = '' }: { className?: string }) {
     return <div className={`volume volume--hint ${className}`}>Use the {ios} volume buttons</div>;
   }
   const Icon = v === 0 ? VolumeX : v < 40 ? Volume1 : Volume2;
-  const set = (x: number) => { setLocal(x); void command({ type: 'volume', volume: x }); };
+  // While dragging, send at most ~6 volume commands a second (plus the final value).
+  const send = (x: number) => {
+    const st = sendTimer.current;
+    st.pending = x;
+    const wait = 160 - (Date.now() - st.last);
+    if (wait <= 0 && !st.t) { st.last = Date.now(); st.pending = null; void command({ type: 'volume', volume: x }); return; }
+    if (!st.t) st.t = setTimeout(() => {
+      st.t = null; st.last = Date.now();
+      if (st.pending != null) { const p = st.pending; st.pending = null; void command({ type: 'volume', volume: p }); }
+    }, Math.max(0, wait));
+  };
+  const set = (x: number) => { setLocal(x); setHeld({ v: x, until: Date.now() + 5000 }); send(x); };
   return (
     <div className={`volume ${className}`}>
-      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => { setLocal(null); void command({ type: 'volume', volume: v === 0 ? lastAudible : 0 }); }}>
+      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => { const x = v === 0 ? lastAudible : 0; setLocal(null); setHeld({ v: x, until: Date.now() + 5000 }); void command({ type: 'volume', volume: x }); }}>
         <Icon size={18} />
       </button>
       <VolumeSlider value={v} onChange={set} onCommit={() => setLocal(null)} />

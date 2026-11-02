@@ -144,6 +144,18 @@ describe('Spotify Connect zones', () => {
     expect(state.status).toBe('playing');
   });
 
+  it('keeps a just-set volume while Spotify still reports the old one', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1')); // device reports 42
+    let t = 1000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { now: () => t });
+    const state = await zone.command({ type: 'volume', volume: 70 });
+    expect(state.volume).toBe(70);
+    t += 5000; // hold expired: trust Spotify again
+    await (zone as unknown as { refresh(): Promise<unknown> }).refresh();
+    expect(zone.state().volume).toBe(42);
+  });
+
   it('rejects local track ids with a clear error and no call', async () => {
     const api = new FakeZoneApi();
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
