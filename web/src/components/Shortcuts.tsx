@@ -19,7 +19,7 @@ const VOLUME_STEP = 5;
 /** Sends at most one volume change per this many ms while a key is held (Spotify rate limits). */
 const VOLUME_SEND_MS = 150;
 
-/** Space = play / pause, E = volume down, R = volume up, anywhere on the page (not while typing). */
+/** Space = play / pause, E / R = volume down / up, 1 / 2 / 3 = previous / restart / next, anywhere on the page (not while typing). */
 export function KeyboardShortcuts() {
   useEffect(() => {
     // the volume being aimed at: held keys step from it, not from the (lagging) reported volume
@@ -45,11 +45,28 @@ export function KeyboardShortcuts() {
       sendTimer = window.setTimeout(flush, wait);
     };
 
+    /** 1 = previous song (always the song before, even a few seconds in), 2 = this song from the start, 3 = next. */
+    const songKey = (k: '1' | '2' | '3') => {
+      const { state, command } = usePlayer.getState();
+      if (!state.queue.length) return;
+      if (k === '3') { void command({ type: 'next' }); return; }
+      if (k === '1' && state.index > 0) { void command({ type: 'jump', index: state.index - 1 }); return; }
+      // 2, or 1 on the first song: back to the start of this one, playing
+      void command({ type: 'seek', positionMs: 0 }).then(() => {
+        if (usePlayer.getState().state.status !== 'playing') void command({ type: 'resume' });
+      });
+    };
+
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if ((k === 'e' || k === 'r') && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
         e.preventDefault();
         stepVolume(k === 'r' ? 1 : -1);
+        return;
+      }
+      if ((k === '1' || k === '2' || k === '3') && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
+        e.preventDefault();
+        if (!e.repeat) songKey(k);
         return;
       }
       if (e.code !== 'Space' && e.key !== ' ') return;
