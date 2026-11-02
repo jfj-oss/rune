@@ -5,6 +5,7 @@ import { useIsDesktop } from '../hooks/useMedia';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { MediaSessionBridge } from './MediaSession';
+import { KeyboardShortcuts } from './Shortcuts';
 import { PlayOnSheet } from './PlayOnSheet';
 import { PlaylistDialogsHost } from './PlaylistDialogs';
 import { MobileTabs } from './MobileTabs';
@@ -64,6 +65,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <QueueDrawer />
       <NowPlaying />
       <MediaSessionBridge />
+      <KeyboardShortcuts />
       <PlayOnSheet />
       <PlaylistDialogsHost />
       <Toast />
