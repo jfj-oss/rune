@@ -383,6 +383,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         try {
           return sanitize(await z.command(req.body));
         } catch (e) {
+          app.log.warn({ zone: req.params.zone, cmd: req.body?.type, err: (e as Error).message }, 'player command failed');
           return reply.code(400).send({ error: (e as Error).message });
         }
       });
