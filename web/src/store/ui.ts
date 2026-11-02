@@ -1,3 +1,4 @@
+import { clientLog } from '../clientLog';
 import { create } from 'zustand';
 
 function load<T>(key: string, fallback: T): T {
@@ -60,6 +61,7 @@ export const useUi = create<UiStore>((set) => ({
   setQueueOpen: (queueOpen) => set({ queueOpen }),
   setNowPlayingOpen: (nowPlayingOpen) => set({ nowPlayingOpen }),
   toast: (text) => {
+    clientLog('warn', `toast: ${text}`);
     const id = ++toastN;
     set({ notice: { id, text } });
     setTimeout(() => set((s) => (s.notice?.id === id ? { notice: null } : s)), 3200);

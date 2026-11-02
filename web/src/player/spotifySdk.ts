@@ -1,3 +1,4 @@
+import { clientLog } from '../clientLog';
 import type { Track } from '@liner/shared';
 import type { Engine } from './engine';
 import { detectEnded, extrapolate, spotifyIdOf, type Snap } from './sdkState';
@@ -86,7 +87,11 @@ export class SpotifySdkEngine implements Engine {
   get phase() { return this.status.phase; }
 
   private setStatus(patch: Partial<SdkStatus>) {
+    const before = this.status.phase;
     this.status = { ...this.status, ...patch };
+    if (patch.phase && (patch.phase !== before || patch.error)) {
+      clientLog(patch.phase === 'error' ? 'error' : 'info', `spotify sdk: ${patch.phase}${patch.error ? ` — ${patch.error}` : ''}`, { deviceId: this.status.deviceId });
+    }
     this.statusFn(this.status);
   }
 

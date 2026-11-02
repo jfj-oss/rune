@@ -80,7 +80,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         // Login callback fires this without awaiting: the redirect must not wait
         // for the Spotify library to download.
         onLogin: () => {
-          void runSpotifySync();
+          void runSpotifySync({ force: true });
         },
       })
     : undefined;
@@ -88,18 +88,33 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const spotifyListeners = new Map<Zone, () => void>();
 
   // One Spotify sync at a time; scan/scheduler/login/manual all share it.
+  // Persisted throttle: restarts must not resync (a full Liked Songs pass is ~100
+  // requests), and a long Retry-After from Spotify is honoured across restarts.
+  db.exec('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const getState = (k: string) => (db.prepare('SELECT value FROM app_state WHERE key = ?').get(k) as { value: string } | undefined)?.value;
+  const setState = (k: string, v: string) =>
+    db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
+  const SYNC_MIN_GAP_MS = 25 * 60_000;
   let spotifySyncInFlight: Promise<void> | null = null;
-  function runSpotifySync(): Promise<void> {
+  function runSpotifySync(opts: { force?: boolean } = {}): Promise<void> {
     if (!spotify) return Promise.resolve();
     if (spotifySyncInFlight) return spotifySyncInFlight;
+    const nowMs = Date.now();
+    const blockedUntil = Number(getState('spotify.blockedUntil') ?? 0);
+    if (blockedUntil > nowMs) {
+      app.log.warn({ until: new Date(blockedUntil).toISOString() }, 'spotify sync skipped: rate limited');
+      return Promise.resolve();
+    }
+    if (!opts.force && nowMs - Number(getState('spotify.lastSync') ?? 0) < SYNC_MIN_GAP_MS) return Promise.resolve();
     spotifySyncInFlight = (async () => {
       try {
+        setState('spotify.lastSync', String(Date.now()));
         const result = await spotify.syncLibrary();
         app.log.info({ result }, 'spotify library sync complete');
         broadcast({ type: 'library-changed' });
       } catch (err) {
-        // 429s are handled/retried inside the API client; anything else is logged
-        // and the next scheduled sync retries.
+        const retry = (err as { status?: number; retryAfterMs?: number }).status === 429 ? (err as { retryAfterMs?: number }).retryAfterMs : undefined;
+        if (retry) setState('spotify.blockedUntil', String(Date.now() + retry));
         app.log.warn({ err }, 'spotify library sync failed');
       } finally {
         spotifySyncInFlight = null;
@@ -372,6 +387,18 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }
       });
 
+      // Browsers report their errors here (e.g. the Spotify Web Playback SDK on the Mac)
+      // so problems on other devices show up in the server log.
+      const clientLog: { at: number; ua?: string; level: string; msg: string; data?: unknown }[] = [];
+      r.post<{ Body: { level?: string; msg?: string; data?: unknown } }>('/client-log', async (req) => {
+        const e = { at: Date.now(), ua: req.headers['user-agent'], level: String(req.body?.level ?? 'info').slice(0, 10), msg: String(req.body?.msg ?? '').slice(0, 500), data: req.body?.data };
+        clientLog.push(e);
+        if (clientLog.length > 300) clientLog.shift();
+        app.log.warn({ client: e }, 'client log');
+        return { ok: true };
+      });
+      r.get('/client-log', async () => clientLog.slice(-100));
+
       r.post('/scan', async () => {
         void runScan();
         return { started: true };
@@ -385,7 +412,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           return reply.code(400).send({ error: 'not_connected' });
         }
         const started = spotifySyncInFlight === null;
-        void runSpotifySync();
+        void runSpotifySync({ force: true });
         return { started, running: true };
       });
     },

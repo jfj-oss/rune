@@ -1,3 +1,4 @@
+import { installClientLog } from './clientLog';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
@@ -10,6 +11,7 @@ import './styles/browse.css';
 import './styles/ambient.css';
 import './styles/spotify.css';
 
+installClientLog();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
