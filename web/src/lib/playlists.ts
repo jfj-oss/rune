@@ -38,7 +38,7 @@ export const isOverlayRow = (playlistId: string, t: { source: string; entrySourc
 /** Can this row be removed / dragged? */
 export const rowEditable = (p: { id: string; kind?: PlaylistKind }, t: { source: string; entrySource?: string }) =>
   isEditable(p) || (hasOverlay(p) && isOverlayRow(p.id, t));
-export const SPOTIFY_ADD_NOTE = 'Spotify songs can’t be added to Spotify playlists yet';
+export const SPOTIFY_ADD_NOTE = 'Nothing to add';
 
 // ---------- smart rules (mirror of server/src/myplaylists/rules.ts) ----------
 export type SmartField = 'genre' | 'artist' | 'year' | 'format' | 'added' | 'plays' | 'lastPlayed' | 'source';
@@ -139,9 +139,10 @@ export function toPlaylistTrack(i: PlayItem): EntryTrack {
 
 /** Split items for a target playlist: Spotify playlists only take local files (for now). */
 export function splitForTarget(playlistId: string, items: PlayItem[]): { add: PlayItem[]; refused: number } {
-  if (isRunePlaylist(playlistId)) return { add: items, refused: 0 };
-  const add = items.filter((i) => i.track.source !== 'spotify');
-  return { add, refused: items.length - add.length };
+  // rune playlists take anything; Spotify playlists take Spotify songs (added on Spotify) and
+  // local files (kept in rune's overlay)
+  void playlistId;
+  return { add: items, refused: 0 };
 }
 
 /** True when the playlist holds both local and Spotify tracks. */

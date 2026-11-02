@@ -60,6 +60,9 @@ export function Waveform({ data, positionMs, durationMs, onSeek, className = '' 
     return { x, ms: seekTimeAt(x, r.width, durationMs), index: barAt(x, r.width, data.length) };
   };
 
+  // a new song (new peaks) never keeps a drag from the previous one
+  useEffect(() => { setDrag(null); }, [data]);
+
   const onDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);

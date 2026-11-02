@@ -104,14 +104,11 @@ describe('Spotify playlists with rune’s local overlay', () => {
     expect(rowEditable({ id: 'pl:rune:1' }, { source: 'spotify' })).toBe(true);
     expect(isOverlayRow('pl:rune:1', { source: 'local' })).toBe(false);
   });
-  it('refuses Spotify songs for Spotify playlists, keeps everything for rune ones', () => {
+  it('takes Spotify songs and local files for both kinds of playlist', () => {
     const item = (id: string, source: 'local' | 'spotify') => ({ track: tr(id, 'a', source), album: { id: 'a', title: 'A' } });
     const items = [item('l:1', 'local'), item('sp:1', 'spotify'), item('l:2', 'local')];
-    const r = splitForTarget('pl:sp:abc', items);
-    expect(r.add.map((i) => i.track.id)).toEqual(['l:1', 'l:2']);
-    expect(r.refused).toBe(1);
+    expect(splitForTarget('pl:sp:abc', items)).toEqual({ add: items, refused: 0 });
     expect(splitForTarget('pl:rune:1', items)).toEqual({ add: items, refused: 0 });
-    expect(splitForTarget('pl:sp:abc', [items[1]!]).add).toEqual([]);
   });
 });
 

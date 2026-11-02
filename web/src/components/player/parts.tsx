@@ -27,6 +27,9 @@ export function SeekBar({ showTimes = true, className = '', buckets = 400 }: See
   const pos = usePosition();
   const [drag, setDrag] = useState<number | null>(null);
   const cur = currentItem(state);
+  // a new song never inherits a half-finished drag of the previous one
+  const curKey = cur ? `${state.index}:${cur.track.id}` : '';
+  useEffect(() => { setDrag(null); }, [curKey]);
   const live = isLiveTrack(cur?.track);
   const dur = cur?.track.durationMs ?? 0;
   const shown = drag ?? pos;

@@ -788,7 +788,12 @@ function importBody(body: unknown): { content: string; name?: string; descriptio
  * intentionally NOT registered here (they already exist in api/server.ts); use
  * listAllPlaylists / getPlaylistDetail there instead.
  */
-export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db): void {
+export interface MyPlaylistRouteOptions {
+  /** Adds Spotify songs to a synced Spotify playlist on Spotify itself (and mirrors it locally). */
+  addToSpotifyPlaylist?(playlistId: string, trackIds: string[]): Promise<void>;
+}
+
+export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db, opts: MyPlaylistRouteOptions = {}): void {
   ensureMyPlaylistSchema(db);
   registerTextParsers(app);
 
@@ -843,9 +848,24 @@ export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db): void {
 
   app.post<{ Params: { id: string }; Body: AddTracksBody }>(
     '/playlists/:id/tracks',
-    (request, reply) => {
+    async (request, reply) => {
       try {
-        return addPlaylistTracks(db, request.params.id, request.body ?? {});
+        const id = request.params.id;
+        const body = request.body ?? {};
+        const row = getRow(db, id);
+        // Synced Spotify playlist + Spotify songs: those go to the playlist on Spotify; local
+        // files keep going to rune's overlay.
+        if (row && !isRune(row) && opts.addToSpotifyPlaylist) {
+          const ids = parseTrackIds(body.trackIds);
+          const sp = ids.filter((t) => t.startsWith('sp:'));
+          if (sp.length) {
+            await opts.addToSpotifyPlaylist(id, sp);
+            const local = ids.filter((t) => !t.startsWith('sp:'));
+            if (local.length) return addPlaylistTracks(db, id, { ...body, trackIds: local, position: undefined });
+            return getPlaylistDetail(db, id);
+          }
+        }
+        return addPlaylistTracks(db, id, body);
       } catch (err) {
         return sendInputError(reply, err);
       }

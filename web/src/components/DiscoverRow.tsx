@@ -38,7 +38,11 @@ export function DiscoverRow({
   };
 
   return (
-    <li className={`drow${playing ? ' is-playing' : ''}`} onContextMenu={trackMenuHandler(playItem)}>
+    <li
+      className={`drow${playing ? ' is-playing' : ''}`}
+      onContextMenu={trackMenuHandler(playItem)}
+      onClick={(e) => { if ((e.target as HTMLElement).closest('a,button,.pop,[role="menu"]')) return; onPlay(); }}
+    >
       <button className="drow__art" aria-label={`Play ${item.track.title}`} onClick={onPlay}>
         <Cover album={item.album} sizes="44px" />
         <span className="drow__ov">{playing ? <Eq playing={isPlaying} /> : <Play size={15} fill="currentColor" />}</span>

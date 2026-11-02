@@ -16,7 +16,7 @@ import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { normalizeName } from '../db/index.js';
-import { spotifyAlbumIsFull } from '../spotify/library.js';
+import { LIKED_SONGS_PLAYLIST_ID, SpotifyReconnectNeeded, addTracksToSpotifyPlaylist, spotifyAlbumIsFull } from '../spotify/library.js';
 import { createLinking, registerLinkRoutes, ensureLinkSchema } from '../spotify/linking.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
@@ -30,6 +30,7 @@ import { createLoudness, ensureLoudnessSchema, registerLoudnessRoutes } from '..
 import { albumNotHiddenSql, ensureDupesSchema, registerDupesRoutes } from '../library/dupes.js';
 import { createRadio, registerRadioRoutes } from '../radio/index.js';
 import {
+  PlaylistConflictError,
   getPlaylistDetail,
   listAllPlaylists,
   registerMyPlaylistRoutes,
@@ -622,7 +623,26 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       registerDupesRoutes(r, db);
       registerRadioRoutes(r, radio);
       registerRadioStationRoutes(r, iradio);
-      registerMyPlaylistRoutes(r, db);
+      registerMyPlaylistRoutes(r, db, {
+        addToSpotifyPlaylist: async (playlistId, trackIds) => {
+          if (!spotify || !(await spotify.auth.status()).connected) {
+            throw new PlaylistConflictError('Spotify is not connected');
+          }
+          const writes = playlistId === LIKED_SONGS_PLAYLIST_ID ? 'user-library-modify' : 'playlist-modify-private';
+          if (!spotify.auth.grantedScopes().includes(writes)) throw new PlaylistConflictError(new SpotifyReconnectNeeded().message);
+          try {
+            await addTracksToSpotifyPlaylist(spotify.api, db, playlistId, trackIds);
+          } catch (err) {
+            const status = (err as { status?: number }).status;
+            app.log.warn({ err, playlistId }, 'adding to a Spotify playlist failed');
+            if (status === 403) throw new PlaylistConflictError('Spotify only lets you add songs to playlists you own or that are collaborative');
+            if (status === 429) throw new PlaylistConflictError('Spotify is busy (rate limit) — try again in a few minutes');
+            if (status === 404) throw new PlaylistConflictError('Spotify could not find that playlist — it may have been deleted');
+            throw new PlaylistConflictError('Spotify refused the change');
+          }
+          broadcast({ type: 'library-changed' });
+        },
+      });
       registerPeaksRoutes(r, peaks);
       registerPeopleRoutes(r, db);
       registerEditionsRoutes(r, editions);

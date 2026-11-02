@@ -23,6 +23,8 @@ export const SPOTIFY_SCOPES = [
   'user-library-modify',
   'playlist-read-private',
   'playlist-read-collaborative',
+  'playlist-modify-public',
+  'playlist-modify-private',
   'user-read-playback-state',
   'user-modify-playback-state',
   'user-read-currently-playing',
@@ -201,6 +203,12 @@ export class SpotifyAuth {
       // Profile is only cosmetic for /status; tokens are already valid.
     }
     return this.status();
+  }
+
+  /** Scopes the user actually granted (older logins lack newer ones until they reconnect). */
+  grantedScopes(): string[] {
+    const row = this.db.prepare('SELECT scope FROM spotify_auth WHERE id = 1').get() as { scope: string | null } | undefined;
+    return (row?.scope ?? '').split(/\s+/).filter(Boolean);
   }
 
   status(): SpotifyStatus {

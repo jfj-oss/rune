@@ -578,3 +578,89 @@ export async function setSpotifyAlbumSaved(
   const info = db.prepare('UPDATE albums SET in_library = ? WHERE id = ?').run(saved ? 1 : 0, albumId);
   return info.changes > 0;
 }
+
+// ---------- adding Spotify songs to Spotify playlists ----------
+
+/** Thrown when the stored login predates the playlist-write permission. */
+export class SpotifyReconnectNeeded extends Error {
+  constructor() {
+    super('Reconnect Spotify once (Settings → Spotify) so rune may add songs to your Spotify playlists');
+    this.name = 'SpotifyReconnectNeeded';
+  }
+}
+
+export interface PlaylistWriteApi {
+  request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
+  tracks(ids: string[]): Promise<SpotifyTrack[]>;
+}
+
+/**
+ * Add Spotify songs to a synced Spotify playlist (or Liked Songs) on Spotify itself, then
+ * mirror the change locally so rune shows it at once (the next sync confirms it).
+ * Returns how many songs were added.
+ */
+export async function addTracksToSpotifyPlaylist(
+  api: PlaylistWriteApi,
+  db: Db,
+  playlistId: string,
+  trackIds: string[],
+  opts: { now?: () => number } = {},
+): Promise<number> {
+  ensureSpotifySchema(db);
+  ensureSpotifyLibrarySchema(db);
+  const now = opts.now ?? Date.now;
+  const ids = [...new Set(trackIds.filter((t) => t.startsWith('sp:')).map((t) => t.slice(3)))];
+  if (ids.length === 0) return 0;
+
+  // Songs from search / Discover may not be stored yet: store them so the playlist can show them.
+  const have = new Set(
+    (db.prepare(`SELECT id FROM tracks WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids.map((i) => `sp:${i}`)) as { id: string }[]).map((r) => r.id),
+  );
+  const missing = ids.filter((i) => !have.has(`sp:${i}`));
+  if (missing.length) {
+    const fetched = await api.tracks(missing);
+    const tx = db.transaction(() => {
+      const ctx = createStore(db, now);
+      for (const t of fetched) if (t && isPlayablePlaylistTrack(t)) storePlaylistTrack(ctx, t);
+      indexArtists(ctx);
+    });
+    tx();
+  }
+
+  const at = now();
+  if (playlistId === LIKED_SONGS_PLAYLIST_ID) {
+    for (let i = 0; i < ids.length; i += 50) {
+      await api.request<void>('/me/tracks', { method: 'PUT', body: { ids: ids.slice(i, i + 50) } });
+    }
+    // Liked Songs are stored newest first: shift everything down, put the new ones on top.
+    const tx = db.transaction(() => {
+      const n = ids.length;
+      db.prepare('UPDATE playlist_tracks SET position = -(position + ?) - 1 WHERE playlist_id = ?').run(n, playlistId);
+      db.prepare('UPDATE playlist_tracks SET position = -position - 1 WHERE playlist_id = ? AND position < 0').run(playlistId);
+      const ins = db.prepare('INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at) VALUES (?, ?, ?, ?)');
+      ids.forEach((id, k) => ins.run(playlistId, k, `sp:${id}`, at));
+      db.prepare('UPDATE playlists SET track_count = track_count + ?, updated_at = ? WHERE id = ?').run(n, at, playlistId);
+    });
+    tx();
+    return ids.length;
+  }
+
+  const spId = playlistId.startsWith('pl:sp:') ? playlistId.slice(6) : playlistId;
+  let snapshot: string | undefined;
+  for (let i = 0; i < ids.length; i += 100) {
+    const res = await api.request<{ snapshot_id?: string } | undefined>(`/playlists/${encodeURIComponent(spId)}/items`, {
+      method: 'POST',
+      body: { uris: ids.slice(i, i + 100).map((id) => `spotify:track:${id}`) },
+    });
+    snapshot = res?.snapshot_id ?? snapshot;
+  }
+  const tx = db.transaction(() => {
+    const max = (db.prepare('SELECT max(position) AS m FROM playlist_tracks WHERE playlist_id = ?').get(playlistId) as { m: number | null }).m ?? -1;
+    const ins = db.prepare('INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at) VALUES (?, ?, ?, ?)');
+    ids.forEach((id, k) => ins.run(playlistId, max + 1 + k, `sp:${id}`, at));
+    db.prepare('UPDATE playlists SET track_count = track_count + ?, updated_at = ? WHERE id = ?').run(ids.length, at, playlistId);
+  });
+  tx();
+  void snapshot; // the next sync picks up Spotify's new snapshot and confirms the order
+  return ids.length;
+}

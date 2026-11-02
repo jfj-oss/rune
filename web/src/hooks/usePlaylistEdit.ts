@@ -41,12 +41,14 @@ export async function optimisticEdit(
     if (fresh && typeof fresh === 'object' && 'tracks' in fresh) qc.setQueryData(DETAIL(id), fresh);
     void qc.invalidateQueries({ queryKey: LIST });
     return true;
-  } catch {
+  } catch (err) {
     if (prevDetail) qc.setQueryData(DETAIL(id), prevDetail);
     if (prevList) qc.setQueryData(LIST, prevList);
     void qc.invalidateQueries({ queryKey: DETAIL(id) });
     void qc.invalidateQueries({ queryKey: LIST });
-    useUi.getState().toast(`${failMessage} — changes undone`);
+    // the server's reason ("reconnect Spotify", "not your playlist") is more useful than a generic line
+    const why = (err as { serverMessage?: string } | null)?.serverMessage;
+    useUi.getState().toast(why && (err as { status?: number }).status !== 500 ? `${failMessage}: ${why}` : `${failMessage} — changes undone`);
     return false;
   }
 }
@@ -58,11 +60,11 @@ export function usePlaylistActions() {
 
   const addItems = useCallback(async (playlistId: string, playlistName: string, all: PlayItem[]): Promise<boolean> => {
     if (!all.length) return false;
-    // Spotify playlists take local files only (they live in rune's overlay); Spotify songs are refused for now
+    // Spotify playlists: Spotify songs go to the playlist on Spotify; local files stay in rune's overlay
     const { add: items, refused } = splitForTarget(playlistId, all);
     if (!items.length) { toast(SPOTIFY_ADD_NOTE); return false; }
     const overlay = !isRunePlaylist(playlistId);
-    const tracks = items.map((i) => ({ ...toPlaylistTrack(i), ...(overlay ? { entrySource: 'rune-overlay' as const } : {}) }));
+    const tracks = items.map((i) => ({ ...toPlaylistTrack(i), ...(overlay && i.track.source !== 'spotify' ? { entrySource: 'rune-overlay' as const } : {}), addedAt: Date.now() }));
     const ok = await optimisticEdit(qc, playlistId, { type: 'add', tracks }, () => playlistApi.addTracks(playlistId, items.map((i) => i.track.id), tracks), `Could not add to “${playlistName}”`);
     if (ok) {
       noteRecent(playlistId);

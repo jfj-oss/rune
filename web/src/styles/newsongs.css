@@ -170,3 +170,6 @@
   .radio, .radio__scrim, .ctxmenu { animation: none; }
   .is-spinning { animation-duration: 3s; }
 }
+
+/* one click anywhere on a song card plays it */
+.drow { cursor: pointer; }

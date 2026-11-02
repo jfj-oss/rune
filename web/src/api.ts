@@ -18,8 +18,11 @@ function detectMock(): boolean {
 export const isMock = typeof window !== 'undefined' && detectMock();
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** The server's own explanation (`{ error }` body), when it sent one. */
+  serverMessage?: string;
+  constructor(public status: number, message: string, serverMessage?: string) {
     super(message);
+    if (serverMessage) this.serverMessage = serverMessage;
   }
 }
 
@@ -28,7 +31,11 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
   });
-  if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText} — ${path}`);
+  if (!res.ok) {
+    let msg: string | undefined;
+    try { const b = (await res.json()) as { error?: unknown }; if (typeof b?.error === 'string') msg = b.error; } catch { /* not JSON */ }
+    throw new ApiError(res.status, `${res.status} ${res.statusText} — ${path}`, msg);
+  }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
