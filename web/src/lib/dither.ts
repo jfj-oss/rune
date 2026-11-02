@@ -270,12 +270,13 @@ export function ditherHueOf(css: string): DitherHue | null {
 }
 
 /**
- * New-song wave: the dot shapes already on screen swell outwards until they cover ~80% of the page, rest
- * there a moment, then draw back in, slowly at first and faster as they shrink, settling softly at rest.
+ * New-song wave: the dot shapes already on screen swell outwards until they cover ~80% of the page (gently
+ * at first, building, easing into the peak), rest there a moment, then draw back in, slowly at first and
+ * faster as they shrink, settling softly at rest. 6.8 s in all.
  * The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes grow from where they
  * are. `amt` 0..1 (how far out), `dir` +1 swelling, 0 holding, -1 drawing back.
  */
-export const WAVE = { rise: 1.3, hold: 0.8, fall: 1.3, ripple: 0.035, get length() { return this.rise + this.hold + this.fall; } };
+export const WAVE = { rise: 2.6, hold: 1.6, fall: 2.6, ripple: 0.035, get length() { return this.rise + this.hold + this.fall; } };
 
 /**
  * Field exponent at the peak for a screen shape (width / height). Measured with field() over many frames,
@@ -290,8 +291,8 @@ export function wavePeakExponent(aspect: number): number {
 export function waveAt(dt: number): { amt: number; dir: number; t: number } {
   const { rise, hold, fall, length } = WAVE;
   if (!(dt >= 0) || dt >= length) return { amt: 0, dir: 1, t: 0 };
-  // out: eases into the peak
-  if (dt < rise) return { amt: Math.sin((Math.PI / 2) * (dt / rise)), dir: 1, t: dt };
+  // out: starts gently, builds, and eases into the peak (like a swell of water, not a jolt)
+  if (dt < rise) return { amt: 0.5 - 0.5 * Math.cos(Math.PI * (dt / rise)), dir: 1, t: dt };
   // a moment at full size
   if (dt < rise + hold) return { amt: 1, dir: 0, t: dt };
   // back: starts gently, accelerates, then lands softly at rest

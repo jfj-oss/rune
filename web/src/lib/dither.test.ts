@@ -136,6 +136,10 @@ describe('waveAt', () => {
     expect(waveAt(-1).amt).toBe(0);
     expect(waveAt(0).amt).toBeCloseTo(0, 5);
     expect(waveAt(WAVE.rise * 0.5).dir).toBe(1);
+    expect(WAVE.length).toBeCloseTo(6.8, 5);
+    // the way out starts gently too: the first quarter grows less than the second
+    const out = (q: number) => waveAt(q * WAVE.rise).amt;
+    expect(out(0.25)).toBeLessThan(out(0.5) - out(0.25));
     // resting at the peak
     expect(waveAt(WAVE.rise + 0.01).amt).toBe(1);
     expect(waveAt(WAVE.rise + WAVE.hold - 0.01).amt).toBe(1);
