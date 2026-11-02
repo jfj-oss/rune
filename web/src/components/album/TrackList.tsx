@@ -30,7 +30,7 @@ export function TrackList({ album }: { album: Album }) {
         return (
           <Fragment key={t.id}>
             {head && <div className="tracks__disc" role="row">Disc {t.disc}</div>}
-            <div id={`trk-${t.id}`} className={`trow${playing ? ' is-playing' : ''}`} role="row" onDoubleClick={() => void playItems(items, i)}>
+            <div id={`trk-${t.id}`} className={`trow${playing ? ' is-playing' : ''}`} role="row" onClick={(e) => { if ((e.target as HTMLElement).closest('a,button,.pop,[role="menu"]')) return; void playItems(items, i); }}>
               <button className="trow__num" aria-label={`Play ${t.title}`} onClick={() => void playItems(items, i)}>
                 <span className="trow__n">{playing ? <Eq playing={state.status === 'playing'} /> : t.number}</span>
                 <Play size={14} fill="currentColor" className="trow__p" />

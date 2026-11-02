@@ -74,6 +74,15 @@ export const api = {
     if (isMock) return (await mock()).mockApi.zones();
     return http('/zones');
   },
+  /** Spotify devices hidden from the "Play on" list (by name, for every rune page). */
+  async hiddenZones(): Promise<string[]> {
+    if (isMock) return [];
+    return http('/zones/hidden');
+  },
+  async setZoneHidden(name: string, hidden: boolean): Promise<string[]> {
+    if (isMock) return [];
+    return http('/zones/hidden', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, hidden }) });
+  },
   /** Contract gap: not in CONTRACTS.md yet. */
   async candidates(albumId: string): Promise<MatchCandidate[]> {
     if (isMock) return (await mock()).mockApi.candidates(albumId);

@@ -136,7 +136,7 @@ export default function SearchPage() {
               <SectionHead title="Tracks" />
               <ul className="tlist">
                 {tracks.map((t) => (
-                  <li key={t.id} className="tlist__row" {...nv(`tr:${t.id}`)}>
+                  <li key={t.id} className="tlist__row tlist__row--click" {...nv(`tr:${t.id}`)} onClick={(e) => { if ((e.target as HTMLElement).closest('a,button')) return; void playTrack(t.albumId, t.id); }}>
                     <button className="tlist__art" aria-label={`Play ${t.title}`} onClick={() => void playTrack(t.albumId, t.id)}>
                       <Cover album={{ id: t.albumId, title: albumTitle(t.albumId) }} sizes="44px" />
                       <span className="tlist__play"><Play size={16} fill="currentColor" /></span>

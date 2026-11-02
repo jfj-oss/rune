@@ -300,7 +300,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
               <span className="ptools__hint">
                 {spotifyList
                   ? (mineCount > 0 ? <><HardDrive size={13} /> Your local rows can be {reorder ? <>dragged <GripVertical size={13} /> and </> : ''}removed · Spotify rows are locked</> : <>Add local files with “Add to playlist” on any track or album · Spotify rows are locked</>)
-                  : reorder ? <>Drag <GripVertical size={13} /> to reorder · click a row to select, shift or ⌘ for several</> : <>Newest first · switch to “Playlist order” to drag rows · click a row to select</>}
+                  : reorder ? <>Drag <GripVertical size={13} /> to reorder · click to play · shift or ⌘-click to select</> : <>Newest first · switch to “Playlist order” to drag rows · shift or ⌘-click to select</>}
               </span>
             </>
           ) : (
@@ -340,8 +340,12 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
               role="row"
               aria-selected={editable ? picked : undefined}
               style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: row.size, transform: `translateY(${y}px)`, transition: drag && drag.from !== i ? 'transform 150ms ease' : undefined, zIndex: drag?.from === i ? 5 : undefined }}
-              onClick={editable && mine ? (e) => { if ((e.target as HTMLElement).closest('a,button,.pop')) return; pick(i, e); } : undefined}
-              onDoubleClick={go}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('a,button,.pop,[role="menu"]')) return;
+                // one click plays; selecting is shift / ⌘-click, or any click while "Select" is on
+                if (editable && mine && (selectMode || sel.size > 0 || e.shiftKey || e.metaKey || e.ctrlKey)) pick(i, e);
+                else go();
+              }}
             >
  {editable && !mine && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
               {editable && mine && reorder && (

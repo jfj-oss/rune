@@ -163,6 +163,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
   // Auto-radio: keep the PC zone playing when its queue runs out (default on).
   const AUTO_RADIO_KEY = 'settings.autoRadio';
+  const HIDDEN_ZONES_KEY = 'zones.hiddenNames';
+  const hiddenZoneNames = (): string[] => {
+    try {
+      const v = JSON.parse(getState(HIDDEN_ZONES_KEY) ?? '[]') as unknown;
+      return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  };
   const autoRadioEnabled = (): boolean => getState(AUTO_RADIO_KEY) !== '0';
   const SYNC_MIN_GAP_MS = 25 * 60_000;
   let spotifySyncInFlight: Promise<void> | null = null;
@@ -776,7 +785,21 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           // PC speakers first: the phone's default target.
           zones.unshift(entry);
         }
-        return zones;
+        // Spotify devices the user hid ("does nothing" duplicates such as the Spotify app on the
+        // same Mac as a rune tab). The pc zone's own Spotify app is matched above regardless.
+        const hidden = new Set(hiddenZoneNames());
+        return zones.filter((z) => !(z.kind === 'spotify' && hidden.has(z.name)));
+      });
+
+      r.get('/zones/hidden', async () => hiddenZoneNames());
+      r.post<{ Body: { name?: unknown; hidden?: unknown } }>('/zones/hidden', async (req, reply) => {
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 200) : '';
+        if (!name) return reply.code(400).send({ error: 'name required' });
+        const names = new Set(hiddenZoneNames());
+        if (req.body?.hidden === false) names.delete(name);
+        else names.add(name);
+        setState(HIDDEN_ZONES_KEY, JSON.stringify([...names]));
+        return [...names];
       });
 
       r.get<{ Params: { zone: string } }>('/player/:zone', async (req, reply) => {

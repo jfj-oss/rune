@@ -179,3 +179,17 @@ button.note__track:hover { text-decoration: underline; text-underline-offset: 3p
 .banner__btn { margin-left: 4px; font-weight: 700; color: #1a1306; background: var(--warn); border-radius: 999px; padding: 5px 14px; font-size: 13px; }
 .banner__btn:hover { filter: brightness(1.1); }
 @media (max-width: 899px) { .banner { flex-wrap: wrap; padding-top: 14px; padding-left: 62px; } .banner svg { position: absolute; left: 20px; } }
+
+/* Play-on list: a hide button beside Spotify devices, and the hidden ones at the bottom */
+.zonerow { display: flex; align-items: center; gap: 2px; }
+.zonerow > .menu__item { flex: 1; min-width: 0; }
+.zonerow__hide { opacity: 0; color: var(--text-3); flex: none; }
+.zonerow:hover .zonerow__hide, .zonerow__hide:focus-visible { opacity: 1; }
+@media (hover: none) { .zonerow__hide { opacity: 0.7; } }
+.zones__hidden { border-top: 1px solid color-mix(in srgb, #fff 8%, transparent); margin-top: 6px; padding-top: 6px; }
+.zones__hiddenbtn { background: none; border: 0; color: var(--text-3); font-size: 12.5px; padding: 6px 10px; cursor: pointer; }
+.zones__hiddenbtn:hover { color: var(--text-2); }
+.zonerow--hidden { justify-content: space-between; padding: 2px 6px 2px 10px; color: var(--text-2); font-size: 13.5px; }
+
+/* one click on a track row plays it */
+.trow, .prow, .tlist__row--click { cursor: pointer; }

@@ -1,5 +1,6 @@
-import { ArrowRight, Check, Monitor, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Smartphone, Speaker, Volume1, Volume2, VolumeX, Globe } from 'lucide-react';
+import { ArrowRight, Check, Monitor, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Smartphone, Speaker, Volume1, Volume2, VolumeX, Globe, Eye, EyeOff } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { api } from '../../api';
 import { formatDuration } from '../../lib/format';
 import { usePosition } from '../../hooks/usePosition';
 import type { ZoneInfo } from '../../lib/types';
@@ -203,8 +204,13 @@ function ZoneList({ close }: { close(): void }) {
   const setZone = usePlayer((s) => s.setZone);
   const refresh = usePlayer((s) => s.refreshZones);
   const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
   // the Spotify app on the PC (and phones) come and go: look again whenever the list is opened
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(); void api.hiddenZones().then(setHidden, () => undefined); }, [refresh]);
+  const toggleHidden = async (name: string, hide: boolean) => {
+    try { setHidden(await api.setZoneHidden(name, hide)); await refresh(); } catch { /* server offline */ }
+  };
   return (
     <>
       <div className="popover__title">Play on</div>
@@ -212,13 +218,29 @@ function ZoneList({ close }: { close(): void }) {
         const I = kindIcon[z.kind] ?? Monitor;
         const hint = zoneHint(z, mixed && z.id === zone);
         return (
-          <button key={z.id} className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`} onClick={() => { void setZone(z.id); close(); }}>
-            <I size={16} />
-            <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
-            {z.id === zone && <Check size={16} className="menu__check" />}
-          </button>
+          <div key={z.id} className="zonerow">
+            <button className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`} onClick={() => { void setZone(z.id); close(); }}>
+              <I size={16} />
+              <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
+              {z.id === zone && <Check size={16} className="menu__check" />}
+            </button>
+            {z.kind === 'spotify' && z.id !== zone && (
+              <button className="btn-icon zonerow__hide" title={`Hide “${z.name}” from this list`} aria-label={`Hide ${z.name}`} onClick={() => void toggleHidden(z.name, true)}><EyeOff size={14} /></button>
+            )}
+          </div>
         );
       })}
+      {hidden.length > 0 && (
+        <div className="zones__hidden">
+          <button className="zones__hiddenbtn" onClick={() => setShowHidden((v) => !v)}>{showHidden ? 'Hide' : 'Show'} hidden devices ({hidden.length})</button>
+          {showHidden && hidden.map((n) => (
+            <div key={n} className="zonerow zonerow--hidden">
+              <span className="zoneitem"><span>{n}</span></span>
+              <button className="btn btn--sm btn--ghost" onClick={() => void toggleHidden(n, false)}><Eye size={14} /> Show</button>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
