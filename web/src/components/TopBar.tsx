@@ -6,7 +6,7 @@ import { useSearchNav } from '../store/searchNav';
 import { AMBIENTS, useUi, type Ambient } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
 
-const AMBIENT_LABEL: Record<Ambient, string> = { cycle: 'Cycle', blue: 'Blue', purple: 'Purple', green: 'Green', off: 'Off' };
+const AMBIENT_LABEL: Record<Ambient, string> = { cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off' };
 
 export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: boolean }) {
   const nav = useNavigate();
