@@ -143,6 +143,32 @@ export interface SpotifyPlayBody {
   position_ms?: number;
 }
 
+export interface SpotifyUsageCount {
+  /** `METHOD normalizedPath`, e.g. `GET /me/player`. */
+  path: string;
+  count: number;
+}
+
+export interface SpotifyHourlyUsage {
+  /** Epoch ms at the start of the completed clock hour. */
+  hourStart: number;
+  total: number;
+  topPaths: SpotifyUsageCount[];
+}
+
+export interface SpotifyUsage {
+  /** Real network requests since this client was created. */
+  sinceStart: number;
+  /** Requests in the current clock hour. */
+  lastHour: number;
+  /** Requests in the current and previous 24 clock hours. */
+  last24h: number;
+  /** Request counts for the last 24 hours, busiest first (at most 20 entries). */
+  byPath: SpotifyUsageCount[];
+  /** Epoch ms when the circuit breaker stops blocking, or null when not blocked. */
+  blockedUntil: number | null;
+}
+
 export interface SpotifyApiOptions {
   /** Injected for tests. Defaults to global fetch. */
   fetch?: FetchLike;
@@ -155,6 +181,39 @@ export interface SpotifyApiOptions {
   maxRateLimitRetries?: number;
   /** Retry-After values larger than this are surfaced instead of blocking (default 60s). */
   maxRetryAfterMs?: number;
+  /** Clock for the circuit breaker and hourly buckets (default Date.now). */
+  now?: () => number;
+  /** Called once per completed clock hour that had requests. */
+  onHourlyUsage?: (usage: SpotifyHourlyUsage) => void;
+}
+
+const HOUR_MS = 3_600_000;
+/** Current hour + the previous 24, enough for the rolling 24-hour total. */
+const USAGE_KEEP_HOURS = 25;
+const USAGE_BY_PATH = 20;
+/** Spotify ids are 22-char base62; some ids (and other opaque segments) are long hex. */
+const ID_SEGMENT = /^(?:[0-9A-Za-z]{22}|[0-9A-Fa-f]{16,})$/;
+
+/** Strip the query string and collapse Spotify-id path segments to `:id`. */
+export function normalizeSpotifyPath(path: string): string {
+  const bare = path.split('?')[0] ?? path;
+  return bare
+    .split('/')
+    .map((segment) => (ID_SEGMENT.test(segment) ? ':id' : segment))
+    .join('/');
+}
+
+function sumCounts(counts: Iterable<number>): number {
+  let total = 0;
+  for (const n of counts) total += n;
+  return total;
+}
+
+function topCounts(bucket: Map<string, number>, limit: number): SpotifyUsageCount[] {
+  return [...bucket.entries()]
+    .map(([path, count]) => ({ path, count }))
+    .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path))
+    .slice(0, limit);
 }
 
 export class SpotifyApi {
@@ -164,6 +223,17 @@ export class SpotifyApi {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly maxRateLimitRetries: number;
   private readonly maxRetryAfterMs: number;
+  private readonly now: () => number;
+  private readonly onHourlyUsage: ((usage: SpotifyHourlyUsage) => void) | undefined;
+
+  /** Circuit breaker: set when Spotify answers with a Retry-After above maxRetryAfterMs. */
+  private blockedUntilAt: number | null = null;
+  private sinceStart = 0;
+  /** Epoch-hour -> `METHOD path` -> count. */
+  private readonly hourCounts = new Map<number, Map<string, number>>();
+  private lastRecordedHour: number | null = null;
+  /** Rolls the hourly line even when no request arrives (e.g. while the breaker is open). */
+  private hourlyTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: SpotifyApiOptions) {
     this.fetchImpl = opts.fetch ?? ((url, init) => globalThis.fetch(url, init));
@@ -172,12 +242,60 @@ export class SpotifyApi {
     this.sleep = opts.sleep ?? defaultSleep;
     this.maxRateLimitRetries = opts.maxRateLimitRetries ?? 2;
     this.maxRetryAfterMs = opts.maxRetryAfterMs ?? 60_000;
+    this.now = opts.now ?? Date.now;
+    this.onHourlyUsage = opts.onHourlyUsage;
+    if (this.onHourlyUsage) {
+      this.hourlyTimer = setInterval(() => this.flushHourlyUsage(), 60_000);
+      (this.hourlyTimer as { unref?: () => void }).unref?.();
+    }
+  }
+
+  /** Epoch ms until which Spotify refuses requests, or null when not blocked. */
+  blockedUntil(): number | null {
+    const until = this.blockedUntilAt;
+    if (until === null) return null;
+    if (this.now() >= until) {
+      this.blockedUntilAt = null;
+      return null;
+    }
+    return until;
+  }
+
+  /** Real network requests since this client was created, bucketed by hour. */
+  usage(): SpotifyUsage {
+    const now = this.now();
+    const hour = Math.floor(now / HOUR_MS);
+    const lastHour = sumCounts(this.hourCounts.get(hour)?.values() ?? []);
+    const merged = new Map<string, number>();
+    let last24h = 0;
+    for (const [h, bucket] of this.hourCounts) {
+      if (h < hour - 24) continue;
+      for (const [path, count] of bucket) {
+        last24h += count;
+        merged.set(path, (merged.get(path) ?? 0) + count);
+      }
+    }
+    return {
+      sinceStart: this.sinceStart,
+      lastHour,
+      last24h,
+      byPath: topCounts(merged, USAGE_BY_PATH),
+      blockedUntil: this.blockedUntil(),
+    };
   }
 
   // ---------- transport ----------
 
   /** Authenticated request with one refresh+retry on 401 and Retry-After handling on 429. */
   async request<T>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string> } = {}): Promise<T> {
+    // Circuit breaker: a long Retry-After means Spotify is out of quota. Do not even ask
+    // for a token or touch the network until it expires.
+    const blocked = this.blockedUntil();
+    if (blocked !== null) {
+      const remaining = blocked - this.now();
+      throw new HttpError(`Spotify rate limited; retry after ${remaining}ms`, 429, '', remaining);
+    }
+
     const headers: Record<string, string> = { ...init.headers };
     if (init.body !== undefined) headers['Content-Type'] = 'application/json';
     let token = await this.getToken(false);
@@ -185,6 +303,7 @@ export class SpotifyApi {
     let rateLimitRetries = 0;
 
     for (;;) {
+      this.recordRequest(init.method ?? 'GET', path);
       const res = await this.fetchImpl(this.baseUrl + path, {
         method: init.method ?? 'GET',
         headers: { ...headers, Authorization: `Bearer ${token}` },
@@ -202,6 +321,7 @@ export class SpotifyApi {
         const seconds = header === null ? 1 : Number(header);
         const retryAfterMs = Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : 1000;
         if (retryAfterMs > this.maxRetryAfterMs) {
+          this.blockedUntilAt = this.now() + retryAfterMs;
           throw new HttpError(`Spotify rate limited; retry after ${retryAfterMs}ms`, 429, await safeText(res), retryAfterMs);
         }
         rateLimitRetries++;
@@ -222,6 +342,45 @@ export class SpotifyApi {
       } catch {
         return undefined as T;
       }
+    }
+  }
+
+  /** Count one real network request, roll the hour buckets and prune old ones. */
+  private recordRequest(method: string, path: string): void {
+    const key = `${method.toUpperCase()} ${normalizeSpotifyPath(path)}`;
+    const hour = Math.floor(this.now() / HOUR_MS);
+    this.sinceStart++;
+    let bucket = this.hourCounts.get(hour);
+    if (!bucket) {
+      bucket = new Map();
+      this.hourCounts.set(hour, bucket);
+    }
+    bucket.set(key, (bucket.get(key) ?? 0) + 1);
+    this.logCompletedHours(hour);
+    this.pruneHours(hour);
+  }
+
+  private flushHourlyUsage(): void {
+    const hour = Math.floor(this.now() / HOUR_MS);
+    this.logCompletedHours(hour);
+    this.pruneHours(hour);
+  }
+
+  private pruneHours(hour: number): void {
+    for (const h of this.hourCounts.keys()) if (h < hour - (USAGE_KEEP_HOURS - 1)) this.hourCounts.delete(h);
+  }
+
+  /** Emit one line per completed hour that saw traffic (lazily, on the next request). */
+  private logCompletedHours(hour: number): void {
+    const previous = this.lastRecordedHour;
+    this.lastRecordedHour = hour;
+    if (previous === null || hour <= previous || !this.onHourlyUsage) return;
+    for (let h = previous; h < hour; h++) {
+      const bucket = this.hourCounts.get(h);
+      if (!bucket) continue;
+      const total = sumCounts(bucket.values());
+      if (total === 0) continue;
+      this.onHourlyUsage({ hourStart: h * HOUR_MS, total, topPaths: topCounts(bucket, 5) });
     }
   }
 

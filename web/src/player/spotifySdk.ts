@@ -320,7 +320,9 @@ export class SpotifySdkEngine implements Engine {
       const token = await spotifyToken();
       const h = { Authorization: `Bearer ${token}` };
       const dev = `device_id=${encodeURIComponent(deviceId)}`;
-      await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=false&${dev}`, { method: 'PUT', headers: h });
+      const shuffle = await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=false&${dev}`, { method: 'PUT', headers: h });
+      // Out of quota: do not send the second write (or retry).
+      if (shuffle.status === 429) return;
       await fetch(`https://api.spotify.com/v1/me/player/repeat?state=off&${dev}`, { method: 'PUT', headers: h });
     } catch { /* best effort: rune still corrects the song at each change */ }
   }
@@ -345,7 +347,13 @@ export class SpotifySdkEngine implements Engine {
         continue;
       }
       if (res.status === 401) continue;
-      if (res.status === 429) { await sleep(Math.min(5000, Number(res.headers.get('retry-after') ?? 1) * 1000)); continue; }
+      // Never retry a 429: Spotify's daily quota does not recover in seconds, and every
+      // retry spends more of it.
+      if (res.status === 429) {
+        throw new Error(
+          'Spotify is refusing requests right now (daily limit reached) — try again later. Local music still works.',
+        );
+      }
       if (res.status === 403) throw new Error('Spotify Premium is required to play in the browser');
       throw new Error(`Spotify refused to play this (${res.status})`);
     }

@@ -24,6 +24,43 @@ function playing() {
   return { e, player, onState };
 }
 
+describe('SpotifySdkEngine quota handling', () => {
+  it('does not retry a 429 from PUT /me/player/play', async () => {
+    const e = new SpotifySdkEngine('test');
+    const error = vi.fn();
+    e.onError(error);
+    // Skip the SDK device handshake; go straight to the Web API call.
+    (e as unknown as { ensureReady(): Promise<string> }).ensureReady = async () => 'dev';
+    let spotifyCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes('/api/spotify/token')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ access_token: 'tok', expires_at: Date.now() + 300_000 }),
+          };
+        }
+        spotifyCalls++;
+        return new Response('', { status: 429, headers: { 'retry-after': '32400' } });
+      }),
+    );
+    try {
+      e.load(track('a'), 0, true);
+      await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
+      expect(error.mock.calls[0]![0]).toBe(
+        'Spotify is refusing requests right now (daily limit reached) — try again later. Local music still works.',
+      );
+      expect(spotifyCalls).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      e.dispose();
+    }
+  });
+});
+
 describe('SpotifySdkEngine look-ahead', () => {
   it('Next uses Spotify’s preloaded next song instead of a new play request', () => {
     const { e, player, onState } = playing();

@@ -1,6 +1,6 @@
 import type { PlayerState, QueueItem, Zone } from '@liner/shared';
 import { create } from 'zustand';
-import { api, isMock } from '../api';
+import { ApiError, api, isMock } from '../api';
 import { deviceName } from '../lib/device';
 import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
@@ -123,6 +123,13 @@ function routeElsewhere(req: ChooserRequest): Promise<void> | void {
   sp.askWhere(req);
 }
 
+/** The server's own explanation (`{ error }`) when it sent one; generic text for a dead network. */
+function reportCommandFailure(e: unknown): void {
+  const message =
+    e instanceof ApiError && e.serverMessage ? e.serverMessage : 'That did not work — is the server reachable?';
+  useUi.getState().toast(message);
+}
+
 export const usePlayer = create<PlayerStore>((set, get) => {
   const rec = { albumId: null as string | null };
   const attach = (b: Backend) => {
@@ -163,6 +170,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
     },
 
     async setZone(id, opts) {
+      try {
       const z = get().zones.find((x) => x.id === id);
       if (!z || id === get().zone) return;
       const handoff = opts?.handoff !== false;
@@ -212,64 +220,84 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       }
       attach(b);
       await b.refresh();
+      } catch (e) {
+        reportCommandFailure(e);
+      }
     },
 
     async playItems(items, startIndex = 0, opts) {
-      if (!items.length) return;
-      const st = get();
-      const z = st.zones.find((x) => x.id === st.zone);
-      if (!z || !backends.get(z.id)) return;
-      let list = items;
-      let start = startIndex;
-      if (opts?.shuffle) {
-        list = items.slice();
-        for (let i = list.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [list[i], list[j]] = [list[j] as PlayItem, list[i] as PlayItem];
+      try {
+        if (!items.length) return;
+        const st = get();
+        const z = st.zones.find((x) => x.id === st.zone);
+        if (!z || !backends.get(z.id)) return;
+        let list = items;
+        let start = startIndex;
+        if (opts?.shuffle) {
+          list = items.slice();
+          for (let i = list.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [list[i], list[j]] = [list[j] as PlayItem, list[i] as PlayItem];
+          }
+          start = 0;
         }
-        start = 0;
+        const route = routeItems(z, list, start, capsFrom(useSpotify.getState()));
+        if (!route.ok) {
+          await routeElsewhere({ items: list, startIndex: start, shuffle: opts?.shuffle, need: route.need, context: opts?.context });
+          return;
+        }
+        if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
+        await startOn(backends.get(z.id)!, z, route.items, route.startIndex, opts?.shuffle);
+      } catch (e) {
+        // e.g. a 429 from the Spotify quota: show the server's own explanation, never leave
+        // this promise unhandled (callers fire it with `void`).
+        reportCommandFailure(e);
       }
-      const route = routeItems(z, list, start, capsFrom(useSpotify.getState()));
-      if (!route.ok) return routeElsewhere({ items: list, startIndex: start, shuffle: opts?.shuffle, need: route.need, context: opts?.context });
-      if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
-      await startOn(backends.get(z.id)!, z, route.items, route.startIndex, opts?.shuffle);
     },
 
     async playOn(zoneId, req, remember = true) {
-      const z = get().zones.find((x) => x.id === zoneId);
-      if (!z) return;
-      const caps = capsFrom(useSpotify.getState());
-      const route = routeItems(z, req.items, req.startIndex, { sdk: caps.sdk });
-      if (!route.ok) return;
-      if (remember) useSpotify.getState().remember(req.need, zoneId);
-      await get().setZone(zoneId, { handoff: false });
-      const b = backends.get(zoneId);
-      if (!b) return;
-      if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
-      await startOn(b, z, route.items, route.startIndex, req.shuffle);
+      try {
+        const z = get().zones.find((x) => x.id === zoneId);
+        if (!z) return;
+        const caps = capsFrom(useSpotify.getState());
+        const route = routeItems(z, req.items, req.startIndex, { sdk: caps.sdk });
+        if (!route.ok) return;
+        if (remember) useSpotify.getState().remember(req.need, zoneId);
+        await get().setZone(zoneId, { handoff: false });
+        const b = backends.get(zoneId);
+        if (!b) return;
+        if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
+        await startOn(b, z, route.items, route.startIndex, req.shuffle);
+      } catch (e) {
+        reportCommandFailure(e);
+      }
     },
 
     async enqueueItems(items, next, opts) {
-      const st = get();
-      const z = st.zones.find((x) => x.id === st.zone);
-      const b = z && backends.get(z.id);
-      if (!z || !b || !items.length) return;
-      const caps = capsFrom(useSpotify.getState());
-      const ok = items.filter((i) => zoneCanPlay(z, i.track.source, caps));
-      if (!ok.length) {
-        useUi.getState().toast(z.kind === 'pc' ? cantPlayMessage(z, items[0]!.track.source) : `${cantPlayMessage(z, items[0]!.track.source)} — pick another zone first`);
-        return;
+      try {
+        const st = get();
+        const z = st.zones.find((x) => x.id === st.zone);
+        const b = z && backends.get(z.id);
+        if (!z || !b || !items.length) return;
+        const caps = capsFrom(useSpotify.getState());
+        const ok = items.filter((i) => zoneCanPlay(z, i.track.source, caps));
+        if (!ok.length) {
+          useUi.getState().toast(z.kind === 'pc' ? cantPlayMessage(z, items[0]!.track.source) : `${cantPlayMessage(z, items[0]!.track.source)} — pick another zone first`);
+          return;
+        }
+        await b.send({ type: 'enqueue', trackIds: ok.map((i) => i.track.id), next }, ok);
+        if (opts?.quiet) return;
+        const skipped = items.length - ok.length;
+        useUi.getState().toast(next ? 'Playing next' : `Added to queue — ${ok.length} ${ok.length === 1 ? 'track' : 'tracks'}${skipped ? ` (${skipped} can't play here)` : ''}`);
+      } catch (e) {
+        reportCommandFailure(e);
       }
-      await b.send({ type: 'enqueue', trackIds: ok.map((i) => i.track.id), next }, ok);
-      if (opts?.quiet) return;
-      const skipped = items.length - ok.length;
-      useUi.getState().toast(next ? 'Playing next' : `Added to queue — ${ok.length} ${ok.length === 1 ? 'track' : 'tracks'}${skipped ? ` (${skipped} can't play here)` : ''}`);
     },
 
     async command(cmd) {
       const b = backends.get(get().zone);
       if (!b) return;
-      try { await b.send(cmd); } catch { useUi.getState().toast('That did not work — is the server reachable?'); }
+      try { await b.send(cmd); } catch (e) { reportCommandFailure(e); }
     },
   };
 });

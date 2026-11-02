@@ -6,7 +6,7 @@ import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
 import { getAlbum } from '../api/library.js';
-import { SpotifyApi } from './api.js';
+import { SpotifyApi, type SpotifyHourlyUsage } from './api.js';
 import { SpotifyAuth, registerSpotifyRoutes, type SpotifyAuthOptions, type SpotifyStatus } from './auth.js';
 import { SpotifyCatalog, type SearchResults } from './catalog.js';
 import {
@@ -33,6 +33,8 @@ export interface CreateSpotifyOptions extends SpotifyAuthOptions, ConnectZoneOpt
   onLogin?: () => void;
   /** TTL for identical catalogue searches (default 60 s). */
   catalogTtlMs?: number;
+  /** One pino line per completed hour of Spotify traffic (see SpotifyApiOptions). */
+  onHourlyUsage?: (usage: SpotifyHourlyUsage) => void;
 }
 
 export interface SpotifyLibrarySyncResult {
@@ -72,9 +74,16 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     fetch: opts.fetch,
     baseUrl: opts.endpoints?.api,
     getToken: (force) => auth.getAccessToken(force),
+    now: opts.now,
+    onHourlyUsage: opts.onHourlyUsage,
   });
   // songs rune has stored (played, saved, in playlists) start with their titles + covers, no lookup
-  const zones = createSpotifyZones(api, { knownTracks: (ids) => loadQueueItems(db, ids), ...opts });
+  const zones = createSpotifyZones(api, {
+    knownTracks: (ids) => loadQueueItems(db, ids),
+    // While Spotify is out of quota the zone loop parks itself until the breaker expires.
+    blockedUntil: () => api.blockedUntil(),
+    ...opts,
+  });
   const catalog = new SpotifyCatalog(api, { ttlMs: opts.catalogTtlMs, now: opts.now });
   const now = opts.now ?? Date.now;
   const artistPages = new SpotifyArtistPages(api, now);

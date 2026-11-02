@@ -84,13 +84,91 @@ describe('SpotifyApi transport', () => {
     expect(slept).toEqual([1000]);
   });
 
-  it('surfaces an excessive Retry-After instead of blocking', async () => {
+  it('surfaces an excessive Retry-After and opens the circuit breaker', async () => {
     const { fetch } = fakeFetch(() => jsonResponse(429, {}, { 'Retry-After': '120' }));
     const api = new SpotifyApi({ fetch, baseUrl: BASE, getToken: async () => 'tok', sleep: async () => {} });
     const err = await api.album('x').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(HttpError);
     expect((err as HttpError).status).toBe(429);
     expect((err as HttpError).retryAfterMs).toBe(120_000);
+    expect(api.blockedUntil()).toBeTruthy();
+  });
+
+  it('blocks without calling fetch until the Retry-After has passed', async () => {
+    let t = 1_000_000;
+    const { fetch, calls } = fakeFetch(() => jsonResponse(429, {}, { 'Retry-After': '32400' }));
+    const api = new SpotifyApi({
+      fetch,
+      baseUrl: BASE,
+      getToken: async () => 'tok',
+      sleep: async () => {},
+      now: () => t,
+      maxRetryAfterMs: 60_000,
+    });
+
+    await expect(api.album('x')).rejects.toMatchObject({ status: 429, retryAfterMs: 32_400_000 });
+    expect(api.blockedUntil()).toBe(t + 32_400_000);
+    expect(calls).toHaveLength(1);
+
+    // Still blocked: immediate 429 with the remaining time, and no network at all.
+    t += 3_600_000;
+    const err = await api.album('y').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpError);
+    expect((err as HttpError).retryAfterMs).toBe(32_400_000 - 3_600_000);
+    expect(calls).toHaveLength(1);
+
+    // The block expired: the next request goes out again.
+    t += 32_400_000;
+    expect(api.blockedUntil()).toBeNull();
+    await expect(api.album('z')).rejects.toMatchObject({ status: 429 });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('counts real requests by normalized path and clock hour', async () => {
+    let t = Date.UTC(2026, 10, 2, 10, 15);
+    const hourly: { hourStart: number; total: number; topPaths: { path: string; count: number }[] }[] = [];
+    const { fetch } = fakeFetch((url) => jsonResponse(200, { id: url.pathname.split('/').pop() ?? 'x', items: [], next: null }));
+    const api = new SpotifyApi({
+      fetch,
+      baseUrl: BASE,
+      getToken: async () => 'tok',
+      now: () => t,
+      onHourlyUsage: (u) => hourly.push(u),
+    });
+
+    await api.album('4uLU6hMCjMI75M1A2tKUQC'); // 22-char base62 id
+    await api.album('0123456789abcdef0123456789abcdef'); // long hex id
+    await api.track('ABCDEFGHIJKLMNOPQRSTUV'); // 22-char id
+    await api.search('abbey road'); // query string is stripped
+
+    expect(api.usage()).toMatchObject({
+      sinceStart: 4,
+      lastHour: 4,
+      last24h: 4,
+      blockedUntil: null,
+      byPath: [
+        { path: 'GET /albums/:id', count: 2 },
+        { path: 'GET /search', count: 1 },
+        { path: 'GET /tracks/:id', count: 1 },
+      ],
+    });
+
+    // Next clock hour: the previous hour is logged once and the buckets move on.
+    const firstHour = Math.floor(t / 3_600_000) * 3_600_000;
+    t += 3_600_000;
+    await api.album('abcdefabcdefabcdefabcd');
+    expect(api.usage()).toMatchObject({ sinceStart: 5, lastHour: 1, last24h: 5 });
+    expect(hourly).toEqual([
+      {
+        hourStart: firstHour,
+        total: 4,
+        topPaths: [
+          { path: 'GET /albums/:id', count: 2 },
+          { path: 'GET /search', count: 1 },
+          { path: 'GET /tracks/:id', count: 1 },
+        ],
+      },
+    ]);
   });
 
   it('follows pagination for saved albums', async () => {

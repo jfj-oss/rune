@@ -1,6 +1,6 @@
 // Spotify Connect playback zones. Each Connect device exposed by the account
-// becomes a PlaybackZone whose state is polled from /me/player (1 s while
-// playing, 3 s while idle; polling stops when nothing subscribes).
+// becomes a PlaybackZone whose state is polled from /me/player (3 s while
+// playing, 10 s while idle; polling stops when nothing subscribes).
 import type { PlayerCommand, PlayerState, QueueItem, Track, Zone } from '@liner/shared';
 import type { PlaybackZone } from '../modules.js';
 import type {
@@ -38,13 +38,15 @@ export interface SpotifyZoneApi {
 export interface ConnectZoneOptions {
   pollMsPlaying?: number;
   pollMsIdle?: number;
-  /** Poll delays when no rune client is connected (default 15 s playing / 30 s idle). */
+  /** Poll delays when no rune client is connected (default 30 s playing / 120 s idle). */
   pollMsPlayingUnwatched?: number;
   pollMsIdleUnwatched?: number;
   /** Whether at least one websocket client is connected. Undefined = always watched. */
   hasClients?: () => boolean;
   /** Songs rune already has (title, artists, album, cover) by 'sp:' id: shown at once, no Spotify lookup. */
   knownTracks?: (ids: string[]) => QueueItem[];
+  /** Spotify's circuit breaker: while this is in the future, the loop must not call Spotify. */
+  blockedUntil?: () => number | null;
   now?: () => number;
 }
 
@@ -60,7 +62,7 @@ const SETTLE_GAP_MS = 350;
  * How long a /me/player/queue answer stays good enough to reuse. The item id changing
  * (or a command / a connected client) forces a fresh read sooner.
  */
-const QUEUE_STALE_MS = 10_000;
+const QUEUE_STALE_MS = 30_000;
 /** Metadata lookups for a just-started queue: the window around startIndex, in parallel. */
 const STARTED_LOOKUPS = 8;
 const STARTED_LOOKUP_CONCURRENCY = 3;
@@ -219,6 +221,7 @@ export class SpotifyConnectZone implements PlaybackZone {
   private readonly pollMsIdleUnwatched: number;
   private readonly hasClients: (() => boolean) | undefined;
   private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
+  private readonly blockedUntil: (() => number | null) | undefined;
   private readonly now: () => number;
   private snapshot: PlayerState;
   private startedQueue: QueueItem[] = [];
@@ -246,12 +249,13 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.deviceId = deviceId;
     this.name = name;
     this.zone = `spotify:${deviceId}`;
-    this.pollMsPlaying = opts.pollMsPlaying ?? 1000;
-    this.pollMsIdle = opts.pollMsIdle ?? 3000;
-    this.pollMsPlayingUnwatched = opts.pollMsPlayingUnwatched ?? 15_000;
-    this.pollMsIdleUnwatched = opts.pollMsIdleUnwatched ?? 30_000;
+    this.pollMsPlaying = opts.pollMsPlaying ?? 3000;
+    this.pollMsIdle = opts.pollMsIdle ?? 10_000;
+    this.pollMsPlayingUnwatched = opts.pollMsPlayingUnwatched ?? 30_000;
+    this.pollMsIdleUnwatched = opts.pollMsIdleUnwatched ?? 120_000;
     this.hasClients = opts.hasClients;
     this.knownTracks = opts.knownTracks;
+    this.blockedUntil = opts.blockedUntil;
     this.now = opts.now ?? Date.now;
     this.snapshot = emptyPlayerState(this.zone, this.now);
   }
@@ -523,7 +527,7 @@ export class SpotifyConnectZone implements PlaybackZone {
       return;
     }
     // Reuse the last queue unless the playing item changed, a command ran, or the read went
-    // stale (10 s). With no connected client there is nobody to show it to: do not fetch it.
+    // stale (30 s). With no connected client there is nobody to show it to: do not fetch it.
     let queue: SpotifyQueue | undefined = this.lastQueue;
     if (playback && (!playback.device?.id || playback.device.id === this.deviceId)) {
       const itemId = playback.item?.id ?? null;
@@ -605,8 +609,21 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   private async loop(): Promise<void> {
     if (this.closed || this.listeners.size === 0) return;
+    // Spotify is out of quota: park the loop until the breaker expires (+1 s slack),
+    // without touching the network at all.
+    const blocked = this.blockedUntil?.() ?? null;
+    if (blocked !== null && blocked > this.now()) {
+      this.scheduleAt(blocked + 1000);
+      return;
+    }
     await this.pollOnce();
     if (this.closed || this.listeners.size === 0) return;
+    // The poll may just have discovered the quota block.
+    const nowBlocked = this.blockedUntil?.() ?? null;
+    if (nowBlocked !== null && nowBlocked > this.now()) {
+      this.scheduleAt(nowBlocked + 1000);
+      return;
+    }
     const busy = this.snapshot.status === 'playing' || this.now() < this.claimUntil;
     // Nobody connected: poll slowly (history still gets recorded, just coarser).
     const delay = this.clientsWatching()
@@ -616,10 +633,19 @@ export class SpotifyConnectZone implements PlaybackZone {
       : busy
         ? this.pollMsPlayingUnwatched
         : this.pollMsIdleUnwatched;
+    this.scheduleIn(delay);
+  }
+
+  private scheduleAt(at: number): void {
+    this.scheduleIn(at - this.now());
+  }
+
+  private scheduleIn(delay: number): void {
+    if (this.closed || this.listeners.size === 0) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.loop();
-    }, delay);
+    }, Math.max(0, delay));
   }
 
   private clearTimer(): void {
@@ -712,7 +738,7 @@ export class SpotifyZones {
     return this.zones.get(zoneId);
   }
 
-  /** A client connected: every zone polls at once again (1 s / 3 s while watched). */
+  /** A client connected: every zone polls at once again (3 s / 10 s while watched). */
   wake(): void {
     for (const zone of this.zones.values()) zone.wake();
   }

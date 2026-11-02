@@ -13,6 +13,7 @@ import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes, type PcZone } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
+import { HttpError } from '../spotify/fetch.js';
 import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { normalizeName } from '../db/index.js';
@@ -96,6 +97,12 @@ function queryValue(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
+/** Local wall-clock HH:MM (24 h), e.g. for "Spotify songs play again around 19:42". */
+function clockTime(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<BuiltApp> {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   registerJsonCompression(app);
@@ -163,9 +170,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const spotify = cfg.spotifyClientId
     ? createSpotify(db, cfg, {
         ...opts.spotifyOptions,
-        // Connect zones poll /me/player every second only while somebody is watching;
-        // with no live socket they slow to 15 s / 30 s and skip the queue.
+        // Connect zones poll /me/player every 3 s only while somebody is watching;
+        // with no live socket they slow to 30 s / 120 s and skip the queue.
         hasClients: () => clients.size > 0,
+        // One line per hour of Spotify traffic: enough to see a runaway poller.
+        onHourlyUsage: (usage) => {
+          app.log.info(
+            {
+              hour: new Date(usage.hourStart).toISOString(),
+              requests: usage.total,
+              top: usage.topPaths,
+            },
+            'spotify requests last hour',
+          );
+        },
         // Login callback fires this without awaiting: the redirect must not wait
         // for the Spotify library to download.
         onLogin: () => {
@@ -585,7 +603,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const client = socket as typeof socket & { slim?: boolean };
         client.slim = req.query.slim === '1';
         clients.add(client);
-        // Somebody is watching again: Spotify zones go back to 1 s / 3 s polling right now.
+        // Somebody is watching again: Spotify zones go back to 3 s / 10 s polling right now.
         spotify?.zones.wake();
         socket.on('close', () => clients.delete(socket));
         if (pc) {
@@ -923,6 +941,14 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: req.body?.type }, 'spotify command');
           return sanitize(await z.command(req.body));
         } catch (e) {
+          if (e instanceof HttpError && e.status === 429) {
+            const until = spotify?.api.blockedUntil() ?? Date.now() + (e.retryAfterMs ?? 0);
+            const message =
+              `Spotify's daily limit is used up — Spotify songs play again around ${clockTime(until)}. ` +
+              'Local music still works.';
+            app.log.warn({ zone: req.params.zone, cmd: req.body?.type, until: new Date(until).toISOString() }, 'player command rate limited');
+            return reply.code(429).send({ error: message });
+          }
           app.log.warn({ zone: req.params.zone, cmd: req.body?.type, err: (e as Error).message }, 'player command failed');
           return reply.code(400).send({ error: (e as Error).message });
         }
@@ -945,6 +971,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { started: true };
       });
       r.get('/scan', async () => last);
+
+      // Spotify request counters and the quota circuit breaker, for diagnosing runaway polling.
+      r.get('/spotify/usage', async (_req, reply) => {
+        if (!spotify) return reply.code(404).send({ error: 'spotify not configured' });
+        return spotify.api.usage();
+      });
 
       // Manual Spotify sync: starts in the background, never waits for Spotify.
       r.post('/spotify/sync', async (_req, reply) => {
