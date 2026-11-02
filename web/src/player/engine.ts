@@ -1,5 +1,6 @@
 import type { Track } from '@liner/shared';
 import { isLiveTrack } from '../lib/listenTypes';
+import { detectIOS } from '../lib/volume';
 
 /** What actually makes sound (or pretends to) for a local (browser/mock) zone. */
 export interface Engine {
@@ -55,6 +56,8 @@ function audioContextCtor(): AudioContextCtor | null {
   const w = window as typeof window & { webkitAudioContext?: AudioContextCtor };
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
+
+const ON_IOS = typeof navigator !== 'undefined' && detectIOS(navigator.userAgent, navigator.maxTouchPoints) !== null;
 
 export class AudioEngine implements Engine {
   /** The element that is making (or about to make) sound. */
@@ -168,7 +171,9 @@ export class AudioEngine implements Engine {
 
   /** Buffer `track` in the spare element (only local, finite files can be preloaded). */
   private setPreload(track: Track | undefined) {
-    const desired = track && track.source === 'local' && !isLiveTrack(track) ? track : undefined;
+    // iOS lets an <audio> element start by itself only after a tap played that same element: a swapped-in
+    // spare would be refused at the end of a song, so iPhones/iPads keep the single-element behaviour.
+    const desired = track && track.source === 'local' && !isLiveTrack(track) && !ON_IOS ? track : undefined;
     if ((desired?.id ?? null) === this.preloadedId) return;
     this.releasePreload();
     if (!desired) return;
