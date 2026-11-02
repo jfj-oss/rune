@@ -1,0 +1,5 @@
+{
+ "url": "https://musicbrainz.org/ws/2/release-group/b1392450-e666-3926-a536-22c65f834433?fmt=json",
+ "status": 200,
+ "body": "{\"secondary-type-ids\":[],\"title\":\"OK Computer\",\"disambiguation\":\"\",\"secondary-types\":[],\"first-release-date\":\"1997-05-21\",\"primary-type\":\"Album\",\"primary-type-id\":\"f529b476-6e62-324f-b0aa-1f3e33d313fc\",\"id\":\"b1392450-e666-3926-a536-22c65f834433\"}"
+}
