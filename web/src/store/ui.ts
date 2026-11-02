@@ -13,13 +13,13 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-cycle';
+export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-cycle' | 'dither-album';
 export const AMBIENTS: Ambient[] = ['cycle', 'blue', 'purple', 'slate', 'green', 'off'];
 /** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
-export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-cycle'];
+export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-cycle', 'dither-album'];
 export const AMBIENT_LABEL: Record<Ambient, string> = {
   cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off',
-  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-cycle': 'Dither · Cycle',
+  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album',
 };
 const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
 

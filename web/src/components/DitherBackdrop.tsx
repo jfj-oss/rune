@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, paletteAt, POOLS, PULSE, pulseAt, radiusScale, RIBBONS, TONE, toneCurve, WARP,
-  type DitherColour, type DitherPalette,
+  blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
+  WAVE, waveAt, wavePeakExponent, type DitherColour, type DitherPalette,
 } from '../lib/dither';
 import { backdropFrameMs } from '../lib/frameRate';
 import { currentItem, usePlayer } from '../store/player';
@@ -44,8 +44,10 @@ uniform float u_rs;     // radiusScale(aspect)
 uniform float u_t;
 uniform vec3 u_mid;
 uniform vec3 u_light;
-uniform float u_pulse;  // new-song pulse strength 0..1 (pulseAt)
-uniform float u_ring;   // pulse ring radius, in screen heights
+uniform float u_wave;   // new-song wave: how far the shapes have swelled out, 0..1 (waveAt)
+uniform float u_wexp;   // field exponent at the wave's peak (wavePeakExponent)
+uniform float u_wdir;   // +1 swelling out, -1 drawing back in
+uniform float u_wt;     // seconds since the wave started (moves the ripples)
 uniform sampler2D u_noise;
 
 float hash2(vec2 p) {
@@ -72,9 +74,14 @@ void main() {
   float xn = w.x / u_aspect;
   float d;
   ${ribbonGlsl}
-  // new-song pulse: every form swells a little, and a ring of light spreads from the centre
-  float pd = length(w - vec2(0.5 * u_aspect, 0.5)) - u_ring;
-  f += u_pulse * (${g(PULSE.glow)} + ${g(PULSE.ring)} * exp(-(pd * pd) / (${g(PULSE.ringWidth)} * ${g(PULSE.ringWidth)})));
+  // new-song wave: the shapes already on screen swell outwards (lifting the field fills their faint edges
+  // first) and draw back in; ripples on the growing edges travel outwards, then inwards on the way back
+  if (u_wave > 0.0) {
+    float ff = max(f, 0.0);
+    float grown = pow(ff, 1.0 - (1.0 - u_wexp) * u_wave);
+    float edge = smoothstep(0.05, 0.3, grown) * (1.0 - smoothstep(0.6, 0.95, grown));
+    f = grown + u_wave * ${g(WAVE.ripple)} * edge * sin(grown * 26.0 - u_wdir * u_wt * 9.0);
+  }
   float mot = ${g(MOTTLE.base)} + ${g(MOTTLE.amp)} * vnoise(vec2(q.x * ${g(MOTTLE.freq)} + t * ${g(MOTTLE.speed)}, q.y * ${g(MOTTLE.freq)}));
 
   float tau = pow(smoothstep(${g(TONE.lo)}, ${g(TONE.hi)}, f), ${g(TONE.gamma)});
@@ -88,9 +95,9 @@ void main() {
   gl_FragColor = vec4(col / 255.0, 1.0);
 }`;
 
-interface Pulse { amt: number; ring: number }
-const NO_PULSE: Pulse = { amt: 0, ring: 0 };
-interface Renderer { draw(t: number, pal: DitherPalette, pulse?: Pulse): void; resize(w: number, h: number): void; dispose(): void }
+interface Wave { amt: number; dir: number; t: number }
+const NO_WAVE: Wave = { amt: 0, dir: 1, t: 0 };
+interface Renderer { draw(t: number, pal: DitherPalette, wave?: Wave): void; resize(w: number, h: number): void; dispose(): void }
 
 function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const s = gl.createShader(type)!;
@@ -129,7 +136,7 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     const u = (n: string) => gl.getUniformLocation(prog, n);
     const uRes = u('u_res'), uAspect = u('u_aspect'), uT = u('u_t'), uMid = u('u_mid'), uLight = u('u_light'), uRs = u('u_rs');
-    const uPulse = u('u_pulse'), uRing = u('u_ring');
+    const uWave = u('u_wave'), uWexp = u('u_wexp'), uWdir = u('u_wdir'), uWt = u('u_wt');
     gl.uniform1i(u('u_noise'), 0);
     return {
       resize(w, h) {
@@ -138,11 +145,13 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
         gl.uniform2f(uRes, w, h);
         gl.uniform1f(uAspect, w / h);
         gl.uniform1f(uRs, radiusScale(w / h));
+        gl.uniform1f(uWexp, wavePeakExponent(w / h));
       },
-      draw(t, pal, pulse = NO_PULSE) {
+      draw(t, pal, wave = NO_WAVE) {
         gl.uniform1f(uT, t);
-        gl.uniform1f(uPulse, pulse.amt);
-        gl.uniform1f(uRing, pulse.ring);
+        gl.uniform1f(uWave, wave.amt);
+        gl.uniform1f(uWdir, wave.dir);
+        gl.uniform1f(uWt, wave.t);
         gl.uniform3f(uMid, pal.mid[0], pal.mid[1], pal.mid[2]);
         gl.uniform3f(uLight, pal.light[0], pal.light[1], pal.light[2]);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -188,21 +197,27 @@ function canvas2dRenderer(canvas: HTMLCanvasElement): Renderer | null {
   };
 }
 
-/* New-song pulse: one shared start time for every backdrop on the page (app background and Now Playing). */
-let pulseStart = -Infinity;
+/* New-song wave: one shared start time for every backdrop on the page (app background and Now Playing). */
+let waveStart = -Infinity;
 let lastSongKey = '';
 usePlayer.subscribe((s) => {
   const cur = currentItem(s.state);
   const key = cur ? `${s.state.index}:${cur.track.id}` : '';
-  if (key && key !== lastSongKey) pulseStart = performance.now();
+  if (key && key !== lastSongKey) waveStart = performance.now();
   lastSongKey = key;
 });
-const currentPulse = (): Pulse => pulseAt((performance.now() - pulseStart) / 1000);
+const currentWave = (): Wave => waveAt((performance.now() - waveStart) / 1000);
 
 /** Fixed time used for the static (reduced-motion / fallback) frame: a nicely composed moment. */
 const STILL_T = 23;
 
-export function DitherBackdrop({ colour }: { colour: DitherColour }) {
+/** A preset colour (red/blue/purple/green/cycle) or a palette of its own (the album's colour). */
+export type BackdropColour = DitherColour | DitherPalette;
+const resolve = (c: BackdropColour, t: number): DitherPalette => (typeof c === 'string' ? paletteAt(c, t) : c);
+/** Seconds for the dots to blend into a new colour (the next album's). */
+const COLOUR_BLEND_S = 1.4;
+
+export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
   const host = useRef<HTMLDivElement>(null);
   const colourRef = useRef(colour);
   colourRef.current = colour;
@@ -247,9 +262,17 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
       canvas.style.width = `${(w * dot) / dpr}px`;
       canvas.style.height = `${(h * dot) / dpr}px`;
     };
+    // the colour shown glides toward the wanted one, so an album change blends instead of jumping
+    let shown: DitherPalette | null = null;
+    let lastPaint = performance.now();
     const paint = () => {
       const t = still() ? STILL_T : clock();
-      r.draw(t, paletteAt(colourRef.current, still() ? 0 : t), still() ? NO_PULSE : currentPulse());
+      const want = resolve(colourRef.current, still() ? 0 : t);
+      const now = performance.now();
+      const k = shown && !still() ? 1 - Math.exp(-((now - lastPaint) / 1000) / (COLOUR_BLEND_S / 3)) : 1;
+      lastPaint = now;
+      shown = shown ? mixPalette(shown, want, k) : want;
+      r.draw(t, shown, still() ? NO_WAVE : currentWave());
     };
     redraw.current = paint;
 
@@ -261,7 +284,7 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
         frames++; if (dt > 40) slow++;
         if (frames >= 120) { if (slow > 40) { coarse = 1; size(); } frames = slow = 0; }
       }
-      const frameMs = backdropFrameMs(playing, nowPlayingOpen, currentPulse().amt > 0);
+      const frameMs = backdropFrameMs(playing, nowPlayingOpen, currentWave().amt > 0);
       if (now - last < frameMs - 2) return;
       last = now;
       paint();

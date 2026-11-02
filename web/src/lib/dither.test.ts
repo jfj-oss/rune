@@ -130,15 +130,47 @@ describe('ditherHueOf', () => {
   });
 });
 
-describe('pulseAt', () => {
-  it('swells fast, fades to zero, and the ring grows', async () => {
-    const { pulseAt, PULSE } = await import('./dither');
-    expect(pulseAt(-1).amt).toBe(0);
-    expect(pulseAt(0).amt).toBe(0);
-    expect(pulseAt(PULSE.attack).amt).toBeCloseTo(1, 5);
-    expect(pulseAt(1).amt).toBeLessThan(pulseAt(0.3).amt);
-    expect(pulseAt(PULSE.length).amt).toBe(0);
-    expect(pulseAt(PULSE.length - 0.01).amt).toBeLessThan(0.05);
-    expect(pulseAt(1).ring).toBeGreaterThan(pulseAt(0.5).ring);
+describe('waveAt', () => {
+  it('swells out, turns at the middle, draws back in, and ends at rest', async () => {
+    const { waveAt, WAVE } = await import('./dither');
+    expect(waveAt(-1).amt).toBe(0);
+    expect(waveAt(0).amt).toBeCloseTo(0, 5);
+    expect(waveAt(WAVE.length / 2).amt).toBeCloseTo(1, 5);
+    expect(waveAt(WAVE.length * 0.25).dir).toBe(1);
+    expect(waveAt(WAVE.length * 0.75).dir).toBe(-1);
+    expect(waveAt(WAVE.length - 0.02).amt).toBeLessThan(0.01);
+    expect(waveAt(WAVE.length).amt).toBe(0);
+  });
+
+  it('lifts the field enough to cover ~60-70% of desktop and phone screens at the peak', async () => {
+    const { field, toneCurve, wavePeakExponent } = await import('./dither');
+    for (const aspect of [1.6, 0.46]) {
+      const e = wavePeakExponent(aspect);
+      let on = 0, n = 0;
+      for (const t of [5, 23, 40, 77, 120]) {
+        for (let y = 0; y < 40; y++) for (let x = 0; x < 60; x++) {
+          const f = Math.max(0, field(((x + 0.5) / 60) * aspect, (y + 0.5) / 40, aspect, t));
+          if (toneCurve(Math.pow(f, e)) > 0.4) on++; // clearly filled, not stray dots
+          n++;
+        }
+      }
+      expect(on / n).toBeGreaterThan(0.58);
+      expect(on / n).toBeLessThan(0.72);
+    }
+  });
+});
+
+describe('paletteFromColour', () => {
+  it('keeps the cover hue, at a fixed brightness; greys and junk handled', async () => {
+    const { paletteFromColour, parseCssColour } = await import('./dither');
+    const red = paletteFromColour('rgb(200 40 40)')!;
+    expect(red.light[0]).toBeGreaterThan(red.light[1]! + 60);
+    expect(red.mid[0]).toBeLessThan(red.light[0]!);
+    const blue = paletteFromColour('hsl(220 40% 30%)')!;
+    expect(blue.light[2]).toBeGreaterThan(blue.light[0]!);
+    const grey = paletteFromColour('rgb(120, 120, 122)')!;
+    expect(Math.abs(grey.light[0]! - grey.light[2]!)).toBeLessThan(40);
+    expect(paletteFromColour('nonsense')).toBeNull();
+    expect(parseCssColour('rgb(1, 2, 3)')).toEqual([1, 2, 3]);
   });
 });

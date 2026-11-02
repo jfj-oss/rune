@@ -7,7 +7,8 @@ import { api } from '../../api';
 import { discoverApi } from '../../discoverApi';
 import { useCoverColor } from '../../hooks/useCoverColor';
 import { useIsDesktop } from '../../hooks/useMedia';
-import { ditherHueOf, type DitherColour } from '../../lib/dither';
+import { ditherHueOf, paletteFromColour, type DitherColour } from '../../lib/dither';
+import type { BackdropColour } from '../DitherBackdrop';
 import { encId, formatDuration } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
 import { liveMeta } from '../../lib/live';
@@ -24,9 +25,10 @@ import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './part
 
 const DitherBackdrop = lazy(() => import('../DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
 
-/** Backdrop colour: the dither hue nearest the cover's colour, else the user's Dither pick, else purple. */
-function backdropColour(tint: string, ambient: string): DitherColour {
-  const fromCover = ditherHueOf(tint);
+/** Backdrop colour: the cover's own colour, else the user's Dither pick, else purple. */
+function backdropColour(tint: string, ambient: string): BackdropColour {
+  // the cover's own colour (blends when the song changes); presets only when the cover gives none
+  const fromCover = paletteFromColour(tint) ?? ditherHueOf(tint);
   if (fromCover) return fromCover;
   if (ambient === 'dither') return 'red';
   if (ambient.startsWith('dither-')) return ambient.slice(7) as DitherColour;

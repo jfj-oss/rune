@@ -1,11 +1,22 @@
 import { lazy, Suspense } from 'react';
-import type { DitherColour } from '../lib/dither';
+import { useCoverColor } from '../hooks/useCoverColor';
+import { paletteFromColour, type DitherColour } from '../lib/dither';
+import { currentItem, usePlayer } from '../store/player';
 import { useUi, type Ambient as AmbientMode } from '../store/ui';
+import type { BackdropColour } from './DitherBackdrop';
 
 const DitherBackdrop = lazy(() => import('./DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
 
-const ditherColour = (a: AmbientMode): DitherColour | null =>
-  a === 'dither' ? 'red' : a.startsWith('dither-') ? (a.slice(7) as DitherColour) : null;
+const ditherColour = (a: AmbientMode): DitherColour | 'album' | null =>
+  a === 'dither' ? 'red' : a === 'dither-album' ? 'album' : a.startsWith('dither-') ? (a.slice(7) as DitherColour) : null;
+
+/** "Dither · Album": the dots take the colour of the playing album's cover (purple when nothing plays). */
+function AlbumDither() {
+  const album = usePlayer((s) => currentItem(s.state)?.album);
+  const tint = useCoverColor(album);
+  const colour: BackdropColour = (album && paletteFromColour(tint)) || 'purple';
+  return <DitherBackdrop colour={colour} />;
+}
 
 /** Ambient background: stacked fixed gradient layers where only opacity is animated (compositor only),
     or — for the Dither modes — a low-res WebGL canvas (mounted only while a Dither mode is active). */
@@ -17,7 +28,9 @@ export function Ambient() {
   return (
     <div className="ambient" aria-hidden="true">
       {colour ? (
-        npOpen ? null : <Suspense fallback={null}><DitherBackdrop colour={colour} /></Suspense>
+        npOpen ? null : (
+          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={colour} />}</Suspense>
+        )
       ) : (
         <>
           <i className="ambient__l ambient__l--blue" />

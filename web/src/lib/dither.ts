@@ -269,15 +269,72 @@ export function ditherHueOf(css: string): DitherHue | null {
   return 'purple';
 }
 
-/** New-song pulse timing (seconds): a quick swell, then a ring that spreads from the centre and fades. */
-export const PULSE = { attack: 0.12, decay: 1.0, length: 2.4, ringSpeed: 0.5, ringStart: 0.04, ringWidth: 0.06, glow: 0.1, ring: 0.7 };
+/**
+ * New-song wave: the dot shapes already on screen swell outwards until they cover ~60-70% of the page, then
+ * draw back in, once. The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes
+ * grow from where they are. `amt` 0..1 (how far out), `dir` +1 while swelling, -1 while drawing back.
+ */
+export const WAVE = { length: 3.2, ripple: 0.05 };
 
-/** Pulse strength (0..1) and ring radius (in screen heights) `dt` seconds after a new song started. */
-export function pulseAt(dt: number): { amt: number; ring: number } {
-  if (!(dt >= 0) || dt >= PULSE.length) return { amt: 0, ring: 0 };
-  const rise = Math.min(1, dt / PULSE.attack);
-  const fall = Math.exp(-Math.max(0, dt - PULSE.attack) / PULSE.decay);
-  // fade the tail to exactly 0 at `length` so the pulse never ends with a visible step
-  const tail = Math.min(1, (PULSE.length - dt) / 0.4);
-  return { amt: rise * fall * tail, ring: PULSE.ringStart + dt * PULSE.ringSpeed };
+/**
+ * Field exponent at the peak for a screen shape (width / height). Measured with field() over many frames,
+ * counting clearly filled dots (tone > 0.4): desktop 16:10 28% at rest -> ~65% at 0.27, phone portrait
+ * 39% -> ~65% at 0.4.
+ */
+export function wavePeakExponent(aspect: number): number {
+  const k = Math.min(1, Math.max(0, (aspect - 0.46) / (1.6 - 0.46)));
+  return 0.4 + (0.27 - 0.4) * k;
+}
+
+export function waveAt(dt: number): { amt: number; dir: number; t: number } {
+  if (!(dt >= 0) || dt >= WAVE.length) return { amt: 0, dir: 1, t: 0 };
+  const p = dt / WAVE.length;
+  // out and back in, easing at both ends and at the turn
+  return { amt: 0.5 - 0.5 * Math.cos(2 * Math.PI * p), dir: p < 0.5 ? 1 : -1, t: dt };
+}
+
+/** Parse `rgb(r g b)`, `rgb(r, g, b)` or `hsl(h s% l%)` (as useCoverColor gives) to 0..255 RGB. */
+export function parseCssColour(css: string): Rgb | null {
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(css);
+  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+  const hsl = /^hsla?\(\s*([\d.]+)[\s,]+([\d.]+)%[\s,]+([\d.]+)%/i.exec(css);
+  if (!hsl) return null;
+  return hslToRgb(Number(hsl[1]), Number(hsl[2]) / 100, Number(hsl[3]) / 100);
+}
+
+function hslToRgb(h: number, s: number, l: number): Rgb {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+
+function rgbToHsl([r, g, b]: Rgb): [number, number, number] {
+  const R = r / 255, G = g / 255, B = b / 255;
+  const max = Math.max(R, G, B), min = Math.min(R, G, B), d = max - min;
+  const l = (max + min) / 2;
+  if (d === 0) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = max === R ? 60 * (((G - B) / d) % 6) : max === G ? 60 * ((B - R) / d + 2) : 60 * ((R - G) / d + 4);
+  return [(h + 360) % 360, s, l];
+}
+
+/**
+ * A dither palette in the album's own colour: a strong, saturated dot colour at a fixed brightness (so text
+ * keeps its contrast whatever the cover) and a dark mid tone of the same hue. Greys stay grey-blue.
+ */
+export function paletteFromColour(css: string): DitherPalette | null {
+  const c = parseCssColour(css);
+  if (!c) return null;
+  const [h, s] = rgbToHsl(c);
+  if (s < 0.12) return { light: hslToRgb(220, 0.12, 0.5), mid: hslToRgb(220, 0.12, 0.18) };
+  // yellows/greens look much brighter than blues at the same lightness: pull them down a little
+  const l = h >= 40 && h <= 160 ? 0.42 : 0.52;
+  const sat = Math.min(0.85, Math.max(0.55, s));
+  return { light: hslToRgb(h, sat, l), mid: hslToRgb(h, sat * 0.85, 0.19) };
+}
+
+/** Blend two palettes (k = 0 → a, 1 → b). */
+export function mixPalette(a: DitherPalette, b: DitherPalette, k: number): DitherPalette {
+  return { light: lerpRgb(a.light, b.light, k), mid: lerpRgb(a.mid, b.mid, k) };
 }
