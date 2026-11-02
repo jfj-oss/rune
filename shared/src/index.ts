@@ -175,3 +175,6 @@ export interface ScanProgress {
 // ---------- Playlists (worker F) ----------
 // Kept in their own file; re-exported only (no existing types changed).
 export type { PlaylistDetail, PlaylistSummary, PlaylistTrack } from './playlists.js';
+
+// ---------- Listening history ----------
+export * from './history.js';

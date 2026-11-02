@@ -15,6 +15,8 @@ import { createPcZone, registerStreamRoutes } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
+import { registerBrowseRoutes } from './browse.js';
+import { createHistory, registerHistoryRoutes } from '../history/index.js';
 import { coverPath, getAlbum, getArtist, listAlbums, listArtists, search, publicTrack, type AlbumListQuery } from './library.js';
 
 export interface AppOptions {
@@ -50,7 +52,17 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
   // ---------- zones
   const pc: PlaybackZone | undefined = opts.pcZone === false ? undefined : await createPcZone(db, cfg);
-  pc?.onChange((state) => broadcast({ type: 'player', state: sanitize(state) }));
+  const history = createHistory(db);
+  const lastState = new Map<Zone, PlayerState>();
+  const recordHistory = (state: PlayerState) => {
+    const prev = lastState.get(state.zone);
+    if (prev) history.recordFromState(prev, state);
+    lastState.set(state.zone, state);
+  };
+  pc?.onChange((state) => {
+    recordHistory(state);
+    broadcast({ type: 'player', state: sanitize(state) });
+  });
   const spotify = cfg.spotifyClientId
     ? createSpotify(db, cfg, {
         ...opts.spotifyOptions,
@@ -98,7 +110,13 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (id.startsWith('spotify:') && spotify) {
       const z = spotify.zones.get(id);
       if (z && !spotifyListeners.has(id)) {
-        spotifyListeners.set(id, z.onChange((state) => broadcast({ type: 'player', state: sanitize(state) })));
+        spotifyListeners.set(
+          id,
+          z.onChange((state) => {
+            recordHistory(state);
+            broadcast({ type: 'player', state: sanitize(state) });
+          }),
+        );
       }
       return z;
     }
@@ -253,6 +271,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
 
       registerMetaRoutes(r, meta);
+      registerBrowseRoutes(r, db);
+      registerHistoryRoutes(r, history);
 
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
