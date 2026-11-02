@@ -3,7 +3,7 @@
 // The queue lives here (see ./queue.ts); mpv's playlist only ever holds the current
 // track plus the next two, loaded with `loadfile <path> append-play` so transitions
 // are gapless. Cue-sheet tracks pass per-file `start=`/`end=` options.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PlayerCommand, PlayerState, QueueItem, Track } from '@liner/shared';
@@ -59,7 +59,14 @@ const OBSERVED_PROPERTIES: [number, string][] = [
   [5, 'eof-reached'],
   [6, 'audio-params'],
   [7, 'audio-out-params'],
+  [8, 'audio-device'],
 ];
+
+/** Values mpv's `audio-device` property can hold instead of a sink description. */
+const DEVICE_ALIASES = new Set(['auto', 'pipewire', 'pulse', 'alsa']);
+
+/** How often to refresh PipeWire's live graph rate while a track is active. */
+const GRAPH_RATE_PROBE_INTERVAL_MS = 5_000;
 
 const POSITION_EMIT_INTERVAL_MS = 1_000;
 const MAX_RESPAWN_ATTEMPTS = 5;
@@ -105,7 +112,18 @@ class PcZoneImpl implements PcZone {
     eofReached?: boolean;
     audioParams?: MpvParams;
     audioOutParams?: MpvParams;
+    /** mpv's current `audio-device` option, e.g. "pipewire/alsa_output...". */
+    audioDevice?: string;
   } = {};
+
+  /** Live PipeWire graph clock rate, refreshed asynchronously (see probeOutput). */
+  private graphRate?: number;
+  /** Human-readable output device, e.g. "E30 Headphones". */
+  private outputDescription?: string;
+  /** Node name `outputDescription` was resolved from (avoids repeated pw-dump). */
+  private resolvedNodeName?: string;
+  private probeTimer: NodeJS.Timeout | null = null;
+  private probing = false;
 
   /** Serializes commands and window maintenance so races cannot interleave. */
   private ops: Promise<unknown> = Promise.resolve();
@@ -165,6 +183,10 @@ class PcZoneImpl implements PcZone {
     if (this.positionTimer) {
       clearTimeout(this.positionTimer);
       this.positionTimer = null;
+    }
+    if (this.probeTimer) {
+      clearTimeout(this.probeTimer);
+      this.probeTimer = null;
     }
     const ipc = this.ipc;
     this.ipc = null;
@@ -259,8 +281,15 @@ class PcZoneImpl implements PcZone {
     this.ipc = ipc;
     ipc.onEvent((msg) => this.onMpvMessage(msg));
     for (const [id, name] of OBSERVED_PROPERTIES) {
-      await ipc.observe(id, name);
+      if (name === 'audio-device') {
+        // Optional: older mpv builds may not expose it. Reporting degrades to
+        // the configured device label rather than failing to start playback.
+        await ipc.observe(id, name).catch(() => undefined);
+      } else {
+        await ipc.observe(id, name);
+      }
     }
+    this.scheduleOutputProbe(750);
   }
 
   private async onMpvExit(
@@ -366,12 +395,23 @@ class PcZoneImpl implements PcZone {
       }
       case 'audio-params': {
         this.props.audioParams = (msg.data as MpvParams | undefined) ?? undefined;
+        // A new track may switch the PipeWire graph rate; re-read it shortly.
+        this.scheduleOutputProbe(500);
         this.emitChange();
         break;
       }
       case 'audio-out-params': {
         this.props.audioOutParams = (msg.data as MpvParams | undefined) ?? undefined;
+        this.scheduleOutputProbe(1_000);
         this.emitChange();
+        break;
+      }
+      case 'audio-device': {
+        const device = typeof msg.data === 'string' ? msg.data : undefined;
+        if (device && device !== this.props.audioDevice) {
+          this.props.audioDevice = device;
+          this.scheduleOutputProbe(0);
+        }
         break;
       }
       default:
@@ -871,19 +911,31 @@ class PcZoneImpl implements PcZone {
     const parts = [formatLabel(track), 'mpv'];
     const out = this.props.audioOutParams;
     const input = this.props.audioParams;
-    if (out && typeof out.samplerate === 'number') {
-      parts.push(`${this.deviceLabel()} ${rateLabel(out.samplerate)}`);
+    const outRate = typeof out?.samplerate === 'number' ? out.samplerate : undefined;
+    if (outRate !== undefined) {
+      parts.push(`${this.outputDeviceLabel()} ${rateLabel(outRate)}`);
     }
     const active = this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
+    if (active && this.graphRate !== undefined) {
+      parts.push(`PipeWire graph ${rateLabel(this.graphRate)}`);
+    }
     if (active && out && input) {
-      if (
-        typeof input.samplerate === 'number' &&
-        typeof out.samplerate === 'number' &&
-        input.samplerate !== out.samplerate
+      const inRate = typeof input.samplerate === 'number' ? input.samplerate : undefined;
+      if (inRate !== undefined && outRate !== undefined && inRate !== outRate) {
+        parts.push(`resampled to ${rateLabel(outRate)}`);
+      } else if (
+        this.graphRate !== undefined &&
+        outRate !== undefined &&
+        this.graphRate !== outRate
       ) {
-        parts.push(`resampled to ${rateLabel(out.samplerate)}`);
+        // mpv negotiated the stream at its native rate, but the PipeWire graph
+        // clock is different: PipeWire is resampling, which mpv cannot see.
+        parts.push(`resampled to ${rateLabel(this.graphRate)}`);
       } else if (input.format && out.format && input.format !== out.format) {
         parts.push(`converted to ${out.format}`);
+      } else if (this.pipewireOutput() && this.graphRate === undefined) {
+        // Don't claim bit-perfect before the graph rate probe has answered.
+        parts.push('PipeWire rate unknown');
       } else {
         // The signal path is no longer bit-perfect once the leveling filter runs.
         parts.push(levelingLabel(this.gainFor(track), this.volume));
@@ -892,11 +944,107 @@ class PcZoneImpl implements PcZone {
     return parts;
   }
 
-  private deviceLabel(): string {
+  private outputDeviceLabel(): string {
     const device = this.cfg.audioDevice;
-    if (device === 'pipewire') return 'PipeWire';
     if (device === 'null') return 'null output';
+    if (this.outputDescription) return this.outputDescription;
+    if (device === 'auto' || device === 'pipewire' || device === 'pulse') return 'PipeWire';
+    if (device.startsWith('pipewire/')) return 'PipeWire';
+    if (device.startsWith('pulse/')) return 'PulseAudio';
+    if (device.startsWith('alsa/')) return `ALSA ${device.slice('alsa/'.length)}`;
     return device;
+  }
+
+  // ---------------------------------------------- PipeWire output diagnostics
+
+  private pipewireOutput(): boolean {
+    const device = this.cfg.audioDevice;
+    return (
+      device === 'auto' ||
+      device === 'pipewire' ||
+      device === 'pulse' ||
+      device.startsWith('pipewire/') ||
+      device.startsWith('pulse/')
+    );
+  }
+
+  private isActive(): boolean {
+    return this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
+  }
+
+  /**
+   * Refreshes the real output device name and PipeWire's live graph rate. Both
+   * need out-of-process queries (mpv IPC for the sink, `pw-top` for the graph
+   * clock), so results are cached and refreshed on a slow timer instead of on
+   * every state() call.
+   */
+  private scheduleOutputProbe(delayMs: number): void {
+    if (this.closed || !this.pipewireOutput()) return;
+    if (this.probeTimer) clearTimeout(this.probeTimer);
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      void this.probeOutput();
+    }, Math.max(0, delayMs));
+    this.probeTimer.unref?.();
+  }
+
+  private async probeOutput(): Promise<void> {
+    if (this.closed || this.probing || !this.pipewireOutput()) return;
+    this.probing = true;
+    const previousDevice = this.outputDescription;
+    const previousRate = this.graphRate;
+    try {
+      const ipc = this.ipc;
+      if (ipc) {
+        const res = await ipc.command(['get_property', 'audio-device']).catch(() => undefined);
+        const device = typeof res?.data === 'string' ? res.data : undefined;
+        if (device) this.props.audioDevice = device;
+        const description = await this.resolveOutputDescription(device);
+        if (description) this.outputDescription = description;
+      }
+      const rate = await queryPipeWireGraphRate();
+      if (rate !== undefined) this.graphRate = rate;
+    } finally {
+      this.probing = false;
+    }
+    if (
+      !this.closed &&
+      (previousDevice !== this.outputDescription || previousRate !== this.graphRate)
+    ) {
+      this.emitChange();
+    }
+    if (!this.closed && this.isActive()) {
+      this.scheduleOutputProbe(GRAPH_RATE_PROBE_INTERVAL_MS);
+    }
+  }
+
+  private async resolveOutputDescription(mpvDevice?: string): Promise<string | undefined> {
+    const device = mpvDevice?.trim();
+    if (device && !DEVICE_ALIASES.has(device)) {
+      if (device.startsWith('pipewire/') || device.startsWith('pulse/')) {
+        return this.describeNode(device.slice(device.indexOf('/') + 1));
+      }
+      // Some mpv builds report the PipeWire node description directly.
+      return device;
+    }
+    const configured = this.cfg.audioDevice;
+    if (configured.startsWith('pipewire/') || configured.startsWith('pulse/')) {
+      return this.describeNode(configured.slice(configured.indexOf('/') + 1));
+    }
+    // "pipewire"/"pulse"/"auto": ask WirePlumber what the default sink is.
+    return this.describeNode('@DEFAULT_AUDIO_SINK@');
+  }
+
+  /** Resolve a PipeWire node name (or @DEFAULT_AUDIO_SINK@) to its description. */
+  private async describeNode(node: string): Promise<string | undefined> {
+    if (node === this.resolvedNodeName && this.outputDescription) return this.outputDescription;
+    const description = await queryPipeWireNodeDescription(node);
+    if (description) {
+      // The default sink can change while playing; don't cache that lookup.
+      if (!node.startsWith('@')) this.resolvedNodeName = node;
+      return description;
+    }
+    return this.outputDescription;
   }
 }
 
@@ -931,4 +1079,71 @@ function rateLabel(sampleRate: number): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Run a command and resolve its stdout; never rejects (diagnostics are best-effort). */
+function runCommand(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+  maxBuffer = 1 << 20,
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    execFile(file, args, { timeout: timeoutMs, maxBuffer }, (err, stdout) => {
+      resolve(err ? undefined : stdout);
+    });
+  });
+}
+
+interface PipeWireDumpObject {
+  info?: { props?: Record<string, unknown> };
+}
+
+/**
+ * Node description for a node name, numeric id, or `@DEFAULT_AUDIO_SINK@`.
+ * `wpctl inspect` only accepts ids (not node names), so names go through pw-dump.
+ */
+async function queryPipeWireNodeDescription(target: string): Promise<string | undefined> {
+  if (target.startsWith('@') || /^\d+$/.test(target)) {
+    const stdout = await runCommand('wpctl', ['inspect', target], 2_000);
+    if (!stdout) return undefined;
+    const description = /node\.description = "(.*)"/.exec(stdout);
+    if (description?.[1]) return description[1];
+    const name = /node\.name = "(.*)"/.exec(stdout);
+    return name?.[1];
+  }
+  const stdout = await runCommand('pw-dump', [], 3_000, 8 << 20);
+  if (!stdout) return undefined;
+  try {
+    const objects = JSON.parse(stdout) as PipeWireDumpObject[];
+    for (const object of objects) {
+      const props = object.info?.props;
+      if (props?.['node.name'] === target) {
+        const description = props['node.description'];
+        return typeof description === 'string' ? description : target;
+      }
+    }
+  } catch {
+    // malformed pw-dump output: fall back to the configured label
+  }
+  return undefined;
+}
+
+/**
+ * PipeWire's live graph clock rate. `pw-metadata -n settings` only reports the
+ * configured default (`clock.rate`), which does not follow allowed-rates
+ * switching on PipeWire 1.6; `pw-top` prints the driver's actual rate.
+ */
+async function queryPipeWireGraphRate(): Promise<number | undefined> {
+  const stdout = await runCommand('pw-top', ['-b', '-n', '2'], 3_000);
+  if (!stdout) return undefined;
+  for (const line of stdout.split('\n')) {
+    // Driver rows carry a non-zero quantum: S ID QUANT RATE ...
+    const m = /^R\s+\d+\s+(\d+)\s+(\d+)\s/.exec(line);
+    if (m && Number(m[1]) > 0) {
+      const rate = Number(m[2]);
+      if (rate > 0) return rate;
+    }
+  }
+  return undefined;
 }
