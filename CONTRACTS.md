@@ -34,6 +34,9 @@ from the PC browser and an iPhone (installable web app).
 | `GET /player/:zone` | `PlayerState` |
 | `POST /player/:zone` body `PlayerCommand` | `PlayerState` |
 | `GET /zones` | `{ id: Zone, name: string, kind: 'pc'\|'browser'\|'spotify' }[]` |
+| `GET /spotify/status` · `GET /spotify/token` | `{connected,user}` · short-lived `{access_token, expires_at}` (Web Playback SDK in the browser) |
+| `GET /playlists` · `GET /playlists/:id` | `PlaylistSummary[]` · `PlaylistDetail` (Liked Songs = `pl:sp:liked`) |
+| `GET /albums/:id/saved` · `POST/DELETE /albums/:id/save` | `{saved}` · save / unsave a Spotify album |
 | `POST /scan` | starts rescan |
 | `POST /albums/:id/match` body `{ musicbrainzReleaseId }` | manual fix match |
 | `WS /ws` | `ServerEvent` stream |
@@ -55,3 +58,8 @@ from the PC browser and an iPhone (installable web app).
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - Report ONCE at the end: what you built, files, test results, anything left undone. Kill your
   own background jobs first. No interim reports.
+
+## Browser zone is hybrid (Spotify Web Playback SDK)
+`web/src/player/hybrid.ts`: the browser zone keeps ONE queue; local tracks play through `<audio>`, Spotify tracks through the
+SDK player (`spotifySdk.ts`, device name `rune — <This Mac>`; desktop browsers only, not iOS). Spotify tracks on a zone that cannot
+play them (PC speakers, or the browser zone on iPhone) open the "Play on…" sheet (`routing.ts`, `PlayOnSheet.tsx`).

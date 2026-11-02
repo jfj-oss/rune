@@ -12,6 +12,8 @@ export interface Engine {
   stop(): void;
   onEnded(fn: () => void): void;
   onError(fn: (msg: string) => void): void;
+  /** Engines that learn about playback from elsewhere (the Spotify SDK) report position/play state here. */
+  onSync?(fn: (positionMs: number, playing: boolean) => void): void;
 }
 
 export class MockEngine implements Engine {

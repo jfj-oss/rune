@@ -1,24 +1,20 @@
 import type { PlayerState, QueueItem, Zone } from '@liner/shared';
 import { create } from 'zustand';
 import { api, isMock } from '../api';
+import { deviceName } from '../lib/device';
 import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
 import { AudioEngine, MockEngine } from '../player/engine';
+import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
 import { RemoteBackend } from '../player/remote';
+import { playableZones, routeItems, withoutOwnDevice, zoneCanPlay } from '../player/routing';
 import { emptyState, livePosition, type Backend } from '../player/types';
+import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
 import { loadLocal, saveLocal, useUi } from './ui';
 
 const backends = new Map<Zone, Backend>();
 let unsub: (() => void) | null = null;
 
-function deviceName(): string {
-  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  if (/iPhone/.test(ua)) return 'This iPhone';
-  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)) return 'This iPad';
-  if (/Macintosh/.test(ua)) return 'This Mac';
-  if (/Android/.test(ua)) return 'This phone';
-  return 'This computer';
-}
 const BROWSER_ZONE: ZoneInfo = { id: 'browser', name: deviceName(), kind: 'browser' };
 
 const FALLBACK_ZONES: ZoneInfo[] = [
@@ -32,8 +28,13 @@ interface PlayerStore {
   state: PlayerState;
   ready: boolean;
   init(): Promise<void>;
-  setZone(id: Zone): Promise<void>;
-  playItems(items: PlayItem[], startIndex?: number, opts?: { shuffle?: boolean }): Promise<void>;
+  /** handoff:false = just switch (nothing is carried over from the old zone). */
+  setZone(id: Zone, opts?: { handoff?: boolean }): Promise<void>;
+  /** Re-read the zone list (Spotify Connect devices come and go). */
+  refreshZones(): Promise<void>;
+  playItems(items: PlayItem[], startIndex?: number, opts?: { shuffle?: boolean; context?: string }): Promise<void>;
+  /** Answer of the "Play on…" sheet. */
+  playOn(zone: Zone, req: ChooserRequest, remember?: boolean): Promise<void>;
   enqueueItems(items: PlayItem[], next?: boolean): Promise<void>;
   command(cmd: ExtCommand): Promise<void>;
 }
@@ -43,8 +44,8 @@ function backendFor(z: ZoneInfo): Backend {
   if (hit) return hit;
   const notice = (m: string) => useUi.getState().toast(m);
   let b: Backend;
-  if (isMock) b = new LocalBackend(z.id, new MockEngine(), undefined, notice);
-  else if (z.kind === 'browser') b = new LocalBackend(z.id, new AudioEngine(), undefined, notice);
+  if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice);
+  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice);
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
   return b;
@@ -73,6 +74,31 @@ function recordPlayed(state: PlayerState, prev: { albumId: string | null }) {
   saveLocal('rune.played', list.slice(0, 60));
 }
 
+/** Spotify's play call takes at most 100 URIs, so a Connect device gets a window of the list. */
+const CONNECT_WINDOW = 100;
+
+async function startOn(b: Backend, z: ZoneInfo, items: PlayItem[], startIndex: number, shuffled?: boolean) {
+  let list = items;
+  let start = startIndex;
+  if (z.kind === 'spotify' && list.length > CONNECT_WINDOW) { list = list.slice(start, start + CONNECT_WINDOW); start = 0; }
+  await b.send({ type: 'play', trackIds: list.map((i) => i.track.id), startIndex: start }, list);
+  if (shuffled) await b.send({ type: 'shuffle', on: true });
+}
+
+/** The current zone can't play this: use the remembered choice, or ask ("Play on…" sheet). */
+function routeElsewhere(req: ChooserRequest): Promise<void> | void {
+  const { zones } = usePlayer.getState();
+  const sp = useSpotify.getState();
+  const options = playableZones(zones, req.need, capsFrom(sp));
+  const remembered = options.find((o) => o.zone.id === sp.choices[req.need]);
+  if (remembered) {
+    useUi.getState().toast(`Playing on ${remembered.label}`);
+    return usePlayer.getState().playOn(remembered.zone.id, req, false);
+  }
+  void usePlayer.getState().refreshZones();
+  sp.askWhere(req);
+}
+
 export const usePlayer = create<PlayerStore>((set, get) => {
   const rec = { albumId: null as string | null };
   const attach = (b: Backend) => {
@@ -88,11 +114,11 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async init() {
       if (get().ready) return;
-      let zones = FALLBACK_ZONES;
-      try { zones = await api.zones(); } catch { /* server offline: keep fallback */ }
-      if (!zones.length) zones = FALLBACK_ZONES;
+      const [zonesRes] = await Promise.all([api.zones().catch(() => FALLBACK_ZONES), useSpotify.getState().init().catch(() => undefined)]);
+      let zones = zonesRes.length ? zonesRes : FALLBACK_ZONES;
       // The browser zone lives in this tab, so the server never lists it.
       if (!isMock && !zones.some((z) => z.kind === 'browser')) zones = [...zones, BROWSER_ZONE];
+      if (!isMock) zones = withoutOwnDevice(zones, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
       const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches;
       const saved = loadLocal<string | null>('rune.zone', null);
       const pick = zones.find((z) => z.id === saved) ?? zones.find((z) => z.kind === (mobile ? 'browser' : 'pc')) ?? zones[0]!;
@@ -103,12 +129,33 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       set({ ready: true });
     },
 
-    async setZone(id) {
+    async refreshZones() {
+      if (isMock) return;
+      try {
+        let zones = await api.zones();
+        if (!zones.some((z) => z.kind === 'browser')) zones = [...zones, BROWSER_ZONE];
+        zones = withoutOwnDevice(zones, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
+        // never drop the zone we are playing on
+        const cur = get().zones.find((z) => z.id === get().zone);
+        if (cur && !zones.some((z) => z.id === cur.id)) zones = [...zones, cur];
+        set({ zones });
+      } catch { /* keep what we have */ }
+    },
+
+    async setZone(id, opts) {
       const z = get().zones.find((x) => x.id === id);
       if (!z || id === get().zone) return;
+      const handoff = opts?.handoff !== false;
+      if (handoff) { useSpotify.getState().remember('spotify', undefined); useSpotify.getState().remember('local', undefined); }
       saveLocal('rune.zone', id);
       const prev = backends.get(get().zone);
       const b = backendFor(z);
+      if (!handoff) {
+        if (prev && prev !== b && (prev.state.status === 'playing' || prev.state.status === 'loading')) await prev.send({ type: 'pause' }).catch(() => undefined);
+        attach(b);
+        await b.refresh();
+        return;
+      }
       // Hand playback over (like Roon's "transfer zone"): same queue, same track, same
       // position, same play/pause state — then stop the old zone.
       if (prev && prev !== b) {
@@ -121,12 +168,12 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         const active = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
         if (active) {
           const items: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
-          const toSpotify = z.kind === 'spotify';
-          const playable = items.filter((i) => (i.track.source === 'spotify') === toSpotify);
+          const caps = capsFrom(useSpotify.getState());
+          const playable = items.filter((i) => zoneCanPlay(z.kind, i.track.source, caps));
           const current = items[s.index]!;
           const notice = (m: string) => useUi.getState().toast(m);
-          if ((current.track.source === 'spotify') !== toSpotify) {
-            notice(toSpotify ? 'Spotify devices can only play Spotify tracks — your local files stay where they are' : 'Spotify tracks play on a Spotify device');
+          if (!zoneCanPlay(z.kind, current.track.source, caps)) {
+            notice(`${z.name} can't play ${current.track.source === 'spotify' ? 'Spotify' : 'local'} tracks — the music stays where it is`);
           } else {
             const startIndex = playable.indexOf(current);
             const positionMs = livePosition(s);
@@ -145,8 +192,10 @@ export const usePlayer = create<PlayerStore>((set, get) => {
     },
 
     async playItems(items, startIndex = 0, opts) {
-      const b = backends.get(get().zone);
-      if (!b || !items.length) return;
+      if (!items.length) return;
+      const st = get();
+      const z = st.zones.find((x) => x.id === st.zone);
+      if (!z || !backends.get(z.id)) return;
       let list = items;
       let start = startIndex;
       if (opts?.shuffle) {
@@ -157,15 +206,40 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         }
         start = 0;
       }
-      await b.send({ type: 'play', trackIds: list.map((i) => i.track.id), startIndex: start }, list);
-      if (opts?.shuffle) await b.send({ type: 'shuffle', on: true });
+      const route = routeItems(z.kind, list, start, capsFrom(useSpotify.getState()));
+      if (!route.ok) return routeElsewhere({ items: list, startIndex: start, shuffle: opts?.shuffle, need: route.need, context: opts?.context });
+      if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
+      await startOn(backends.get(z.id)!, z, route.items, route.startIndex, opts?.shuffle);
+    },
+
+    async playOn(zoneId, req, remember = true) {
+      const z = get().zones.find((x) => x.id === zoneId);
+      if (!z) return;
+      const caps = capsFrom(useSpotify.getState());
+      const route = routeItems(z.kind, req.items, req.startIndex, { sdk: caps.sdk });
+      if (!route.ok) return;
+      if (remember) useSpotify.getState().remember(req.need, zoneId);
+      await get().setZone(zoneId, { handoff: false });
+      const b = backends.get(zoneId);
+      if (!b) return;
+      if (route.dropped) useUi.getState().toast(`${route.dropped} ${route.dropped === 1 ? 'track' : 'tracks'} skipped — ${z.name} can't play them`);
+      await startOn(b, z, route.items, route.startIndex, req.shuffle);
     },
 
     async enqueueItems(items, next) {
-      const b = backends.get(get().zone);
-      if (!b || !items.length) return;
-      await b.send({ type: 'enqueue', trackIds: items.map((i) => i.track.id), next }, items);
-      useUi.getState().toast(next ? 'Playing next' : `Added to queue — ${items.length} ${items.length === 1 ? 'track' : 'tracks'}`);
+      const st = get();
+      const z = st.zones.find((x) => x.id === st.zone);
+      const b = z && backends.get(z.id);
+      if (!z || !b || !items.length) return;
+      const caps = capsFrom(useSpotify.getState());
+      const ok = items.filter((i) => zoneCanPlay(z.kind, i.track.source, caps));
+      if (!ok.length) {
+        useUi.getState().toast(`${z.name} can't play ${items[0]!.track.source === 'spotify' ? 'Spotify' : 'local'} tracks — pick another zone first`);
+        return;
+      }
+      await b.send({ type: 'enqueue', trackIds: ok.map((i) => i.track.id), next }, ok);
+      const skipped = items.length - ok.length;
+      useUi.getState().toast(next ? 'Playing next' : `Added to queue — ${ok.length} ${ok.length === 1 ? 'track' : 'tracks'}${skipped ? ` (${skipped} can't play here)` : ''}`);
     },
 
     async command(cmd) {
@@ -184,8 +258,11 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
   const zones = usePlayer((s) => s.zones);
   const kind = zones.find((z) => z.id === state.zone)?.kind ?? 'pc';
   const cur = state.queue[state.index]?.track;
-  if (kind === 'spotify' || cur?.source === 'spotify') {
+  if (kind === 'spotify') {
     return { steps: ['Spotify', 'Spotify Connect', zones.find((z) => z.id === state.zone)?.name ?? 'Device'], tone: 'off' };
+  }
+  if (cur?.source === 'spotify') {
+    return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === state.zone)?.name ?? 'This browser'], tone: 'off' };
   }
   let steps = state.signalPath;
   if (!steps && cur) {

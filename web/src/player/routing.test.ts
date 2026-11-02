@@ -1,0 +1,94 @@
+import type { Track } from '@liner/shared';
+import { describe, expect, it } from 'vitest';
+import { sdkSupportedFor } from '../lib/device';
+import type { PlayItem, ZoneInfo } from '../lib/types';
+import { playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, zoneCanPlay } from './routing';
+
+const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotify' ? 'sp:alb1' : 'la:a'): PlayItem => ({
+  track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
+  album: { id: albumId, title: 'T' },
+});
+const ZONES: ZoneInfo[] = [
+  { id: 'pc', name: 'Linux PC speakers', kind: 'pc' },
+  { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' },
+  { id: 'browser', name: 'This Mac', kind: 'browser' },
+];
+const SDK = { sdk: true }, NO_SDK = { sdk: false };
+
+describe('zoneCanPlay', () => {
+  it('pc is local-only, Connect is spotify-only, browser is local + (spotify via SDK)', () => {
+    expect(zoneCanPlay('pc', 'local', SDK)).toBe(true);
+    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(false);
+    expect(zoneCanPlay('spotify', 'spotify', NO_SDK)).toBe(true);
+    expect(zoneCanPlay('spotify', 'local', SDK)).toBe(false);
+    expect(zoneCanPlay('browser', 'local', NO_SDK)).toBe(true);
+    expect(zoneCanPlay('browser', 'spotify', NO_SDK)).toBe(false);
+    expect(zoneCanPlay('browser', 'spotify', SDK)).toBe(true);
+  });
+});
+
+describe('routeItems', () => {
+  it('asks when the start item cannot play', () => {
+    const r = routeItems('pc', [t('sp:1', 'spotify')], 0, SDK);
+    expect(r).toEqual({ ok: false, reason: 'start', need: 'spotify' });
+  });
+  it('drops unplayable items and re-bases the start index', () => {
+    const items = [t('l:1', 'local'), t('sp:1', 'spotify'), t('l:2', 'local')];
+    const r = routeItems('pc', items, 2, SDK);
+    expect(r.ok && r.items.map((i) => i.track.id)).toEqual(['l:1', 'l:2']);
+    expect(r.ok && r.startIndex).toBe(1);
+    expect(r.ok && r.dropped).toBe(1);
+  });
+  it('keeps everything on the hybrid browser zone', () => {
+    const items = [t('l:1', 'local'), t('sp:1', 'spotify')];
+    const r = routeItems('browser', items, 1, SDK);
+    expect(r.ok && r.dropped).toBe(0);
+  });
+  it('local items on a Connect device need a choice', () => {
+    expect(routeItems('spotify', [t('l:1', 'local')], 0, SDK)).toMatchObject({ ok: false, need: 'local' });
+  });
+});
+
+describe('playableZones', () => {
+  it('lists the browser first (labelled), then Connect devices, only when the SDK works', () => {
+    const o = playableZones(ZONES, 'spotify', SDK);
+    expect(o.map((x) => x.zone.id)).toEqual(['browser', 'spotify:phone']);
+    expect(o[0]!.label).toBe('This Mac (Spotify)');
+    expect(playableZones(ZONES, 'spotify', NO_SDK).map((x) => x.zone.id)).toEqual(['spotify:phone']);
+  });
+  it('local tracks: pc + browser', () => {
+    expect(playableZones(ZONES, 'local', SDK).map((x) => x.zone.id)).toEqual(['browser', 'pc']);
+  });
+});
+
+describe('withoutOwnDevice', () => {
+  it('hides the SDK device that shows up as a Connect zone (by id or name)', () => {
+    const z: ZoneInfo[] = [...ZONES, { id: 'spotify:abc', name: 'rune — This Mac', kind: 'spotify' }, { id: 'spotify:other', name: 'rune — Laptop', kind: 'spotify' }];
+    expect(withoutOwnDevice(z, { name: 'rune — This Mac', deviceId: null }).map((x) => x.id)).not.toContain('spotify:abc');
+    expect(withoutOwnDevice(z, { name: 'nope', deviceId: 'abc' }).map((x) => x.id)).not.toContain('spotify:abc');
+    expect(withoutOwnDevice(z, { name: 'rune — This Mac', deviceId: 'abc' }).map((x) => x.id)).toContain('spotify:other');
+  });
+});
+
+describe('spotifyDeepLink', () => {
+  it('album when all items share an album, else the track, else null; explicit context wins', () => {
+    expect(spotifyDeepLink([t('sp:1', 'spotify'), t('sp:2', 'spotify')])).toBe('spotify:album:alb1');
+    expect(spotifyDeepLink([t('sp:1', 'spotify', 'sp:x'), t('sp:2', 'spotify', 'sp:y')])).toBe('spotify:track:1');
+    expect(spotifyDeepLink([t('l:1', 'local')])).toBeNull();
+    expect(spotifyDeepLink([t('sp:1', 'spotify')], 'spotify:playlist:zzz')).toBe('spotify:playlist:zzz');
+  });
+});
+
+describe('sdkSupportedFor', () => {
+  const desktop = { ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17 Safari/605.1.15', touchPoints: 0, secure: true, hasEme: true };
+  it('desktop browsers on a secure context with EME', () => {
+    expect(sdkSupportedFor(desktop)).toBe(true);
+    expect(sdkSupportedFor({ ...desktop, secure: false })).toBe(false);
+    expect(sdkSupportedFor({ ...desktop, hasEme: false })).toBe(false);
+  });
+  it('not iPhone / iPad / iPadOS-as-Mac / Android', () => {
+    expect(sdkSupportedFor({ ...desktop, ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148' })).toBe(false);
+    expect(sdkSupportedFor({ ...desktop, touchPoints: 5 })).toBe(false);
+    expect(sdkSupportedFor({ ...desktop, ua: 'Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36' })).toBe(false);
+  });
+});

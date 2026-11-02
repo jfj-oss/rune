@@ -23,6 +23,7 @@ export class LocalBackend implements Backend {
       this.onNotice?.(m);
       this.set({ status: 'paused', positionMs: livePosition(this.state), updatedAt: Date.now() });
     });
+    this.engine.onSync?.((pos, playing) => this.onEngineSync(pos, playing));
     this.engine.setVolume(this.state.volume);
     this.timer = setInterval(() => this.tick(), 400);
   }
@@ -52,6 +53,14 @@ export class LocalBackend implements Backend {
     const real = this.engine.position();
     const pos = real ?? livePosition(s);
     if (real === null && pos >= cur.track.durationMs - 5) this.advance();
+  }
+
+  /** The engine saw the real position / play state (Spotify SDK: also changes made from other Spotify apps). */
+  private onEngineSync(pos: number, playing: boolean) {
+    const s = this.state;
+    if (!s.queue[s.index] || s.status === 'stopped') return;
+    const status = playing ? 'playing' : 'paused';
+    if (status !== s.status || Math.abs(pos - livePosition(s)) > 700) this.set({ status, positionMs: pos, updatedAt: Date.now() });
   }
 
   private startCurrent(positionMs = 0, autoplay = true) {

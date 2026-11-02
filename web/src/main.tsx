@@ -7,6 +7,7 @@ import './styles/shell.css';
 import './styles/components.css';
 import './styles/pages.css';
 import './styles/ambient.css';
+import './styles/spotify.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

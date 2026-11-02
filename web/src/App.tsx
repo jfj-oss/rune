@@ -9,6 +9,8 @@ import ArtistPage from './pages/Artist';
 import Artists from './pages/Artists';
 import Home from './pages/Home';
 import Placeholder from './pages/Placeholder';
+import PlaylistPage from './pages/Playlist';
+import Playlists from './pages/Playlists';
 import SearchPage from './pages/Search';
 import { usePlayer } from './store/player';
 
@@ -32,7 +34,8 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/tracks" element={<Placeholder title="Tracks" />} />
             <Route path="/genres" element={<Placeholder title="Genres" />} />
-            <Route path="/playlists" element={<Placeholder title="Playlists" />} />
+            <Route path="/playlists" element={<Playlists />} />
+            <Route path="/playlist/:id" element={<PlaylistPage />} />
             <Route path="*" element={<Placeholder title="Not found" />} />
           </Routes>
         </Shell>
