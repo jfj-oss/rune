@@ -20,6 +20,8 @@ import {
 export interface SpotifyZoneApi {
   devices(): Promise<SpotifyDevice[]>;
   tracks(ids: string[], opts?: { maxSingles?: number }): Promise<SpotifyTrack[]>;
+  /** One track by id (GET /tracks/{id}). Dev-mode apps may not use the batch endpoint. */
+  track(id: string): Promise<SpotifyTrack>;
   currentPlayback(): Promise<SpotifyPlaybackState | null>;
   queue(): Promise<SpotifyQueue>;
   play(body: SpotifyPlayBody, deviceId?: string): Promise<void>;
@@ -36,6 +38,11 @@ export interface SpotifyZoneApi {
 export interface ConnectZoneOptions {
   pollMsPlaying?: number;
   pollMsIdle?: number;
+  /** Poll delays when no rune client is connected (default 15 s playing / 30 s idle). */
+  pollMsPlayingUnwatched?: number;
+  pollMsIdleUnwatched?: number;
+  /** Whether at least one websocket client is connected. Undefined = always watched. */
+  hasClients?: () => boolean;
   now?: () => number;
 }
 
@@ -47,6 +54,14 @@ const VOLUME_HOLD_MS = 4000;
 /** How long a just-skipped-to song is shown while Spotify still reports the previous one. */
 const TRACK_HOLD_MS = 4000;
 const SETTLE_GAP_MS = 350;
+/**
+ * How long a /me/player/queue answer stays good enough to reuse. The item id changing
+ * (or a command / a connected client) forces a fresh read sooner.
+ */
+const QUEUE_STALE_MS = 10_000;
+/** Metadata lookups for a just-started queue: the window around startIndex, in parallel. */
+const STARTED_LOOKUPS = 8;
+const STARTED_LOOKUP_CONCURRENCY = 3;
 
 const EMPTY_ALBUM = { id: 'sp:unknown', title: '', coverUrl: undefined } as const;
 
@@ -198,9 +213,14 @@ export class SpotifyConnectZone implements PlaybackZone {
   private readonly api: SpotifyZoneApi;
   private readonly pollMsPlaying: number;
   private readonly pollMsIdle: number;
+  private readonly pollMsPlayingUnwatched: number;
+  private readonly pollMsIdleUnwatched: number;
+  private readonly hasClients: (() => boolean) | undefined;
   private readonly now: () => number;
   private snapshot: PlayerState;
   private startedQueue: QueueItem[] = [];
+  /** Bumped whenever startedQueue is replaced, so a slow background lookup cannot overwrite it. */
+  private startedRev = 0;
   private readonly listeners = new Set<(s: PlayerState) => void>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: Promise<void> | null = null;
@@ -212,6 +232,11 @@ export class SpotifyConnectZone implements PlaybackZone {
   private lastActiveDevice: string | null = null;
   /** The song just skipped/jumped to: shown at once and kept while Spotify still reports the old one. */
   private trackHold: { id: string; until: number } | null = null;
+  /** Queue reuse: only re-read when the item changed, a command ran, or it went stale. */
+  private lastQueue: SpotifyQueue | undefined;
+  private lastQueueAt = Number.NEGATIVE_INFINITY;
+  private lastQueueItemId: string | null = null;
+  private queueDirty = false;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
     this.api = api;
@@ -220,6 +245,9 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.zone = `spotify:${deviceId}`;
     this.pollMsPlaying = opts.pollMsPlaying ?? 1000;
     this.pollMsIdle = opts.pollMsIdle ?? 3000;
+    this.pollMsPlayingUnwatched = opts.pollMsPlayingUnwatched ?? 15_000;
+    this.pollMsIdleUnwatched = opts.pollMsIdleUnwatched ?? 30_000;
+    this.hasClients = opts.hasClients;
     this.now = opts.now ?? Date.now;
     this.snapshot = emptyPlayerState(this.zone, this.now);
   }
@@ -239,6 +267,8 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   async command(cmd: PlayerCommand): Promise<PlayerState> {
     const device = this.deviceId;
+    // A command may change what is up next: the next poll must not reuse a cached queue.
+    this.queueDirty = true;
     switch (cmd.type) {
       case 'play': {
         const spotifyIds = cmd.trackIds.map((id) => this.requireSpotifyTrack(id));
@@ -251,7 +281,21 @@ export class SpotifyConnectZone implements PlaybackZone {
         await this.api.play(body, device);
         this.claim();
         if (cmd.paused) await this.api.pause(device).catch(() => undefined);
-        this.startedQueue = await this.fetchStartedQueue(spotifyIds, cmd.startIndex ?? 0);
+        // Show the picked song and the queue we sent at once; Spotify's metadata for those
+        // songs is fetched in the background (the command must not wait for it).
+        const start = Math.max(0, Math.min(cmd.startIndex ?? 0, spotifyIds.length - 1));
+        const rev = ++this.startedRev;
+        this.startedQueue = spotifyIds.map((id, position) =>
+          placeholderQueueItem(placeholderTrack(spotifyTrackId(id)), position),
+        );
+        this.showStarted(start, cmd.positionMs ?? 0, cmd.paused === true);
+        void this.fetchStartedQueue(spotifyIds, start)
+          .then((queue) => {
+            if (this.closed || rev !== this.startedRev) return;
+            this.startedQueue = queue;
+            this.publishStartedQueue();
+          })
+          .catch(() => undefined);
         return this.settle();
       }
       case 'enqueue': {
@@ -291,7 +335,9 @@ export class SpotifyConnectZone implements PlaybackZone {
         await this.api.play({ uris, offset: { position } }, device);
         this.claim();
         const ids = uris.map((u) => u.split(':').pop() as string);
-        this.startedQueue = await this.fetchStartedQueue(ids, position);
+        const rev = ++this.startedRev;
+        const queue = await this.fetchStartedQueue(ids, position);
+        if (rev === this.startedRev) this.startedQueue = queue;
         return this.settle();
       }
       case 'remove':
@@ -343,24 +389,71 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   private async fetchStartedQueue(spotifyIds: string[], startIndex = 0): Promise<QueueItem[]> {
     if (spotifyIds.length === 0) return [];
-    let tracks: SpotifyTrack[] = [];
-    // The songs around the one being started first: when only one-by-one lookups are allowed,
-    // those are the ones that get looked up (Spotify's own "up next" fills in later ones).
+    // The songs around the one being started first: those are the ones that get looked up
+    // (Spotify's own "up next" fills in later ones).
     const from = Math.max(0, Math.min(startIndex, spotifyIds.length - 1) - 2);
-    const ordered = [...spotifyIds.slice(from), ...spotifyIds.slice(0, from)];
+    const ordered = [...spotifyIds.slice(from), ...spotifyIds.slice(0, from)].slice(0, STARTED_LOOKUPS);
+    const byId = new Map<string, SpotifyTrack>();
     try {
-      tracks = await this.api.tracks(ordered, { maxSingles: 8 });
+      // Single GET /tracks/{id} lookups (development-mode apps may not use /tracks?ids=),
+      // at most STARTED_LOOKUP_CONCURRENCY in flight.
+      await eachLimit(ordered, STARTED_LOOKUP_CONCURRENCY, async (id) => {
+        try {
+          const track = await this.api.track(id);
+          if (track?.id) byId.set(track.id, track);
+        } catch (err) {
+          if ((err as { status?: number }).status === 429) throw err;
+          // unknown / unavailable track: leave its placeholder
+        }
+      });
     } catch {
       // Metadata is cosmetic for the queue; fall back to placeholders.
     }
-    const byId = new Map<string, SpotifyTrack>();
-    for (const t of tracks) if (t.id) byId.set(t.id, t);
 
     return spotifyIds.map((id, position) => {
       const sp = byId.get(id);
       if (!sp) return placeholderQueueItem(placeholderTrack(spotifyTrackId(id)), position);
       return queueItemFromSpotify(sp, position);
     });
+  }
+
+  /** Show the song that was just started at once, before Spotify's poll catches up. */
+  private showStarted(index: number, positionMs: number, paused: boolean): void {
+    const item = this.startedQueue[index];
+    if (!item) return;
+    this.trackHold = { id: item.track.id, until: this.now() + TRACK_HOLD_MS };
+    this.snapshot = {
+      ...this.snapshot,
+      queue: this.startedQueue.slice(),
+      index,
+      positionMs: positionMs > 0 ? Math.round(positionMs) : 0,
+      status: paused ? 'paused' : 'playing',
+      updatedAt: this.now(),
+    };
+    for (const cb of this.listeners) cb(this.snapshot);
+  }
+
+  /** Metadata for the just-started queue arrived: fill its placeholders and tell listeners. */
+  private publishStartedQueue(): void {
+    if (this.startedQueue.length === 0) return;
+    const byId = new Map(this.startedQueue.map((q) => [q.track.id, q]));
+    let changed = false;
+    const queue = this.snapshot.queue.map((q) => {
+      const real = byId.get(q.track.id);
+      if (!real) return q;
+      if (real.track.title === q.track.title && real.album.id === q.album.id) return q;
+      changed = true;
+      return { ...q, track: real.track, album: real.album };
+    });
+    // A play command always seeds snapshot.queue from startedQueue, but stay safe if it did not.
+    if (queue.length === 0 && this.startedQueue.length > 0) {
+      this.snapshot = { ...this.snapshot, queue: this.startedQueue.slice() };
+      for (const cb of this.listeners) cb(this.snapshot);
+      return;
+    }
+    if (!changed) return;
+    this.snapshot = { ...this.snapshot, queue, updatedAt: this.now() };
+    for (const cb of this.listeners) cb(this.snapshot);
   }
 
   private async refresh(): Promise<PlayerState> {
@@ -408,12 +501,23 @@ export class SpotifyConnectZone implements PlaybackZone {
     } catch {
       return;
     }
-    let queue: SpotifyQueue | undefined;
+    // Reuse the last queue unless the playing item changed, a command ran, or the read went
+    // stale (10 s). With no connected client there is nobody to show it to: do not fetch it.
+    let queue: SpotifyQueue | undefined = this.lastQueue;
     if (playback && (!playback.device?.id || playback.device.id === this.deviceId)) {
-      try {
-        queue = await this.api.queue();
-      } catch {
-        queue = undefined;
+      const itemId = playback.item?.id ?? null;
+      const stale = this.now() - this.lastQueueAt >= QUEUE_STALE_MS;
+      const itemChanged = itemId !== this.lastQueueItemId;
+      if (this.clientsWatching() && (this.queueDirty || itemChanged || stale || !this.lastQueue)) {
+        try {
+          queue = await this.api.queue();
+          this.lastQueue = queue;
+          this.lastQueueAt = this.now();
+          this.lastQueueItemId = itemId;
+        } catch {
+          queue = this.lastQueue;
+        }
+        this.queueDirty = false;
       }
     }
     // /me/player describes the account's ACTIVE device, which may be another one (the browser,
@@ -467,11 +571,30 @@ export class SpotifyConnectZone implements PlaybackZone {
     void this.loop();
   }
 
+  /** A client just connected (or came back): poll now instead of waiting out a slow interval. */
+  wake(): void {
+    if (this.closed || this.listeners.size === 0) return;
+    this.clearTimer();
+    if (!this.inFlight) void this.loop();
+  }
+
+  private clientsWatching(): boolean {
+    return this.hasClients ? this.hasClients() : true;
+  }
+
   private async loop(): Promise<void> {
     if (this.closed || this.listeners.size === 0) return;
     await this.pollOnce();
     if (this.closed || this.listeners.size === 0) return;
-    const delay = this.snapshot.status === 'playing' || this.now() < this.claimUntil ? this.pollMsPlaying : this.pollMsIdle;
+    const busy = this.snapshot.status === 'playing' || this.now() < this.claimUntil;
+    // Nobody connected: poll slowly (history still gets recorded, just coarser).
+    const delay = this.clientsWatching()
+      ? busy
+        ? this.pollMsPlaying
+        : this.pollMsIdle
+      : busy
+        ? this.pollMsPlayingUnwatched
+        : this.pollMsIdleUnwatched;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.loop();
@@ -506,6 +629,19 @@ function sameState(a: PlayerState, b: PlayerState): boolean {
 
 function assertNever(x: never): never {
   throw new Error(`Unsupported player command: ${JSON.stringify(x)}`);
+}
+
+/** Run `fn` over `items` with at most `limit` promises in flight, preserving nothing about order. */
+async function eachLimit<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      await fn(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 // ---------- manager ----------
@@ -555,6 +691,11 @@ export class SpotifyZones {
     return this.zones.get(zoneId);
   }
 
+  /** A client connected: every zone polls at once again (1 s / 3 s while watched). */
+  wake(): void {
+    for (const zone of this.zones.values()) zone.wake();
+  }
+
   async close(): Promise<void> {
     await Promise.all([...this.zones.values()].map((z) => z.close()));
     this.zones.clear();
@@ -567,6 +708,8 @@ export function createSpotifyZones(api: SpotifyZoneApi, opts: ConnectZoneOptions
 
 /** How long one /me/player (or /me/player/queue) answer is reused by all zones. */
 const SHARED_READ_MS = 800;
+/** The device list changes rarely; GET /zones can afford a 5 s cache. */
+const DEVICES_READ_MS = 5000;
 
 /**
  * Wrap the API so concurrent zone polls share /me/player and /me/player/queue reads
@@ -576,8 +719,14 @@ export function sharedPlaybackReads(api: SpotifyZoneApi, now: () => number = Dat
   type Slot<T> = { at: number; value: Promise<T> } | null;
   let playback: Slot<SpotifyPlaybackState | null> = null;
   let queue: Slot<SpotifyQueue> = null;
-  const read = <T>(slot: Slot<T>, set: (s: Slot<T>) => void, load: () => Promise<T>): Promise<T> => {
-    if (slot && now() - slot.at < SHARED_READ_MS) return slot.value;
+  let devices: Slot<SpotifyDevice[]> = null;
+  const read = <T>(
+    slot: Slot<T>,
+    set: (s: Slot<T>) => void,
+    load: () => Promise<T>,
+    ttlMs = SHARED_READ_MS,
+  ): Promise<T> => {
+    if (slot && now() - slot.at < ttlMs) return slot.value;
     const value = load();
     const mine = { at: now(), value };
     set(mine);
@@ -588,13 +737,16 @@ export function sharedPlaybackReads(api: SpotifyZoneApi, now: () => number = Dat
     try {
       return await fn();
     } finally {
+      // Commands can add/remove/rename a device (and change playback/queue): drop everything.
       playback = null;
       queue = null;
+      devices = null;
     }
   };
   return {
-    devices: () => api.devices(),
+    devices: () => read(devices, (s) => (devices = s), () => api.devices(), DEVICES_READ_MS),
     tracks: (ids, o) => api.tracks(ids, o),
+    track: (id) => api.track(id),
     currentPlayback: () => read(playback, (s) => (playback = s), () => api.currentPlayback()),
     queue: () => read(queue, (s) => (queue = s), () => api.queue()),
     play: (body, deviceId) => write(() => api.play(body, deviceId)),

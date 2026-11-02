@@ -150,6 +150,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const spotify = cfg.spotifyClientId
     ? createSpotify(db, cfg, {
         ...opts.spotifyOptions,
+        // Connect zones poll /me/player every second only while somebody is watching;
+        // with no live socket they slow to 15 s / 30 s and skip the queue.
+        hasClients: () => clients.size > 0,
         // Login callback fires this without awaiting: the redirect must not wait
         // for the Spotify library to download.
         onLogin: () => {
@@ -533,6 +536,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const client = socket as typeof socket & { slim?: boolean };
         client.slim = req.query.slim === '1';
         clients.add(client);
+        // Somebody is watching again: Spotify zones go back to 1 s / 3 s polling right now.
+        spotify?.zones.wake();
         socket.on('close', () => clients.delete(socket));
         if (pc) {
           const state = sanitize(pc.state());

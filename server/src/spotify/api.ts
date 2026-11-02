@@ -432,6 +432,10 @@ export class SpotifyApi {
   }
   private batchTracksRefused = false;
 
+  /** One track by id (GET /tracks/{id}), for callers that must not use the batch endpoint. */
+  track(id: string): Promise<SpotifyTrack> {
+    return this.request<SpotifyTrack>(`/tracks/${encodeURIComponent(id)}`);
+  }
 
   me(): Promise<SpotifyUser> {
     return this.request<SpotifyUser>('/me');
