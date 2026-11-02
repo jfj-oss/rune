@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
+  blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, paletteAt, POOLS, PULSE, pulseAt, radiusScale, RIBBONS, TONE, toneCurve, WARP,
   type DitherColour, type DitherPalette,
 } from '../lib/dither';
+import { currentItem, usePlayer } from '../store/player';
 
 /* "Dither" ambient: slow drifting abstract light forms, ordered-dithered (blue-noise thresholds) into black + a dark
    mid tone + one strong colour. Drawn by a WebGL1 fragment shader into a low-res canvas (~2 CSS px per dot) that is
@@ -41,6 +42,8 @@ uniform float u_rs;     // radiusScale(aspect)
 uniform float u_t;
 uniform vec3 u_mid;
 uniform vec3 u_light;
+uniform float u_pulse;  // new-song pulse strength 0..1 (pulseAt)
+uniform float u_ring;   // pulse ring radius, in screen heights
 uniform sampler2D u_noise;
 
 float hash2(vec2 p) {
@@ -67,6 +70,9 @@ void main() {
   float xn = w.x / u_aspect;
   float d;
   ${ribbonGlsl}
+  // new-song pulse: every form swells a little, and a ring of light spreads from the centre
+  float pd = length(w - vec2(0.5 * u_aspect, 0.5)) - u_ring;
+  f += u_pulse * (${g(PULSE.glow)} + ${g(PULSE.ring)} * exp(-(pd * pd) / (${g(PULSE.ringWidth)} * ${g(PULSE.ringWidth)})));
   float mot = ${g(MOTTLE.base)} + ${g(MOTTLE.amp)} * vnoise(vec2(q.x * ${g(MOTTLE.freq)} + t * ${g(MOTTLE.speed)}, q.y * ${g(MOTTLE.freq)}));
 
   float tau = pow(smoothstep(${g(TONE.lo)}, ${g(TONE.hi)}, f), ${g(TONE.gamma)});
@@ -80,7 +86,9 @@ void main() {
   gl_FragColor = vec4(col / 255.0, 1.0);
 }`;
 
-interface Renderer { draw(t: number, pal: DitherPalette): void; resize(w: number, h: number): void; dispose(): void }
+interface Pulse { amt: number; ring: number }
+const NO_PULSE: Pulse = { amt: 0, ring: 0 };
+interface Renderer { draw(t: number, pal: DitherPalette, pulse?: Pulse): void; resize(w: number, h: number): void; dispose(): void }
 
 function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const s = gl.createShader(type)!;
@@ -119,6 +127,7 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     const u = (n: string) => gl.getUniformLocation(prog, n);
     const uRes = u('u_res'), uAspect = u('u_aspect'), uT = u('u_t'), uMid = u('u_mid'), uLight = u('u_light'), uRs = u('u_rs');
+    const uPulse = u('u_pulse'), uRing = u('u_ring');
     gl.uniform1i(u('u_noise'), 0);
     return {
       resize(w, h) {
@@ -128,8 +137,10 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
         gl.uniform1f(uAspect, w / h);
         gl.uniform1f(uRs, radiusScale(w / h));
       },
-      draw(t, pal) {
+      draw(t, pal, pulse = NO_PULSE) {
         gl.uniform1f(uT, t);
+        gl.uniform1f(uPulse, pulse.amt);
+        gl.uniform1f(uRing, pulse.ring);
         gl.uniform3f(uMid, pal.mid[0], pal.mid[1], pal.mid[2]);
         gl.uniform3f(uLight, pal.light[0], pal.light[1], pal.light[2]);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -177,6 +188,17 @@ function canvas2dRenderer(canvas: HTMLCanvasElement): Renderer | null {
 
 const FRAME_MS = 1000 / 30;
 
+/* New-song pulse: one shared start time for every backdrop on the page (app background and Now Playing). */
+let pulseStart = -Infinity;
+let lastSongKey = '';
+usePlayer.subscribe((s) => {
+  const cur = currentItem(s.state);
+  const key = cur ? `${s.state.index}:${cur.track.id}` : '';
+  if (key && key !== lastSongKey) pulseStart = performance.now();
+  lastSongKey = key;
+});
+const currentPulse = (): Pulse => pulseAt((performance.now() - pulseStart) / 1000);
+
 /** Fixed time used for the static (reduced-motion / fallback) frame: a nicely composed moment. */
 const STILL_T = 23;
 
@@ -220,7 +242,10 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
       canvas.style.width = `${(w * dot) / dpr}px`;
       canvas.style.height = `${(h * dot) / dpr}px`;
     };
-    const paint = () => { const t = still() ? STILL_T : clock(); r.draw(t, paletteAt(colourRef.current, still() ? 0 : t)); };
+    const paint = () => {
+      const t = still() ? STILL_T : clock();
+      r.draw(t, paletteAt(colourRef.current, still() ? 0 : t), still() ? NO_PULSE : currentPulse());
+    };
     redraw.current = paint;
 
     const loop = (now: number) => {

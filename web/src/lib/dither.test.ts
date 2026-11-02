@@ -129,3 +129,16 @@ describe('ditherHueOf', () => {
     expect(ditherHueOf('nonsense')).toBeNull();
   });
 });
+
+describe('pulseAt', () => {
+  it('swells fast, fades to zero, and the ring grows', async () => {
+    const { pulseAt, PULSE } = await import('./dither');
+    expect(pulseAt(-1).amt).toBe(0);
+    expect(pulseAt(0).amt).toBe(0);
+    expect(pulseAt(PULSE.attack).amt).toBeCloseTo(1, 5);
+    expect(pulseAt(1).amt).toBeLessThan(pulseAt(0.3).amt);
+    expect(pulseAt(PULSE.length).amt).toBe(0);
+    expect(pulseAt(PULSE.length - 0.01).amt).toBeLessThan(0.05);
+    expect(pulseAt(1).ring).toBeGreaterThan(pulseAt(0.5).ring);
+  });
+});

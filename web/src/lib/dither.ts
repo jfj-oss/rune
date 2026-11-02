@@ -268,3 +268,16 @@ export function ditherHueOf(css: string): DitherHue | null {
   if (h < 255) return 'blue';
   return 'purple';
 }
+
+/** New-song pulse timing (seconds): a quick swell, then a ring that spreads from the centre and fades. */
+export const PULSE = { attack: 0.12, decay: 1.0, length: 2.4, ringSpeed: 0.5, ringStart: 0.04, ringWidth: 0.06, glow: 0.1, ring: 0.7 };
+
+/** Pulse strength (0..1) and ring radius (in screen heights) `dt` seconds after a new song started. */
+export function pulseAt(dt: number): { amt: number; ring: number } {
+  if (!(dt >= 0) || dt >= PULSE.length) return { amt: 0, ring: 0 };
+  const rise = Math.min(1, dt / PULSE.attack);
+  const fall = Math.exp(-Math.max(0, dt - PULSE.attack) / PULSE.decay);
+  // fade the tail to exactly 0 at `length` so the pulse never ends with a visible step
+  const tail = Math.min(1, (PULSE.length - dt) / 0.4);
+  return { amt: rise * fall * tail, ring: PULSE.ringStart + dt * PULSE.ringSpeed };
+}
