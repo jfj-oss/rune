@@ -27,6 +27,8 @@ export interface PlaylistTrack extends Track {
   entrySource?: 'spotify-playlist' | 'rune-overlay';
   /** Stable id for entry operations (rune overlay entries use this with DELETE/move). */
   entryId?: string;
+  /** When this entry was added to the playlist (epoch ms), if known. */
+  addedAt?: number;
 }
 
 /** GET /api/playlists/:id — playlist metadata plus its ordered tracks. */

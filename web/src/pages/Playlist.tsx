@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
-import { Check, Copy, Disc3, Download, GripVertical, HardDrive, ListEnd, ListPlus, ListStart, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, User, X } from 'lucide-react';
+import { ArrowDownWideNarrow, Check, Copy, Disc3, Download, GripVertical, HardDrive, ListEnd, ListOrdered, ListPlus, ListStart, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, User, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
@@ -17,7 +17,7 @@ import { useScrollRoot } from '../hooks/scrollRoot';
 import { usePlaylistActions } from '../hooks/usePlaylistEdit';
 import { isLiked, playlistItem, playlistItems, playlistUri, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, formatDuration, formatTotalLength, plural } from '../lib/format';
-import { hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, rowEditable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
+import { hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, orderPlaylist, rowEditable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
 import { currentItem, usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
 
@@ -40,10 +40,14 @@ function PlaylistSkeleton() {
   );
 }
 
-function PlaylistView({ d }: { d: RunePlaylistDetail }) {
+function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const { play, enqueue } = usePlaylistPlay();
   const nav = useNavigate();
   const actions = usePlaylistActions();
+  const order = usePlaylistUi((s) => s.order);
+  const setOrder = usePlaylistUi((s) => s.setOrder);
+  const { view: d, origIndex, sorted } = useMemo(() => orderPlaylist(raw, order), [raw, order]);
+  const canSort = !isSmartPlaylist(raw) && raw.tracks.some((t) => t.addedAt != null);
   const items = useMemo(() => playlistItems(d), [d]);
   const totalMs = useMemo(() => d.tracks.reduce((n, t) => n + t.durationMs, 0), [d]);
   const liked = isLiked(d.id);
@@ -105,6 +109,11 @@ function PlaylistView({ d }: { d: RunePlaylistDetail }) {
               <button className="btn btn--primary" onClick={() => void play(d.id)}><Play size={18} fill="currentColor" /> Play</button>
               <button className="btn" onClick={() => void play(d.id, { shuffle: true })}><Shuffle size={17} /> Shuffle</button>
               <button className="btn" onClick={() => void enqueue(d.id)}><Plus size={18} /> Queue</button>
+              {canSort && (
+                <button className="btn" onClick={() => setOrder(order === 'added' ? 'playlist' : 'added')} title="Change the track order">
+                  {order === 'added' ? <><ArrowDownWideNarrow size={16} /> Newest first</> : <><ListOrdered size={16} /> Playlist order</>}
+                </button>
+              )}
               {!rune && <button className="btn" onClick={() => void duplicate()}><Copy size={16} /> Duplicate as rune playlist</button>}
               <Popover
                 placement="bottom-start"
@@ -132,7 +141,7 @@ function PlaylistView({ d }: { d: RunePlaylistDetail }) {
               {!smart && <><br /><br /><Link className="btn" to="/albums">Browse albums</Link></>}
             </Empty>
           ) : <Empty title="No tracks yet">This playlist is empty, or hasn’t finished syncing.</Empty>
-        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d)} mixed={mixed} />}
+        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d)} mixed={mixed} origIndex={origIndex} reorder={!sorted} />}
       </div>
       {confirmDelete && (
         <Dialog
@@ -161,7 +170,9 @@ function SourceBadge({ source, format }: { source: string; format?: string }) {
     : <span className="srcbadge" title="Local file">{format ? format.toUpperCase() : 'Local'}</span>;
 }
 
-function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; items: ReturnType<typeof playlistItems>; editable: boolean; mixed: boolean }) {
+function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: RunePlaylistDetail; items: ReturnType<typeof playlistItems>; editable: boolean; mixed: boolean; origIndex: number[]; reorder: boolean }) {
+  /** Shown row -> position in the playlist (rows are shown newest-first unless "Playlist order"). */
+  const pos = (i: number) => origIndex[i] ?? i;
   const root = useScrollRoot();
   const wrap = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
@@ -189,10 +200,10 @@ function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; 
   };
   const removeSelected = useCallback(() => {
     if (!sel.size) return;
-    const positions = [...sel].sort((a, b) => a - b);
+    const positions = [...sel].map(pos).sort((a, b) => a - b);
     clearSel();
     void actions.removeAt(d.id, positions);
-  }, [sel, clearSel, actions, d.id]);
+  }, [sel, clearSel, actions, d.id, origIndex]);
 
   useEffect(() => {
     if (!editable) return;
@@ -288,8 +299,8 @@ function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; 
               {mineCount > 0 && <button className={`btn btn--sm btn--ghost${selectMode ? ' is-on' : ''}`} aria-pressed={selectMode} onClick={() => setSelectMode((m) => !m)}><Check size={14} /> Select</button>}
               <span className="ptools__hint">
                 {spotifyList
-                  ? (mineCount > 0 ? <><HardDrive size={13} /> Your local rows can be dragged <GripVertical size={13} /> and removed · Spotify rows are locked</> : <>Add local files with “Add to playlist” on any track or album · Spotify rows are locked</>)
-                  : <>Drag <GripVertical size={13} /> to reorder · click a row to select, shift or ⌘ for several</>}
+                  ? (mineCount > 0 ? <><HardDrive size={13} /> Your local rows can be {reorder ? <>dragged <GripVertical size={13} /> and </> : ''}removed · Spotify rows are locked</> : <>Add local files with “Add to playlist” on any track or album · Spotify rows are locked</>)
+                  : reorder ? <>Drag <GripVertical size={13} /> to reorder · click a row to select, shift or ⌘ for several</> : <>Newest first · switch to “Playlist order” to drag rows · click a row to select</>}
               </span>
             </>
           ) : (
@@ -333,7 +344,7 @@ function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; 
               onDoubleClick={go}
             >
  {editable && !mine && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
-              {editable && mine && (
+              {editable && mine && reorder && (
                 <button className="prow__grip" aria-label={`Drag to reorder ${t.title}`} onPointerDown={(e) => onGripDown(e, i)} onPointerMove={onGripMove} onPointerUp={() => endDrag(true)} onPointerCancel={() => endDrag(false)}>
                   <GripVertical size={16} />
                 </button>
@@ -372,7 +383,7 @@ function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; 
                     <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [playlistItem(t)] }} />
                     <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
                     {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
-                    {editable && mine && <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [i]); }}>Remove from playlist</MenuItem>}
+                    {editable && mine && <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>Remove from playlist</MenuItem>}
                   </div>
                 )}
               </Popover>

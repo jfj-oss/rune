@@ -492,6 +492,7 @@ export function getPlaylist(db: Db, id: string): PlaylistDetail | undefined {
       },
       entrySource: entry.entrySource,
       entryId: entry.entryId,
+      ...(entry.addedAt != null ? { addedAt: entry.addedAt } : {}),
     });
   }
 

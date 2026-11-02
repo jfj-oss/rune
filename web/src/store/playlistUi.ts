@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { PlayItem } from '../lib/types';
+import type { PlaylistOrder } from '../lib/playlists';
+import { loadLocal, saveLocal } from './ui';
 
 /** What the "Add to playlist" picker should add. `resolve` runs on pick (an album's tracks are fetched lazily). */
 export interface PickerRequest {
@@ -21,6 +23,9 @@ interface PlaylistUi {
   picker: PickerRequest | null;
   newPlaylist: NewPlaylistRequest | null;
   smart: boolean;
+  /** Newest-added first, or the playlist's own order (remembered on this device). */
+  order: PlaylistOrder;
+  setOrder(o: PlaylistOrder): void;
   openPicker(r: PickerRequest): void;
   closePicker(): void;
   openNew(r?: NewPlaylistRequest): void;
@@ -33,6 +38,8 @@ export const usePlaylistUi = create<PlaylistUi>((set) => ({
   picker: null,
   newPlaylist: null,
   smart: false,
+  order: loadLocal<PlaylistOrder>('rune.playlistOrder', 'added') === 'playlist' ? 'playlist' : 'added',
+  setOrder: (order) => { saveLocal('rune.playlistOrder', order); set({ order }); },
   openPicker: (picker) => set({ picker }),
   closePicker: () => set({ picker: null }),
   openNew: (r) => set({ newPlaylist: r ?? {} }),

@@ -167,3 +167,20 @@ export function orderByRecent<T extends { id: string }>(list: readonly T[], rece
   const rank = (id: string) => { const i = recent.indexOf(id); return i < 0 ? Infinity : i; };
   return list.map((p, i) => ({ p, i })).sort((a, b) => rank(a.p.id) - rank(b.p.id) || a.i - b.i).map((x) => x.p);
 }
+
+/** How playlist tracks are listed: newest additions first (default) or the playlist's own order. */
+export type PlaylistOrder = 'added' | 'playlist';
+
+/**
+ * The playlist as shown/played for `order`. 'added' lists the most recently added entries first
+ * (entries added together keep their playlist order; undated ones go last). Smart playlists keep
+ * their own rule-based order. `origIndex[i]` is the playlist position of shown row i.
+ */
+export function orderPlaylist<T extends { id: string; kind?: PlaylistKind; tracks: { addedAt?: number }[] }>(d: T, order: PlaylistOrder): { view: T; origIndex: number[]; sorted: boolean } {
+  const ident = d.tracks.map((_, i) => i);
+  if (order !== 'added' || isSmartPlaylist(d) || !d.tracks.some((t) => t.addedAt != null)) return { view: d, origIndex: ident, sorted: false };
+  const at = (i: number) => d.tracks[i]!.addedAt ?? -Infinity;
+  const origIndex = ident.slice().sort((a, b) => (at(b) - at(a)) || (a - b));
+  if (origIndex.every((v, i) => v === i)) return { view: d, origIndex, sorted: false };
+  return { view: { ...d, tracks: origIndex.map((i) => d.tracks[i]!) }, origIndex, sorted: true };
+}

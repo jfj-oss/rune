@@ -3,7 +3,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { api } from '../api';
 import type { PlayItem } from '../lib/types';
+import { orderPlaylist } from '../lib/playlists';
 import { usePlayer } from '../store/player';
+import { usePlaylistUi } from '../store/playlistUi';
 import { useUi } from '../store/ui';
 
 export const LIKED_ID = 'pl:sp:liked';
@@ -27,7 +29,7 @@ export function usePlaylistPlay() {
   const play = useCallback(
     async (id: string, opts?: { shuffle?: boolean; startIndex?: number }) => {
       try {
-        const d = await get(id);
+        const d = orderPlaylist(await get(id), usePlaylistUi.getState().order).view;
         await usePlayer.getState().playItems(playlistItems(d), opts?.startIndex ?? 0, { shuffle: opts?.shuffle, context: playlistUri(id) });
       } catch { useUi.getState().toast('Could not load that playlist'); }
     },
@@ -35,7 +37,7 @@ export function usePlaylistPlay() {
   );
   const enqueue = useCallback(
     async (id: string) => {
-      try { await usePlayer.getState().enqueueItems(playlistItems(await get(id))); }
+      try { await usePlayer.getState().enqueueItems(playlistItems(orderPlaylist(await get(id), usePlaylistUi.getState().order).view)); }
       catch { useUi.getState().toast('Could not load that playlist'); }
     },
     [get],

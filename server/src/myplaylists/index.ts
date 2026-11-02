@@ -270,7 +270,7 @@ function summaryFor(
   return summary;
 }
 
-function toPlaylistTracks(db: Db, entries: (string | MergedEntry)[]): PlaylistTrack[] {
+function toPlaylistTracks(db: Db, entries: (string | MergedEntry | { trackId: string; addedAt: number | null })[]): PlaylistTrack[] {
   const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
   const tracks: PlaylistTrack[] = [];
   for (const entry of entries) {
@@ -291,10 +291,11 @@ function toPlaylistTracks(db: Db, entries: (string | MergedEntry)[]): PlaylistTr
         ...(coverUrl ? { coverUrl } : {}),
       },
     };
-    if (typeof entry !== 'string') {
+    if (typeof entry !== 'string' && 'entryId' in entry) {
       playlistTrack.entrySource = entry.entrySource;
       playlistTrack.entryId = entry.entryId;
     }
+    if (typeof entry !== 'string' && entry.addedAt != null) playlistTrack.addedAt = entry.addedAt;
     tracks.push(playlistTrack);
   }
   return tracks;
@@ -343,7 +344,8 @@ export function getPlaylistDetail(db: Db, id: string): RunePlaylistDetail | unde
   return {
     ...summary,
     ...(row.description ? { description: row.description } : {}),
-    tracks: toPlaylistTracks(db, trackIds),
+    // static playlists carry each entry's added date (smart ones are computed live)
+    tracks: toPlaylistTracks(db, isSmart(row) ? trackIds : readEntries(db, row.id)),
   };
 }
 

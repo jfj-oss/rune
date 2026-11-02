@@ -1,6 +1,6 @@
 import type { PlaylistTrack } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
-import { canAddTo, hasOverlay, isOverlayRow, rowEditable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, moved, orderByRecent, selectRow, type RunePlaylistDetail } from './playlists';
+import { canAddTo, hasOverlay, isOverlayRow, rowEditable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, moved, orderByRecent, orderPlaylist, selectRow, type RunePlaylistDetail } from './playlists';
 
 const tr = (id: string, album = 'a1', source: 'local' | 'spotify' = 'local'): PlaylistTrack => ({
   id, albumId: album, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000, album: { id: album, title: album },
@@ -112,5 +112,19 @@ describe('Spotify playlists with rune’s local overlay', () => {
     expect(r.refused).toBe(1);
     expect(splitForTarget('pl:rune:1', items)).toEqual({ add: items, refused: 0 });
     expect(splitForTarget('pl:sp:abc', [items[1]!]).add).toEqual([]);
+  });
+});
+
+describe('orderPlaylist', () => {
+  const pl = (id: string, dates: (number | undefined)[], kind?: 'smart' | 'static') => ({ id, kind, tracks: dates.map((addedAt) => ({ addedAt })) });
+  it('shows newest additions first, keeping batch order and putting undated last', () => {
+    const r = orderPlaylist(pl('pl:sp:x', [100, 300, 300, undefined, 200]), 'added');
+    expect(r.origIndex).toEqual([1, 2, 4, 0, 3]);
+    expect(r.sorted).toBe(true);
+  });
+  it('keeps playlist order when asked, for smart playlists, and without dates', () => {
+    expect(orderPlaylist(pl('pl:sp:x', [100, 300]), 'playlist').sorted).toBe(false);
+    expect(orderPlaylist(pl('pl:rune:1', [100, 300], 'smart'), 'added').sorted).toBe(false);
+    expect(orderPlaylist(pl('pl:sp:x', [undefined, undefined]), 'added').sorted).toBe(false);
   });
 });
