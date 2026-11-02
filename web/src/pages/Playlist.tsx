@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
-import { Check, Copy, Disc3, Download, GripVertical, HardDrive, ListEnd, ListPlus, ListStart, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, User, X } from 'lucide-react';
+import { Check, Copy, Disc3, Download, GripVertical, HardDrive, ListEnd, ListPlus, ListStart, Lock, MoreHorizontal, Play, Plus, Radio, Shuffle, Sparkles, Trash2, User, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
@@ -18,6 +18,7 @@ import { usePlaylistActions } from '../hooks/usePlaylistEdit';
 import { isLiked, playlistItem, playlistItems, playlistUri, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, formatDuration, formatTotalLength, plural } from '../lib/format';
 import { hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, rowEditable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
+import { startRadio } from '../lib/radio';
 import { currentItem, usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
 
@@ -370,6 +371,7 @@ function PlaylistTracks({ d, items, editable, mixed }: { d: RunePlaylistDetail; 
                     <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([playlistItem(t)], true); }}>Play next</MenuItem>
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([playlistItem(t)]); }}>Add to queue</MenuItem>
                     <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [playlistItem(t)] }} />
+                    {t.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('track', t.id); }}>Start radio</MenuItem>}
                     <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
                     {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
                     {editable && mine && <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [i]); }}>Remove from playlist</MenuItem>}

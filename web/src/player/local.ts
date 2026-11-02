@@ -1,4 +1,5 @@
 import type { PlayerState, QueueItem } from '@liner/shared';
+import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import type { Engine } from './engine';
 import { emptyState, livePosition, type Backend } from './types';
@@ -16,7 +17,14 @@ export class LocalBackend implements Backend {
   private subs = new Set<(s: PlayerState) => void>();
   private timer: ReturnType<typeof setInterval>;
 
-  constructor(readonly zone: string, private engine: Engine, init?: Partial<PlayerState>, private onNotice?: (m: string) => void) {
+  constructor(
+    readonly zone: string,
+    private engine: Engine,
+    init?: Partial<PlayerState>,
+    private onNotice?: (m: string) => void,
+    /** The queue ran out naturally (not repeat): browser/mock auto-radio hangs off this. */
+    private onQueueEnd?: () => void,
+  ) {
     this.state = { ...emptyState(zone), ...init, zone };
     this.engine.onEnded(() => this.advance());
     this.engine.onError((m) => {
@@ -52,7 +60,8 @@ export class LocalBackend implements Backend {
     if (!cur) return;
     const real = this.engine.position();
     const pos = real ?? livePosition(s);
-    if (real === null && pos >= cur.track.durationMs - 5) this.advance();
+    // duration 0 = live radio: there is no end to advance past
+    if (real === null && cur.track.durationMs > 0 && !isLiveTrack(cur.track) && pos >= cur.track.durationMs - 5) this.advance();
   }
 
   /** The engine saw the real position / play state (Spotify SDK: also changes made from other Spotify apps). */
@@ -77,6 +86,7 @@ export class LocalBackend implements Backend {
     if (s.repeat === 'all' && s.queue.length) return this.jump(0);
     this.engine.pause();
     this.set({ status: 'stopped', positionMs: 0, updatedAt: Date.now() });
+    this.onQueueEnd?.();
   }
 
   private jump(index: number) {

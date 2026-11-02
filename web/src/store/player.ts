@@ -2,6 +2,7 @@ import type { PlayerState, QueueItem, Zone } from '@liner/shared';
 import { create } from 'zustand';
 import { api, isMock } from '../api';
 import { deviceName } from '../lib/device';
+import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
 import { AudioEngine, MockEngine } from '../player/engine';
 import { HybridEngine } from '../player/hybrid';
@@ -36,7 +37,8 @@ interface PlayerStore {
   playItems(items: PlayItem[], startIndex?: number, opts?: { shuffle?: boolean; context?: string }): Promise<void>;
   /** Answer of the "Play on…" sheet. */
   playOn(zone: Zone, req: ChooserRequest, remember?: boolean): Promise<void>;
-  enqueueItems(items: PlayItem[], next?: boolean): Promise<void>;
+  /** quiet: no "Added to queue" toast (auto-radio continues on its own). */
+  enqueueItems(items: PlayItem[], next?: boolean, opts?: { quiet?: boolean }): Promise<void>;
   command(cmd: ExtCommand): Promise<void>;
 }
 
@@ -61,9 +63,12 @@ function backendFor(z: ZoneInfo): Backend {
   const hit = backends.get(z.id);
   if (hit) return hit;
   const notice = (m: string) => useUi.getState().toast(m);
+  // Browser/mock queues end in this tab: let auto-radio pick up (dynamic import avoids
+  // a cycle: lib/radio uses usePlayer for the current state).
+  const onQueueEnd = () => { void import('../lib/radio').then((m) => m.continueRadio()).catch(() => undefined); };
   let b: Backend;
-  if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice);
-  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice);
+  if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice, onQueueEnd);
+  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd);
   else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, notice }, pcDevice(z));
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
@@ -242,7 +247,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       await startOn(b, z, route.items, route.startIndex, req.shuffle);
     },
 
-    async enqueueItems(items, next) {
+    async enqueueItems(items, next, opts) {
       const st = get();
       const z = st.zones.find((x) => x.id === st.zone);
       const b = z && backends.get(z.id);
@@ -254,6 +259,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         return;
       }
       await b.send({ type: 'enqueue', trackIds: ok.map((i) => i.track.id), next }, ok);
+      if (opts?.quiet) return;
       const skipped = items.length - ok.length;
       useUi.getState().toast(next ? 'Playing next' : `Added to queue — ${ok.length} ${ok.length === 1 ? 'track' : 'tracks'}${skipped ? ` (${skipped} can't play here)` : ''}`);
     },
@@ -279,6 +285,13 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
   }
   if (cur?.source === 'spotify') {
     return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === state.zone)?.name ?? 'This browser'], tone: 'off' };
+  }
+  if (isLiveTrack(cur)) {
+    const fmt = [cur!.format && cur!.format !== 'other' ? cur!.format.toUpperCase() : 'Stream', cur!.bitrateKbps ? `${cur!.bitrateKbps} kbps` : ''].filter(Boolean).join(' ');
+    const liveSteps = kind === 'pc'
+      ? [fmt, 'mpv', 'PipeWire', 'live stream']
+      : [fmt, 'Browser audio', 'live stream'];
+    return { steps: liveSteps, tone: 'warn' };
   }
   let steps = state.signalPath;
   if (!steps && cur) {

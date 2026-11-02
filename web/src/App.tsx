@@ -12,11 +12,13 @@ import Home from './pages/Home';
 import Placeholder from './pages/Placeholder';
 import PlaylistPage from './pages/Playlist';
 import Playlists from './pages/Playlists';
+import RadioPage from './pages/Radio';
 import SearchPage from './pages/Search';
 import Tracks from './pages/Tracks';
 import { ReviewPreviewHost } from './components/ReviewPreview';
 import { startHistoryReporter } from './lib/historyReporter';
 import { usePlayer } from './store/player';
+import { useRadio } from './store/radio';
 
 const client = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -24,6 +26,7 @@ const client = new QueryClient({
 
 export default function App() {
   useEffect(() => { void usePlayer.getState().init(); }, []);
+  useEffect(() => { void useRadio.getState().loadAutoRadio(); }, []);
   useEffect(() => startHistoryReporter(), []);
   return (
     <QueryClientProvider client={client}>
@@ -40,6 +43,7 @@ export default function App() {
             <Route path="/tracks" element={<Tracks />} />
             <Route path="/genres" element={<Genres />} />
             <Route path="/genres/:genre" element={<GenrePage />} />
+            <Route path="/radio" element={<RadioPage />} />
             <Route path="/playlists" element={<Playlists />} />
             <Route path="/playlist/:id" element={<PlaylistPage />} />
             <Route path="*" element={<Placeholder title="Not found" />} />

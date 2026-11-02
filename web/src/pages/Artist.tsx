@@ -1,15 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { Play, Shuffle } from 'lucide-react';
+import { MoreHorizontal, Play, Radio, Shuffle } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
 import { api, coverSrc } from '../api';
 import { AlbumCard } from '../components/AlbumCard';
 import { Avatar } from '../components/album/Credits';
 import { MobileBack } from '../components/MobileBack';
+import { MenuItem, Popover } from '../components/Popover';
 import { Prose } from '../components/album/Reception';
 import { Empty, SectionHead, SourceLink } from '../components/Rows';
 import { usePlay } from '../hooks/usePlay';
 import { encId, plural } from '../lib/format';
 import { textPreview } from '../lib/previews';
+import { startRadio } from '../lib/radio';
 import { usePreview } from '../store/preview';
 
 export default function ArtistPage() {
@@ -22,6 +24,7 @@ export default function ArtistPage() {
   if (!a) return <div className="page"><div className="ahero"><div className="skel skel--title shimmer" style={{ marginTop: 120 }} /></div></div>;
   const mosaic = a.albums.concat(a.appearsOn).slice(0, 6);
   const ids = a.albums.map((x) => x.id);
+  const hasLocal = a.albums.some((x) => x.source === 'local');
   return (
     <div className="page page--artist">
       <section className="arthero">
@@ -42,6 +45,18 @@ export default function ArtistPage() {
               <div className="ahero__actions">
                 <button className="btn btn--primary" onClick={() => void playAlbums(ids)}><Play size={18} fill="currentColor" /> Play</button>
                 <button className="btn" onClick={() => void playAlbums(ids, { shuffle: true })}><Shuffle size={17} /> Shuffle</button>
+                {hasLocal && (
+                  <Popover
+                    placement="bottom-start"
+                    trigger={({ toggle }) => <button className="btn btn--icon" aria-label="More actions" onClick={toggle}><MoreHorizontal size={20} /></button>}
+                  >
+                    {(close) => (
+                      <div role="menu" className="menu">
+                        <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('artist', a.id); }}>Start radio</MenuItem>
+                      </div>
+                    )}
+                  </Popover>
+                )}
               </div>
             )}
           </div>

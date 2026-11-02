@@ -1,8 +1,11 @@
-import { ChevronLeft, ChevronRight, Check, RefreshCw, Search, Settings, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Radio, RefreshCw, Search, Settings, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { listenApi } from '../listenApi';
+import type { NormalizeMode } from '../lib/listenTypes';
 import { useSearchNav } from '../store/searchNav';
+import { useRadio } from '../store/radio';
 import { AMBIENTS, useUi, type Ambient } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
 
@@ -19,6 +22,8 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
   const toast = useUi((s) => s.toast);
   const ambient = useUi((s) => s.ambient);
   const setAmbient = useUi((s) => s.setAmbient);
+  const autoRadio = useRadio((s) => s.autoRadio);
+  const setAutoRadio = useRadio((s) => s.setAutoRadio);
 
   useEffect(() => { setValue(urlQ); }, [urlQ]);
   useEffect(() => {
@@ -76,6 +81,13 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
         {(close) => (
           <div role="menu" className="menu">
             <MenuItem icon={<RefreshCw size={16} />} onClick={() => { close(); void api.scan().then(() => toast('Library rescan started')).catch(() => toast('Could not reach the server')); }}>Rescan library</MenuItem>
+            <button className="menu__item" role="menuitemcheckbox" aria-checked={autoRadio} onClick={() => void setAutoRadio(!autoRadio)}>
+              <Radio size={16} />
+              <span>Auto-radio when the queue ends</span>
+              {autoRadio && <Check size={16} className="menu__check" />}
+            </button>
+            <div className="popover__title">Volume levelling</div>
+            <VolumeLevel />
             <div className="popover__title">Ambient colours</div>
             {AMBIENTS.map((a) => (
               <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>
@@ -88,5 +100,43 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
         )}
       </Popover>
     </header>
+  );
+}
+
+const LEVELS: { id: NormalizeMode; label: string; hint: string }[] = [
+  { id: 'off', label: 'Off', hint: 'no loudness gain' },
+  { id: 'track', label: 'Per track', hint: 'even out every track' },
+  { id: 'album', label: 'Per album', hint: 'keep an album’s own dynamics' },
+];
+
+/** Off / per-track / per-album loudness gain (GET+POST /settings/normalize). */
+function VolumeLevel() {
+  const [mode, setMode] = useState<NormalizeMode | null>(null);
+  const toast = useUi((s) => s.toast);
+  useEffect(() => {
+    let alive = true;
+    listenApi.normalize().then((m) => { if (alive) setMode(m); }).catch(() => { if (alive) setMode('off'); });
+    return () => { alive = false; };
+  }, []);
+  const pick = async (m: NormalizeMode) => {
+    if (!mode || m === mode) return;
+    const prev = mode;
+    setMode(m);
+    try {
+      setMode(await listenApi.setNormalize(m));
+    } catch {
+      setMode(prev);
+      toast('Could not save the volume levelling setting');
+    }
+  };
+  return (
+    <div className="vlevel">
+      <div className="seg seg--level" role="radiogroup" aria-label="Volume levelling">
+        {LEVELS.map((l) => (
+          <button key={l.id} role="radio" aria-checked={mode === l.id} className={mode === l.id ? 'is-active' : ''} disabled={!mode} title={l.hint} onClick={() => void pick(l.id)}>{l.label}</button>
+        ))}
+      </div>
+      <p className="vlevel__hint"><Volume2 size={12} /> {mode === null ? 'Loading…' : mode === 'off' ? 'No loudness gain' : `From ${mode} loudness · local files`}</p>
+    </div>
   );
 }

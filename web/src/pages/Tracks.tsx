@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, Disc3, ListEnd, ListStart, MoreHorizontal, Play, Search, User, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Disc3, ListEnd, ListStart, MoreHorizontal, Play, Radio, Search, User, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { browseApi } from '../browseApi';
@@ -12,6 +12,7 @@ import { Empty } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
 import { encId, formatDuration, plural } from '../lib/format';
+import { startRadio } from '../lib/radio';
 import type { BrowseTrack, PlayItem, TrackSort } from '../lib/types';
 import { currentItem, usePlayer } from '../store/player';
 import { LibraryTabs } from './Albums';
@@ -205,6 +206,7 @@ function TrackRow({ t, playing, isPlaying, desktop, onPlay }: { t: BrowseTrack; 
               <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)], true); }}>Play next</MenuItem>
               <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)]); }}>Add to queue</MenuItem>
               <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [toItem(t)] }} />
+              {t.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('track', t.id); }}>Start radio</MenuItem>}
               <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
               {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
             </div>

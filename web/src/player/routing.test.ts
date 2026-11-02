@@ -8,6 +8,10 @@ const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotif
   track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
   album: { id: albumId, title: 'T' },
 });
+const radio = (id = 'rs:station-1'): PlayItem => ({
+  track: { id, albumId: id, source: 'radio', title: id, artists: [], disc: 1, number: 1, durationMs: 0 } as unknown as Track,
+  album: { id, title: 'Station' },
+});
 const ZONES: ZoneInfo[] = [
   { id: 'pc', name: 'Linux PC speakers', kind: 'pc' },
   { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' },
@@ -24,6 +28,28 @@ describe('zoneCanPlay', () => {
     expect(zoneCanPlay('browser', 'local', NO_SDK)).toBe(true);
     expect(zoneCanPlay('browser', 'spotify', NO_SDK)).toBe(false);
     expect(zoneCanPlay('browser', 'spotify', SDK)).toBe(true);
+  });
+});
+
+describe('internet radio', () => {
+  it('plays on the PC and in this browser, never on a Connect device', () => {
+    expect(zoneCanPlay('pc', 'radio', NO_SDK)).toBe(true);
+    expect(zoneCanPlay('browser', 'radio', NO_SDK)).toBe(true);
+    expect(zoneCanPlay('spotify', 'radio', SDK)).toBe(false);
+  });
+  it('routes a station without dropping it', () => {
+    const r = routeItems('pc', [radio()], 0, NO_SDK);
+    expect(r.ok && r.dropped).toBe(0);
+    expect(r.ok && r.items[0]!.track.id).toBe('rs:station-1');
+  });
+  it('asks for another zone when the current one cannot play radio', () => {
+    expect(routeItems('spotify', [radio()], 0, SDK)).toMatchObject({ ok: false, need: 'radio' });
+  });
+  it('offers the PC and browser as radio targets', () => {
+    expect(playableZones(ZONES, 'radio', SDK).map((o) => o.zone.id)).toEqual(['browser', 'pc']);
+  });
+  it('explains why a Connect device cannot play a station', () => {
+    expect(cantPlayMessage({ kind: 'spotify', name: 'iPhone' }, 'radio')).toContain('internet radio');
   });
 });
 

@@ -1,5 +1,4 @@
-import type { Source } from '@liner/shared';
-import type { PlayItem, ZoneInfo } from '../lib/types';
+import type { PlayItem, PlaySource, ZoneInfo } from '../lib/types';
 
 /** What this client can currently do beyond plain local playback. */
 export interface Caps {
@@ -15,22 +14,23 @@ const kindOf = (z: ZoneLike): ZoneInfo['kind'] => (typeof z === 'string' ? z : z
 export const pcHasSpotify = (z: ZoneLike): boolean => typeof z !== 'string' && z.kind === 'pc' && !!z.spotifyDeviceId;
 
 /** Can a zone play an item of this source? */
-export function zoneCanPlay(zone: ZoneLike, source: Source, caps: Caps): boolean {
+export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boolean {
   const kind = kindOf(zone);
-  if (kind === 'pc') return source === 'local' || pcHasSpotify(zone);
-  if (kind === 'browser') return source === 'local' || caps.sdk;
+  if (kind === 'pc') return source === 'local' || source === 'radio' || pcHasSpotify(zone);
+  if (kind === 'browser') return source === 'local' || source === 'radio' || caps.sdk;
   return source === 'spotify'; // Spotify Connect device
 }
 
 /** The actionable text for "this zone can't play <source>". */
-export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: Source): string {
+export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource): string {
   if (zone.kind === 'pc' && source === 'spotify') return 'Open the Spotify app on the PC to play Spotify through the Linux speakers';
+  if (source === 'radio') return `${zone.name} can’t play internet radio — use the PC or this browser`;
   return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
 }
 
 export type Routing =
   | { ok: true; items: PlayItem[]; startIndex: number; dropped: number }
-  | { ok: false; reason: 'start'; need: Source };
+  | { ok: false; reason: 'start'; need: PlaySource };
 
 /**
  * Decide what a zone can take from a list. If the item at `startIndex` cannot play there, the caller must
@@ -51,7 +51,7 @@ export interface ZoneOption {
 }
 
 /** Zones that could play items of this source, in display order (browser first, then Connect devices). */
-export function playableZones(zones: ZoneInfo[], source: Source, caps: Caps): ZoneOption[] {
+export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps): ZoneOption[] {
   const out: ZoneOption[] = [];
   for (const z of zones) {
     if (!zoneCanPlay(z, source, caps)) continue;

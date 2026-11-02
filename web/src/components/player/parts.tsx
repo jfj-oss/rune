@@ -2,6 +2,8 @@ import { ArrowRight, Check, Monitor, Pause, Play, Repeat, Repeat1, Shuffle, Skip
 import { useEffect, useState } from 'react';
 import { formatDuration } from '../../lib/format';
 import { usePosition } from '../../hooks/usePosition';
+import { usePeaks } from '../../hooks/usePeaks';
+import { isLiveTrack } from '../../lib/listenTypes';
 import type { ZoneInfo } from '../../lib/types';
 import { isMixedQueue } from '../../player/pc';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
@@ -9,27 +11,54 @@ import { Popover } from '../Popover';
 import { detectIOS } from '../../lib/volume';
 import { Slider } from './Slider';
 import { VolumeSlider } from './VolumeSlider';
+import { Waveform } from './Waveform';
 
-export function SeekBar({ showTimes = true, className = '' }: { showTimes?: boolean; className?: string }) {
+interface SeekBarProps {
+  showTimes?: boolean;
+  className?: string;
+  /** Peak resolution: ~400 fits the bar, ~800 the Now Playing sheet. */
+  buckets?: number;
+}
+
+export function SeekBar({ showTimes = true, className = '', buckets = 400 }: SeekBarProps) {
   const state = usePlayer((s) => s.state);
   const command = usePlayer((s) => s.command);
   const pos = usePosition();
   const [drag, setDrag] = useState<number | null>(null);
-  const dur = currentItem(state)?.track.durationMs ?? 0;
+  const cur = currentItem(state);
+  const live = isLiveTrack(cur?.track);
+  const dur = cur?.track.durationMs ?? 0;
   const shown = drag ?? pos;
+  const peaks = usePeaks(cur?.track, buckets);
+  const seek = (ms: number) => void command({ type: 'seek', positionMs: ms });
+
+  if (live) {
+    return (
+      <div className={`seek seek--live ${className}`}>
+        <span className="livepill"><i />LIVE</span>
+        <span className="seek__live">Live stream · no seeking</span>
+      </div>
+    );
+  }
+
+  const wave = peaks.status === 'ready' && peaks.data && dur > 0 ? peaks.data.data : null;
   return (
-    <div className={`seek ${className}`}>
+    <div className={`seek ${wave ? 'seek--wave' : ''} ${className}`}>
       {showTimes && <span className="seek__t">{formatDuration(shown)}</span>}
-      <Slider
-        label="Seek"
-        className="slider--seek"
-        value={shown}
-        max={dur}
-        step={250}
-        disabled={!dur}
-        onChange={setDrag}
-        onCommit={(v) => { setDrag(null); void command({ type: 'seek', positionMs: v }); }}
-      />
+      {wave ? (
+        <Waveform data={wave} positionMs={shown} durationMs={dur} onSeek={seek} />
+      ) : (
+        <Slider
+          label="Seek"
+          className="slider--seek"
+          value={shown}
+          max={dur}
+          step={250}
+          disabled={!dur}
+          onChange={setDrag}
+          onCommit={(v) => { setDrag(null); seek(v); }}
+        />
+      )}
       {showTimes && <span className="seek__t seek__t--r">{formatDuration(dur)}</span>}
     </div>
   );

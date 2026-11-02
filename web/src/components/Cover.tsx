@@ -10,17 +10,19 @@ interface Props {
   className?: string;
   eager?: boolean;
   alt?: string;
+  /** Use this image instead of the album cover route. `null` = never request one. */
+  src?: string | null;
 }
 
 /** Square, never cropped. Shows an initials tile until (or unless) the image loads. */
-export function Cover({ album, size = 200, sizes, className = '', eager, alt = '' }: Props) {
+export function Cover({ album, size = 200, sizes, className = '', eager, alt = '', src: override }: Props) {
   const [state, setState] = useState<'loading' | 'ok' | 'err'>('loading');
-  const src = coverSrc(album, size);
-  const srcSet = size === 200 ? `${coverSrc(album, 200)} 200w, ${coverSrc(album, 600)} 600w` : undefined;
+  const src = override === undefined ? coverSrc(album, size) : override;
+  const srcSet = override === undefined && size === 200 ? `${coverSrc(album, 200)} 200w, ${coverSrc(album, 600)} 600w` : undefined;
   return (
     <div className={`cover ${className}`} style={{ background: tileGradient(album.id) }} data-state={state}>
       <span className="cover__ini" aria-hidden>{initials(album.title ?? '?')}</span>
-      {state !== 'err' && (
+      {state !== 'err' && src && (
         <img
           src={src}
           srcSet={srcSet}

@@ -1,4 +1,8 @@
 import type { AlbumSummary, PlayerCommand, Track, Zone } from '@liner/shared';
+import type { Source } from '@liner/shared';
+
+/** What a zone can be asked to play: the shared sources plus live internet radio. */
+export type PlaySource = Source | 'radio';
 
 /** A zone as returned by GET /zones. */
 export interface ZoneInfo {

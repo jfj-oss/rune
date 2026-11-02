@@ -8,7 +8,7 @@ export function MobileTabs() {
   const setNp = useUi((s) => s.setNowPlayingOpen);
   const { pathname } = useLocation();
   const close = () => { setQueue(false); setNp(false); };
-  const libActive = !queueOpen && /^\/(albums|artists|album|artist|tracks|genres|playlists?)/.test(pathname);
+  const libActive = !queueOpen && /^\/(albums|artists|album|artist|tracks|genres|radio|playlists?)/.test(pathname);
   const cls = (a: boolean) => `tab${a ? ' is-active' : ''}`;
   return (
     <nav className="tabs" aria-label="Main">
