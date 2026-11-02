@@ -59,6 +59,16 @@
   :root:not([data-ambient]) .ambient__l--slate, :root[data-ambient='cycle'] .ambient__l--slate { animation: none; opacity: 0; will-change: auto; }
   :root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: none; opacity: 0; will-change: auto; }
 }
+/* ---------- Dither ambient ----------
+   Pure black base + a low-res WebGL canvas (components/DitherBackdrop) upscaled with crisp pixels so the grain stays sharp. */
+:root[data-ambient^='dither'] .ambient { background: #000; }
+:root[data-ambient^='dither'] body { background: #000; }
+/* secondary text a step brighter (as on the glass), so it keeps WCAG AA over the dithered colour; see MASK in lib/dither */
+:root[data-ambient^='dither'] { --text-2: #d3d4de; --text-3: #c2c3d1; }
+:root[data-ambient^='dither'] .search:not(:focus-within) { background: rgba(0, 0, 0, 0.5); }
+/* on a pure-black base the sidebar glass dims what it blurs, like the bottom bars, so it never glows brighter than the page */
+:root[data-ambient^='dither'] .side { -webkit-backdrop-filter: blur(32px) saturate(165%) brightness(0.6); backdrop-filter: blur(32px) saturate(165%) brightness(0.6); }
+.ambient__dither { position: absolute; left: 0; top: 0; display: block; image-rendering: pixelated; }
 .ambdot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
 .ambdot--cycle { background: conic-gradient(#0c4f63, #290893, #0f2d3a, #082908, #0c4f63); }
 .ambdot--blue { background: #08394a; }
@@ -66,6 +76,15 @@
 .ambdot--slate { background: #0f2d3a; }
 .ambdot--green { background: #082908; }
 .ambdot--off { background: #0f1013; }
+/* dither swatches: a tiny dot screen of the strong colour on black */
+.ambdot--dither, .ambdot--dither-blue, .ambdot--dither-purple, .ambdot--dither-green, .ambdot--dither-cycle {
+  --c: #d4584f;
+  background: radial-gradient(circle, var(--c) 0 38%, transparent 46%) 0 0 / 3px 3px, radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--c) 55%, #000), #000 75%);
+}
+.ambdot--dither-blue { --c: #3f74e8; }
+.ambdot--dither-purple { --c: #8f5ae8; }
+.ambdot--dither-green { --c: #22924c; }
+.ambdot--dither-cycle { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, conic-gradient(#d4584f, #8f5ae8, #3f74e8, #22924c, #d4584f); }
 
 /* ---------- liquid glass (smoked / tinted) ----------
    Desktop: sidebar + now-playing bar. Mobile: tab bar + mini-player. Album sticky tab strip matches.

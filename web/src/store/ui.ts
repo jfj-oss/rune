@@ -13,15 +13,19 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off';
+export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-cycle';
 export const AMBIENTS: Ambient[] = ['cycle', 'blue', 'purple', 'slate', 'green', 'off'];
-const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient);
+/** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
+export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-cycle'];
+const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
 
-/** `rune.ambient` is stored as a plain string; `?ambient=green` in the URL also sets (and persists) it. */
+/** `rune.ambient` is stored as a plain string; `?ambient=green` in the URL also sets (and persists) it
+    (`?ambient=dither-red` is accepted as an alias of `dither`). */
 function loadAmbient(): Ambient {
   let v: unknown = null;
   try {
-    const q = new URLSearchParams(location.search).get('ambient');
+    let q = new URLSearchParams(location.search).get('ambient');
+    if (q === 'dither-red') q = 'dither';
     if (isAmbient(q)) { localStorage.setItem('rune.ambient', q); return q; }
     v = localStorage.getItem('rune.ambient');
   } catch { /* storage blocked */ }
