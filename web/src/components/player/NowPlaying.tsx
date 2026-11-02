@@ -119,7 +119,7 @@ export function NowPlaying() {
 
           <SeekBar className="seek--np" />
           <div className="np__transport"><Transport big /></div>
-          {desktop && <div className="np__vol"><VolumeControl /></div>}
+          <div className="np__vol"><VolumeControl /></div>
 
           <div className="np__signal">
             <SignalDot withLabel placement="top-start" />

@@ -162,3 +162,24 @@ a.chip:hover, button.chip:hover { background: color-mix(in srgb, #fff 14%, trans
   .slider::-webkit-slider-thumb { transform: scale(1); width: 14px; height: 14px; margin-top: -5px; }
   .slider::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--text) var(--p), color-mix(in srgb, #fff 20%, transparent) var(--p)); }
 }
+
+/* volume slider: wide, tall hit area, thick track, always-visible thumb, 25 % midpoint tick */
+.vslider { position: relative; flex: 1; min-width: 0; --thumb: 18px; }
+.vslider { --x: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--f)); }
+.slider--vol { height: 28px; --p: var(--x); }
+.slider--vol::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; }
+.slider--vol::-moz-range-track, .slider--vol::-moz-range-progress { height: 6px; border-radius: 3px; }
+.slider--vol::-webkit-slider-thumb { width: var(--thumb); height: var(--thumb); margin-top: calc((6px - var(--thumb)) / 2); transform: scale(0.85); }
+.slider--vol::-moz-range-thumb { width: var(--thumb); height: var(--thumb); transform: scale(0.85); }
+.slider--vol:hover::-webkit-slider-thumb, .slider--vol:focus-visible::-webkit-slider-thumb, .slider--vol:active::-webkit-slider-thumb { transform: scale(1.1); }
+.slider--vol:hover::-moz-range-thumb, .slider--vol:focus-visible::-moz-range-thumb, .slider--vol:active::-moz-range-thumb { transform: scale(1.1); }
+.vslider__tick { position: absolute; left: 50%; top: 50%; width: 2px; height: 12px; margin: -6px 0 0 -1px; border-radius: 1px; background: color-mix(in srgb, #fff 38%, transparent); pointer-events: none; }
+.vslider__tick b { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px; font: 500 10px/1 var(--sans); color: var(--text-3); opacity: 0; transition: opacity var(--t); white-space: nowrap; }
+.vslider__tip { position: absolute; bottom: calc(100% - 2px); left: calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--f)); transform: translate(-50%, 4px); padding: 3px 8px; border-radius: 6px; background: var(--surface-2, #2a2a2e); border: 1px solid var(--line); color: var(--text); font: 600 12px/1.2 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity var(--t); }
+.vslider:hover .vslider__tick b, .vslider:has(:focus-visible) .vslider__tick b, .vslider:has(input:active) .vslider__tick b, .vslider.is-active .vslider__tick b,
+.vslider:hover .vslider__tip, .vslider:has(:focus-visible) .vslider__tip, .vslider:has(input:active) .vslider__tip, .vslider.is-active .vslider__tip { opacity: 1; }
+@media (hover: none) {
+  .slider--vol::-webkit-slider-thumb { width: var(--thumb); height: var(--thumb); margin-top: calc((6px - var(--thumb)) / 2); }
+  .vslider { --thumb: 22px; }
+  .vslider__tick b { opacity: 1; }
+}
