@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_FPS, IDLE_FPS, backdropFrameMs } from './frameRate';
+import { ACTIVE_FPS, IDLE_FPS, WAVE_FPS, backdropFrameMs } from './frameRate';
 
 describe('backdrop frame pacing', () => {
   it('runs at 30 fps while music plays or Now Playing is open', () => {
@@ -12,7 +12,8 @@ describe('backdrop frame pacing', () => {
     expect(backdropFrameMs(false, false, false)).toBeCloseTo(83.33, 1);
   });
 
-  it('keeps 30 fps for the new-song pulse even when paused with the sheet closed', () => {
-    expect(backdropFrameMs(false, false, true)).toBe(1000 / ACTIVE_FPS);
+  it('draws the new-song swell at 60 fps, whatever else is going on', () => {
+    expect(backdropFrameMs(false, false, true)).toBe(1000 / WAVE_FPS);
+    expect(backdropFrameMs(true, true, true)).toBe(1000 / WAVE_FPS);
   });
 });

@@ -274,7 +274,7 @@ export function ditherHueOf(css: string): DitherHue | null {
  * draw back in, once. The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes
  * grow from where they are. `amt` 0..1 (how far out), `dir` +1 while swelling, -1 while drawing back.
  */
-export const WAVE = { length: 3.2, ripple: 0.05 };
+export const WAVE = { length: 3.2, ripple: 0.035 };
 
 /**
  * Field exponent at the peak for a screen shape (width / height). Measured with field() over many frames,

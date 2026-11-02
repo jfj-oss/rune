@@ -46,8 +46,6 @@ uniform vec3 u_mid;
 uniform vec3 u_light;
 uniform float u_wave;   // new-song wave: how far the shapes have swelled out, 0..1 (waveAt)
 uniform float u_wexp;   // field exponent at the wave's peak (wavePeakExponent)
-uniform float u_wdir;   // +1 swelling out, -1 drawing back in
-uniform float u_wt;     // seconds since the wave started (moves the ripples)
 uniform sampler2D u_noise;
 
 float hash2(vec2 p) {
@@ -75,12 +73,12 @@ void main() {
   float d;
   ${ribbonGlsl}
   // new-song wave: the shapes already on screen swell outwards (lifting the field fills their faint edges
-  // first) and draw back in; ripples on the growing edges travel outwards, then inwards on the way back
+  // first) and draw back in. A gentle ripple rides the growing edge; its phase follows the swell itself
+  // (out while growing, back while shrinking), so it never jumps or flickers.
   if (u_wave > 0.0) {
-    float ff = max(f, 0.0);
-    float grown = pow(ff, 1.0 - (1.0 - u_wexp) * u_wave);
+    float grown = pow(max(f, 0.0), 1.0 - (1.0 - u_wexp) * u_wave);
     float edge = smoothstep(0.05, 0.3, grown) * (1.0 - smoothstep(0.6, 0.95, grown));
-    f = grown + u_wave * ${g(WAVE.ripple)} * edge * sin(grown * 26.0 - u_wdir * u_wt * 9.0);
+    f = grown + u_wave * ${g(WAVE.ripple)} * edge * sin(grown * 9.0 - u_wave * 6.0);
   }
   float mot = ${g(MOTTLE.base)} + ${g(MOTTLE.amp)} * vnoise(vec2(q.x * ${g(MOTTLE.freq)} + t * ${g(MOTTLE.speed)}, q.y * ${g(MOTTLE.freq)}));
 
@@ -136,7 +134,7 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     const u = (n: string) => gl.getUniformLocation(prog, n);
     const uRes = u('u_res'), uAspect = u('u_aspect'), uT = u('u_t'), uMid = u('u_mid'), uLight = u('u_light'), uRs = u('u_rs');
-    const uWave = u('u_wave'), uWexp = u('u_wexp'), uWdir = u('u_wdir'), uWt = u('u_wt');
+    const uWave = u('u_wave'), uWexp = u('u_wexp');
     gl.uniform1i(u('u_noise'), 0);
     return {
       resize(w, h) {
@@ -150,8 +148,6 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
       draw(t, pal, wave = NO_WAVE) {
         gl.uniform1f(uT, t);
         gl.uniform1f(uWave, wave.amt);
-        gl.uniform1f(uWdir, wave.dir);
-        gl.uniform1f(uWt, wave.t);
         gl.uniform3f(uMid, pal.mid[0], pal.mid[1], pal.mid[2]);
         gl.uniform3f(uLight, pal.light[0], pal.light[1], pal.light[2]);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
