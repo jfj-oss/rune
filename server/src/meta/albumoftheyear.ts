@@ -5,7 +5,7 @@ import * as cheerio from 'cheerio';
 import type { CriticScore } from '@liner/shared';
 import type { CachedHttp } from './http.js';
 import { cleanText, titleSimilarity } from './text.js';
-import type { ReviewAlbumRef } from './metacritic.js';
+import type { ReviewAlbumRef } from './types.js';
 
 export interface AotyResult {
   score?: CriticScore;

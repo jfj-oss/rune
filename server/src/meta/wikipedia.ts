@@ -1,24 +1,41 @@
-// Wikipedia: album page discovery, "Critical reception"/"Background" prose, and
-// the ratings table (which is how we get Metacritic/Pitchfork/AOTY scores when
-// the sites themselves are unavailable or blocked).
+// Wikipedia: album page discovery, "Critical reception"/"Background" prose,
+// critic quotes, and the ratings table (which is how we get Metacritic and
+// outlet scores when the sites themselves are unavailable or blocked).
+//
+// Article selection order (round 2):
+//   1. MusicBrainz release-group URL relationships -> Wikidata -> enwiki
+//      sitelink (when the matcher filled mb_release_group_id). This is the
+//      reliable path: the community already linked the album to its article.
+//   2. Candidate-title lookup: "<Album> (<Artist> album)", "<Album> (album)",
+//      "<Album>" (MediaWiki follows redirects and normalises "&" vs "and").
+//   3. Search fallback: intitle search, then a plain search + batch validation.
 import * as cheerio from 'cheerio';
 import type { CheerioAPI } from 'cheerio';
-import type { CriticScore, Sourced } from '@liner/shared';
+import type { CriticQuote, CriticScore, Sourced } from '@liner/shared';
 import type { CachedHttp } from './http.js';
-import { cleanText, namesMatch, titleSimilarity, truncateAtSentence, wikipediaUrl } from './text.js';
+import type { MbClient } from '../match/mb.js';
+import type { ReviewAlbumRef } from './types.js';
+import { collectRefUrls, paragraphUrls } from './html.js';
+import { extractQuotes, type ProseParagraph } from './quotes.js';
+import { parseRatings } from './ratings.js';
+import { releaseGroupWikipediaTitle } from './musicbrainz.js';
+import {
+  cleanText,
+  namesMatch,
+  stripQualifiers,
+  titleSimilarity,
+  truncateAtSentence,
+  wikipediaUrl,
+} from './text.js';
 
-export interface WikiAlbumRef {
-  id: string;
-  title: string;
-  artist: string;
-  year?: number;
-}
+export type WikiAlbumRef = ReviewAlbumRef;
 
 export interface WikipediaResult {
   pageTitle: string;
   reception?: Sourced<string>;
   background?: Sourced<string>;
   scores: CriticScore[];
+  quotes: CriticQuote[];
   /** External URLs cited on the page; used to find direct review links. */
   referenceUrls: string[];
 }
@@ -28,6 +45,7 @@ export interface WikiPage {
   title?: string;
   index?: number;
   extract?: string;
+  missing?: string;
   categories?: { title?: string }[];
 }
 
@@ -39,8 +57,19 @@ interface ListSearch {
   query?: { search?: { title?: string }[] };
 }
 
+interface TitlesQuery {
+  query?: { pages?: Record<string, WikiPage> };
+}
+
 interface ParseResponse {
   parse?: { title?: string; text?: { '*'?: string } };
+}
+
+export interface WikipediaOptions {
+  /** Shared MusicBrainz client (1 req/s limiter shared with the matcher). */
+  mb?: MbClient;
+  /** Release-group id from the matcher; enables the Wikidata/sitelink path. */
+  releaseGroupId?: string;
 }
 
 const WP_API = 'https://en.wikipedia.org/w/api.php';
@@ -50,13 +79,52 @@ function luceneValue(s: string): string {
   return s.replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export function wikipediaSearchUrl(album: WikiAlbumRef): string {
-  const q = `intitle:"${luceneValue(album.title)}" ${luceneValue(album.artist)}`;
-  return `${WP_API}?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=10&prop=categories|extracts&exintro=1&explaintext=1&cllimit=50&format=json&redirects=1`;
+/** Direct page lookup for a handful of candidate titles, in one request. */
+export function wikipediaTitlesUrl(titles: string[]): string {
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: titles.join('|'),
+    redirects: '1',
+    prop: 'categories|extracts',
+    exintro: '1',
+    explaintext: '1',
+    cllimit: '50',
+    format: 'json',
+  });
+  return `${WP_API}?${params.toString()}`;
 }
 
-export function wikipediaPlainSearchUrl(album: WikiAlbumRef): string {
-  const q = `"${luceneValue(album.title)}" "${luceneValue(album.artist)}" album`;
+/** Candidate article titles, most specific first. */
+export function candidateTitles(album: WikiAlbumRef): string[] {
+  const title = stripQualifiers(album.title) || album.title.trim();
+  const artists = new Set<string>();
+  const artist = album.artist.trim();
+  if (artist) {
+    artists.add(artist);
+    artists.add(artist.replace(/&/g, 'and'));
+    artists.add(artist.replace(/\band\b/gi, '&'));
+    artists.add(artist.replace(/^The\s+/i, ''));
+  }
+  const out: string[] = [];
+  const add = (value: string): void => {
+    const clean = cleanText(value);
+    if (clean && !out.includes(clean)) out.push(clean);
+  };
+  for (const name of artists) add(`${title} (${name} album)`);
+  add(`${title} (album)`);
+  add(title);
+  return out.slice(0, 8);
+}
+
+export function wikipediaSearchUrl(album: WikiAlbumRef): string {
+  const q = `intitle:"${luceneValue(stripQualifiers(album.title))}" ${luceneValue(album.artist)}`;
+  return `${WP_API}?action=query&generator=search&gsrsearch=${encodeURIComponent(
+    q,
+  )}&gsrlimit=10&prop=categories|extracts&exintro=1&explaintext=1&cllimit=50&format=json&redirects=1`;
+}
+
+export function wikipediaListSearchUrl(album: WikiAlbumRef): string {
+  const q = `"${luceneValue(stripQualifiers(album.title))}" "${luceneValue(album.artist)}" album`;
   return `${WP_API}?action=query&list=search&srsearch=${encodeURIComponent(q)}&srlimit=10&format=json`;
 }
 
@@ -65,16 +133,22 @@ export function wikipediaParseUrl(pageTitle: string): string {
 }
 
 const ALBUM_CATEGORY = /\b(albums|EPs|extended plays|live albums|compilation albums|soundtrack albums|remix albums)\b/i;
+const NOT_ALBUM_TITLE = /\b(song|single|discography|film|novel)\b/i;
 
-/** Pick the best album-page candidate from a generator=search response. */
+/** Pick the best album-page candidate from a generator=search / titles response. */
 export function pickAlbumPage(pages: WikiPage[], album: WikiAlbumRef): WikiPage | null {
   let best: { page: WikiPage; score: number } | null = null;
 
   for (const page of pages) {
     const title = page.title ?? '';
-    if (!title) continue;
+    if (!title || page.missing !== undefined) continue;
+    if (!titleSimilarity(album.title, title)) continue;
+    if (NOT_ALBUM_TITLE.test(title) && !ALBUM_CATEGORY.test((page.categories ?? []).map((c) => c.title ?? '').join(' '))) {
+      continue;
+    }
+
     const cats = (page.categories ?? []).map((c) => c.title ?? '').join(' ');
-    if (!ALBUM_CATEGORY.test(cats)) continue;
+    const albumCategory = ALBUM_CATEGORY.test(cats);
     const sim = titleSimilarity(album.title, title);
     if (sim < 0.75) continue;
 
@@ -82,35 +156,68 @@ export function pickAlbumPage(pages: WikiPage[], album: WikiAlbumRef): WikiPage 
     // Without an intro we cannot verify the artist, and a same-titled album by
     // someone else is worse than no data at all.
     if (!intro) continue;
-    const artistHit = namesMatch(album.artist, intro) || intro.toLowerCase().includes(album.artist.toLowerCase());
+    const artistHit = namesMatch(album.artist, intro) || normalizeContains(intro, album.artist);
     const yearHit = album.year ? intro.includes(String(album.year)) : false;
-    if (!artistHit && !(yearHit && sim >= 0.95)) continue;
+    const albumWord = /\b(album|EP|extended play|record|LP)\b/i.test(intro);
+    if (!albumCategory && !artistHit && !(yearHit && sim >= 0.95)) continue;
+    if (!albumCategory && !albumWord && !artistHit) continue;
 
-    const rank = page.index === undefined ? 0 : 1 / (1 + page.index);
-    const score = sim * 4 + (artistHit ? 2 : 0) + (yearHit ? 1 : 0) + rank;
+    const rank = page.index === undefined ? 0.25 : 1 / (1 + page.index);
+    const score =
+      sim * 4 + (artistHit ? 3 : 0) + (yearHit ? 1 : 0) + (albumCategory ? 1 : 0) + rank;
     if (!best || score > best.score) best = { page, score };
   }
   return best?.page ?? null;
 }
 
-export async function findAlbumPage(http: CachedHttp, album: WikiAlbumRef): Promise<string | null> {
-  const search = await http.getJson<GeneratorSearch>(wikipediaSearchUrl(album), ACCEPT_JSON);
-  const pages = Object.values(search?.query?.pages ?? {});
-  const picked = pickAlbumPage(pages, album);
-  if (picked?.title) return picked.title;
-
-  // Fallback: plain list search, then use the first few titles. This path does
-  // not have categories, so we only accept a title that is an exact match and
-  // contains the artist or year in the search result title itself.
-  const fallback = await http.getJson<ListSearch>(wikipediaPlainSearchUrl(album), ACCEPT_JSON);
-  const titles = (fallback?.query?.search ?? []).map((r) => r.title ?? '').filter(Boolean);
-  for (const title of titles.slice(0, 5)) {
-    if (titleSimilarity(album.title, title) >= 0.95) return title;
-  }
-  return null;
+function normalizeContains(haystack: string, needle: string): boolean {
+  const n = needle
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  if (!n) return false;
+  const h = haystack
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return (` ${h} `).includes(` ${n} `);
 }
 
-interface Section {
+async function pagesForTitles(http: CachedHttp, titles: string[]): Promise<WikiPage[]> {
+  if (!titles.length) return [];
+  const data = await http.getJson<TitlesQuery>(wikipediaTitlesUrl(titles), ACCEPT_JSON);
+  return Object.values(data?.query?.pages ?? {});
+}
+
+export async function findAlbumPage(http: CachedHttp, album: WikiAlbumRef): Promise<string | null> {
+  // 1. Direct candidate titles ("Discovery (Daft Punk album)", "Discovery (album)",
+  //    "Discovery") in a single query; redirects are followed by MediaWiki.
+  const direct = await pagesForTitles(http, candidateTitles(album));
+  const pickedDirect = pickAlbumPage(direct, album);
+  if (pickedDirect?.title) return pickedDirect.title;
+
+  // 2. Generator search keeps categories + intros in one request.
+  const search = await http.getJson<GeneratorSearch>(wikipediaSearchUrl(album), ACCEPT_JSON);
+  const picked = pickAlbumPage(Object.values(search?.query?.pages ?? {}), album);
+  if (picked?.title) return picked.title;
+
+  // 3. Plain search, then validate the top titles in a second batch request.
+  const fallback = await http.getJson<ListSearch>(wikipediaListSearchUrl(album), ACCEPT_JSON);
+  const titles = (fallback?.query?.search ?? [])
+    .map((r) => r.title ?? '')
+    .filter((t) => t && titleSimilarity(album.title, t) >= 0.75)
+    .slice(0, 10);
+  const pickedFallback = pickAlbumPage(await pagesForTitles(http, titles), album);
+  return pickedFallback?.title ?? null;
+}
+
+export interface Section {
   heading: string;
   id?: string;
   level: 2 | 3;
@@ -134,7 +241,6 @@ function collectSections($: CheerioAPI): Section[] {
       const tagName = (el as { tagName?: string } | undefined)?.tagName?.toLowerCase();
       if (tagName === 'h2' || tagName === 'h3') break;
       if (tagName === 'div' && next.hasClass('mw-heading')) break;
-      // Stop at the references/external-links machinery, which can be huge.
       nodes.push(el);
       next = next.next();
     }
@@ -144,27 +250,37 @@ function collectSections($: CheerioAPI): Section[] {
 }
 
 const RECEPTION_PATTERNS: { re: RegExp; score: number }[] = [
-  { re: /^critical (reception|response|reviews?)$/i, score: 6 },
-  { re: /^critical (reception|response|reviews?)\b/i, score: 5 },
-  { re: /^(release and )?reception$/i, score: 5 },
-  { re: /^reception$/i, score: 4 },
-  { re: /\b(critical reception|critical response)\b/i, score: 4 },
+  { re: /^critical reception( and legacy)?$/i, score: 9 },
+  { re: /^critical response$/i, score: 9 },
+  { re: /^critical reception and response$/i, score: 9 },
+  { re: /^reception$/i, score: 8 },
+  { re: /^release and reception$/i, score: 8 },
+  { re: /^reception and legacy$/i, score: 8 },
+  { re: /^reception and awards$/i, score: 7 },
+  { re: /^legacy$/i, score: 5 },
+  { re: /^(critical )?(reception|response)\b/i, score: 4 },
   { re: /\breception\b/i, score: 2 },
 ];
-const RECEPTION_EXCLUDE = /commercial|chart|award|accolade|legacy|certification|personnel|track listing|references/i;
+const RECEPTION_EXCLUDE = /commercial|chart|award|accolade|certification|personnel|track listing|references|discography/i;
 
 const BACKGROUND_PATTERNS: { re: RegExp; score: number }[] = [
-  { re: /^background( and recording)?$/i, score: 6 },
-  { re: /^background and recording$/i, score: 6 },
-  { re: /^recording( and production)?$/i, score: 5 },
-  { re: /^writing and recording$/i, score: 5 },
-  { re: /^production$/i, score: 4 },
+  { re: /^background( and recording)?$/i, score: 9 },
+  { re: /^recording( and production)?$/i, score: 8 },
+  { re: /^background and recording$/i, score: 9 },
+  { re: /^writing and recording$/i, score: 8 },
+  { re: /^production$/i, score: 5 },
+  { re: /^composition$/i, score: 5 },
+  { re: /^music and lyrics$/i, score: 6 },
+  { re: /^music and composition$/i, score: 6 },
   { re: /^background\b/i, score: 4 },
-  { re: /^composition$/i, score: 2 },
 ];
-const BACKGROUND_EXCLUDE = /reception|track listing|personnel|charts?|certification|references|external|further|discography|legacy|release/i;
+const BACKGROUND_EXCLUDE = /reception|track listing|personnel|charts?|certification|references|external|further|discography|legacy|release|single/i;
 
-function pickSection(sections: Section[], patterns: { re: RegExp; score: number }[], exclude: RegExp): Section | undefined {
+function pickSection(
+  sections: Section[],
+  patterns: { re: RegExp; score: number }[],
+  exclude: RegExp,
+): Section | undefined {
   let best: { section: Section; score: number } | undefined;
   for (const section of sections) {
     if (exclude.test(section.heading)) continue;
@@ -177,30 +293,90 @@ function pickSection(sections: Section[], patterns: { re: RegExp; score: number 
   return best?.section;
 }
 
-function sectionParagraphs($: CheerioAPI, section: Section | undefined): string[] {
+/** Exported for the heading-acceptance tests. */
+export function pickReceptionSection(sections: Section[]): Section | undefined {
+  return pickSection(sections, RECEPTION_PATTERNS, RECEPTION_EXCLUDE);
+}
+
+/** Exported for the heading-acceptance tests. */
+export function pickBackgroundSection(sections: Section[]): Section | undefined {
+  return pickSection(sections, BACKGROUND_PATTERNS, BACKGROUND_EXCLUDE);
+}
+
+function paragraphFromNode($: CheerioAPI, node: unknown, refs: Map<string, string>): ProseParagraph | null {
+  const $p = $(node as never).clone();
+  $p.find(
+    'sup.reference, sup, .mw-editsection, style, script, table, figure, .thumb, .infobox, .navbox, .hatnote, .mw-empty-elt, .cite-bracket',
+  ).remove();
+  const text = cleanText($p.text());
+  if (text.length < 60) return null;
+  return { text, urls: paragraphUrls($, node, refs) };
+}
+
+function sectionParagraphs($: CheerioAPI, section: Section | undefined, refs: Map<string, string>): ProseParagraph[] {
   if (!section) return [];
-  const out: string[] = [];
+  const out: ProseParagraph[] = [];
+  const seen = new Set<string>();
   for (const node of section.nodes) {
-    const $n = $(node as never);
     const tag = (node as { tagName?: string }).tagName?.toLowerCase();
-    const candidates: unknown[] =
-      tag === 'p' ? [node] : tag === 'div' || tag === 'section' ? $n.find('p').toArray() : [];
+    if (tag === 'table' || tag === 'ul' || tag === 'ol' || tag === 'figure') continue;
+    const $n = $(node as never);
+    const candidates: unknown[] = tag === 'p' ? [node] : tag === 'div' || tag === 'section' ? $n.find('p').toArray() : [];
     for (const p of candidates) {
-      const $p = $(p as never).clone();
-      $p.find(
-        'sup.reference, sup, .mw-editsection, style, script, table, figure, .thumb, .infobox, .navbox, .hatnote, .mw-empty-elt, .cite-bracket',
-      ).remove();
-      const text = cleanText($p.text());
-      if (text.length >= 60 && !out.includes(text)) out.push(text);
+      const parsed = paragraphFromNode($, p, refs);
+      if (parsed && !seen.has(parsed.text)) {
+        seen.add(parsed.text);
+        out.push(parsed);
+      }
     }
   }
   return out;
 }
 
-function sectionValue($: CheerioAPI, section: Section | undefined, pageTitle: string, max: number): Sourced<string> | undefined {
-  const paragraphs = sectionParagraphs($, section);
+/** Lead paragraphs, used only as a reception fallback when no section exists. */
+function leadParagraphs($: CheerioAPI, refs: Map<string, string>): ProseParagraph[] {
+  const root = $('.mw-parser-output').first();
+  const scope = root.length ? root : $('body');
+  const out: ProseParagraph[] = [];
+  for (const p of scope.children('p').toArray()) {
+    const parsed = paragraphFromNode($, p, refs);
+    if (parsed) out.push(parsed);
+  }
+  return out;
+}
+
+const LEAD_RECEPTION_HINT = /\b(reviews?|reviewers?|critics?|critically|acclaim|praised|praise)\b/i;
+
+function receptionParagraphsWithFallback(
+  $: CheerioAPI,
+  section: Section | undefined,
+  refs: Map<string, string>,
+): { paragraphs: ProseParagraph[]; section?: Section } {
+  let fromSection = sectionParagraphs($, section, refs);
+  // Combined "Release and reception" sections often open with release/single
+  // information. Start at the first paragraph that actually discusses reviews.
+  if (section && /\brelease\b/i.test(section.heading) && fromSection.length > 1) {
+    // A review paragraph can be recognisable by an attributed critic even when
+    // it never uses the word "review" ("Paul Evans of Rolling Stone called...").
+    const startsReception = (p: ProseParagraph): boolean =>
+      LEAD_RECEPTION_HINT.test(p.text) || extractQuotes([p], '', 1).length > 0;
+    const firstReview = fromSection.findIndex(startsReception);
+    if (firstReview > 0) fromSection = fromSection.slice(firstReview);
+  }
+  if (fromSection.length) return { paragraphs: fromSection, ...(section ? { section } : {}) };
+  const lead = leadParagraphs($, refs).filter((p) => LEAD_RECEPTION_HINT.test(p.text));
+  if (lead.length) return { paragraphs: lead.slice(0, 1) };
+  return { paragraphs: [] };
+}
+
+function paragraphsValue(
+  paragraphs: ProseParagraph[],
+  pageTitle: string,
+  section: Section | undefined,
+  max: number,
+): Sourced<string> | undefined {
   if (!paragraphs.length) return undefined;
-  const value = truncateAtSentence(paragraphs.join('\n\n'), max);
+  const value = truncateAtSentence(paragraphs.map((p) => p.text).join('\n\n'), max);
   if (value.length < 60) return undefined;
   return {
     value,
@@ -209,148 +385,52 @@ function sectionValue($: CheerioAPI, section: Section | undefined, pageTitle: st
   };
 }
 
-export async function fetchWikipedia(http: CachedHttp, album: WikiAlbumRef): Promise<WikipediaResult | null> {
-  const pageTitle = await findAlbumPage(http, album);
+export async function fetchWikipedia(
+  http: CachedHttp,
+  album: WikiAlbumRef,
+  opts: WikipediaOptions = {},
+): Promise<WikipediaResult | null> {
+  let fromMusicBrainz = false;
+  let pageTitle: string | null = null;
+
+  if (opts.mb && opts.releaseGroupId) {
+    pageTitle = await releaseGroupWikipediaTitle(http, opts.mb, opts.releaseGroupId).catch(() => null);
+    fromMusicBrainz = Boolean(pageTitle);
+  }
+  if (!pageTitle) pageTitle = await findAlbumPage(http, album);
   if (!pageTitle) return null;
-  const parsed = await http.getJson<ParseResponse>(wikipediaParseUrl(pageTitle), ACCEPT_JSON);
-  const html = parsed?.parse?.text?.['*'];
+
+  let parsed = await http.getJson<ParseResponse>(wikipediaParseUrl(pageTitle), ACCEPT_JSON);
+  let html = parsed?.parse?.text?.['*'];
+  if (!html && fromMusicBrainz) {
+    // A stale Wikidata sitelink: fall back to title/search selection.
+    pageTitle = await findAlbumPage(http, album);
+    if (!pageTitle) return null;
+    parsed = await http.getJson<ParseResponse>(wikipediaParseUrl(pageTitle), ACCEPT_JSON);
+    html = parsed?.parse?.text?.['*'];
+  }
   if (!html) return null;
+
   const canonical = parsed?.parse?.title ?? pageTitle;
   const $ = cheerio.load(html);
+  const refs = collectRefUrls($);
   const sections = collectSections($);
 
-  const receptionSection = pickSection(sections, RECEPTION_PATTERNS, RECEPTION_EXCLUDE);
-  const backgroundSection = pickSection(sections, BACKGROUND_PATTERNS, BACKGROUND_EXCLUDE);
+  const receptionSection = pickReceptionSection(sections);
+  const receptionPick = receptionParagraphsWithFallback($, receptionSection, refs);
+  const backgroundSection = pickBackgroundSection(sections);
+  const backgroundParagraphs = sectionParagraphs($, backgroundSection, refs);
+
+  const reception = paragraphsValue(receptionPick.paragraphs, canonical, receptionPick.section, 2400);
+  const background = paragraphsValue(backgroundParagraphs, canonical, backgroundSection, 2200);
+  const quotes = extractQuotes(receptionPick.paragraphs, wikipediaUrl(canonical), 4);
+
   return {
     pageTitle: canonical,
-    reception: sectionValue($, receptionSection, canonical, 2400),
-    background: sectionValue($, backgroundSection, canonical, 2200),
-    scores: parseRatings($, album),
-    referenceUrls: [...collectRefUrls($).values()],
+    ...(reception ? { reception } : {}),
+    ...(background ? { background } : {}),
+    scores: parseRatings($, album, canonical),
+    quotes,
+    referenceUrls: [...refs.values()],
   };
-}
-
-// ---------- ratings table ----------
-
-interface OutletInfo {
-  outlet: string;
-  defaultScale?: number;
-  host: string;
-  searchUrl: (album: WikiAlbumRef) => string;
-}
-
-const OUTLETS: { re: RegExp; info: OutletInfo }[] = [
-  {
-    re: /^metacritic$/i,
-    info: {
-      outlet: 'Metacritic',
-      defaultScale: 100,
-      host: 'metacritic.com',
-      searchUrl: (a) => `https://www.metacritic.com/search/music/${encodeURIComponent(`${a.artist} ${a.title}`)}/`,
-    },
-  },
-  {
-    re: /^(album of the year|album ?of ?the ?year|aoty)$/i,
-    info: {
-      outlet: 'Album of the Year',
-      defaultScale: 100,
-      host: 'albumoftheyear.org',
-      searchUrl: (a) => `https://www.albumoftheyear.org/search/?q=${encodeURIComponent(`${a.title} ${a.artist}`)}`,
-    },
-  },
-  {
-    re: /^pitchfork( media)?$/i,
-    info: {
-      outlet: 'Pitchfork',
-      defaultScale: 10,
-      host: 'pitchfork.com',
-      searchUrl: (a) => `https://pitchfork.com/search/?query=${encodeURIComponent(`${a.title} ${a.artist}`)}`,
-    },
-  },
-];
-
-function outletInfo(raw: string): OutletInfo | null {
-  for (const o of OUTLETS) if (o.re.test(raw.trim())) return o.info;
-  return null;
-}
-
-function cellText($: CheerioAPI, cell: unknown): string {
-  const $cell = $(cell as never).clone();
-  $cell.find('sup, .reference, .cite-bracket').remove();
-  return cleanText($cell.text());
-}
-
-function collectRefUrls($: CheerioAPI): Map<string, string> {
-  const refs = new Map<string, string>();
-  $('li[id^="cite_note-"]').each((_, li) => {
-    const id = $(li).attr('id');
-    if (!id) return;
-    const links = $(li).find('a[href^="http"]').toArray();
-    const preferred = links.find((a) => !/web\.archive\.org|archive\.(today|is|ph)/i.test($(a).attr('href') ?? ''));
-    const href = $(preferred ?? links[0] ?? li).attr('href');
-    if (href && /^https?:/.test(href)) refs.set(id, href);
-  });
-  return refs;
-}
-
-function citationUrlForCell($: CheerioAPI, cell: unknown, refs: Map<string, string>): string | undefined {
-  const href = $(cell as never).find('a[href^="#cite_note-"]').first().attr('href');
-  if (!href) return undefined;
-  return refs.get(href.slice(1));
-}
-
-function parseRating(text: string, defaultScale?: number): { score: number; scale: number } | null {
-  const t = text.replace(/\s+/g, ' ').trim();
-  const slash = t.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
-  if (slash) {
-    const score = Number(slash[1]);
-    const scale = Number(slash[2]);
-    if (Number.isFinite(score) && Number.isFinite(scale) && scale > 0 && score >= 0 && score <= scale) return { score, scale };
-    return null;
-  }
-  const single = t.match(/^(\d+(?:\.\d+)?)$/);
-  if (single && defaultScale) {
-    const score = Number(single[1]);
-    if (Number.isFinite(score) && score >= 0 && score <= defaultScale) return { score, scale: defaultScale };
-  }
-  return null;
-}
-
-function hostMatches(url: string, host: string): boolean {
-  try {
-    const h = new URL(url).host;
-    return h === host || h.endsWith(`.${host}`);
-  } catch {
-    return false;
-  }
-}
-
-/** Parse the "Professional ratings" wikitable. Exported for fixture tests. */
-export function parseRatings($: CheerioAPI, album: WikiAlbumRef): CriticScore[] {
-  const refs = collectRefUrls($);
-  const scores: CriticScore[] = [];
-  const tables = $('table').toArray();
-  for (const table of tables) {
-    const $t = $(table);
-    const header = `${cleanText($t.find('caption').first().text())} ${cleanText($t.text()).slice(0, 260)}`;
-    if (!/professional ratings|aggregate scores|review scores/i.test(header)) continue;
-
-    $t.find('tr').each((_, tr) => {
-      const cells = $(tr).children('td,th').toArray();
-      if (cells.length < 2) return;
-      const outletRaw = cellText($, cells[0]);
-      if (!outletRaw || /^source$/i.test(outletRaw)) return;
-      const info = outletInfo(outletRaw);
-      if (!info) return;
-      const parsed = parseRating(cellText($, cells[1]), info.defaultScale);
-      if (!parsed) return;
-      if (scores.some((s) => s.outlet === info.outlet)) return;
-      const cited = citationUrlForCell($, cells[1], refs);
-      const normalizedCited = cited?.replace(/^http:\/\//i, 'https://');
-      const url = normalizedCited && hostMatches(normalizedCited, info.host) ? normalizedCited : info.searchUrl(album);
-      scores.push({ outlet: info.outlet, score: parsed.score, scale: parsed.scale, url });
-    });
-    if (scores.length) break;
-  }
-  return scores;
 }

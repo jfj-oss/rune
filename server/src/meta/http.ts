@@ -38,11 +38,10 @@ export interface HttpDeps {
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_MIN_INTERVAL_MS: Record<string, number> = {
   'en.wikipedia.org': 1100, // MediaWiki asks clients to be conservative
-  'backend.metacritic.com': 700,
-  'www.metacritic.com': 700,
+  'www.wikidata.org': 1100,
+  'api.genius.com': 350, // official API, 1000 req/hour
   'pitchfork.com': 700,
   'www.albumoftheyear.org': 700,
-  'genius.com': 900,
 };
 const DEFAULT_MIN_INTERVAL_FALLBACK = 500;
 

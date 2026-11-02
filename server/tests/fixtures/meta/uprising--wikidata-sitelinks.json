@@ -1,0 +1,5 @@
+{
+ "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q1051420&props=sitelinks&sitefilter=enwiki&format=json",
+ "status": 200,
+ "body": "{\"entities\":{\"Q1051420\":{\"type\":\"item\",\"id\":\"Q1051420\",\"sitelinks\":{\"enwiki\":{\"site\":\"enwiki\",\"title\":\"Uprising (Bob Marley and the Wailers album)\",\"badges\":[]}}}},\"success\":1}"
+}

@@ -9,12 +9,13 @@ import type { FastifyInstance } from 'fastify';
 import type { AlbumDetails, CriticQuote, CriticScore } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
+import { MbClient, RateLimiter } from '../match/mb.js';
 import { CachedHttp, type HttpDeps } from './http.js';
 import { fetchWikipedia } from './wikipedia.js';
-import { fetchMetacritic, type ReviewAlbumRef } from './metacritic.js';
 import { fetchAoty } from './albumoftheyear.js';
 import { fetchPitchfork, pickPitchforkReferenceUrl } from './pitchfork.js';
 import { fetchGenius, type GeniusNote, type TrackRef } from './genius.js';
+import type { ReviewAlbumRef } from './types.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -25,6 +26,14 @@ export interface MetaDeps extends HttpDeps {
   emptyTtlMs?: number;
   geniusMaxTracks?: number;
   geniusMaxNotes?: number;
+  /**
+   * Share the matcher's MusicBrainz client / limiter. Pass the same
+   * `RateLimiter` instance to createMatcher and createMeta (or one MbClient) so
+   * both modules respect a single 1 req/s MusicBrainz budget.
+   */
+  mbClient?: MbClient;
+  mbLimiter?: RateLimiter;
+  mbRateLimitMs?: number;
 }
 
 export interface MetaService {
@@ -48,6 +57,7 @@ interface AlbumRow {
   release_date: string | null;
   source: string;
   mb_release_id: string | null;
+  mb_release_group_id: string | null;
   folder_path: string | null;
   artist_name: string | null;
 }
@@ -57,7 +67,14 @@ interface StoredDetails {
   fetched_at: number;
 }
 
-const OUTLET_ORDER = ['Metacritic', 'Album of the Year', 'Pitchfork'];
+const OUTLET_ORDER = [
+  'Metacritic',
+  'Album of the Year',
+  'Pitchfork',
+  'AllMusic',
+  'Rolling Stone',
+  'Robert Christgau',
+];
 
 function mergeScores(wikipediaScores: CriticScore[], direct: (CriticScore | undefined)[]): CriticScore[] {
   const byOutlet = new Map<string, CriticScore>();
@@ -70,10 +87,11 @@ function mergeScores(wikipediaScores: CriticScore[], direct: (CriticScore | unde
   });
 }
 
-function mergeQuotes(quotes: (CriticQuote | undefined)[]): CriticQuote[] {
+function mergeQuotes(quotes: (CriticQuote | undefined)[], max = 4): CriticQuote[] {
   const out: CriticQuote[] = [];
   for (const q of quotes) {
     if (!q || !q.quote) continue;
+    if (out.length >= max) break;
     if (out.some((existing) => existing.outlet === q.outlet && existing.quote === q.quote)) continue;
     out.push(q);
   }
@@ -98,10 +116,24 @@ export function createMeta(db: Db, cfg: Config, deps: MetaDeps = {}): MetaServic
   const ttlMs = deps.ttlMs ?? 30 * DAY_MS;
   const emptyTtlMs = deps.emptyTtlMs ?? 7 * DAY_MS;
   const inflight = new Map<string, Promise<AlbumDetails | null>>();
+  const geniusToken = (cfg as Config & { geniusToken?: string }).geniusToken;
+  // Meta only needs MusicBrainz for release-group -> Wikipedia links. Sharing
+  // the matcher's RateLimiter keeps the combined request rate at 1/s.
+  const mb =
+    deps.mbClient ??
+    new MbClient({
+      userAgent: cfg.userAgent,
+      db,
+      fetch: deps.fetch,
+      sleep: deps.sleep,
+      now: deps.now,
+      rateLimitMs: deps.mbRateLimitMs ?? 1000,
+      limiter: deps.mbLimiter,
+    });
 
   const albumStmt = db.prepare(
-    `SELECT a.id, a.title, a.year, a.release_date, a.source, a.mb_release_id, a.folder_path,
-            ar.name AS artist_name
+    `SELECT a.id, a.title, a.year, a.release_date, a.source, a.mb_release_id,
+            a.mb_release_group_id, a.folder_path, ar.name AS artist_name
        FROM albums a
        LEFT JOIN artists ar ON ar.id = a.artist_id
       WHERE a.id = ?`,
@@ -135,30 +167,36 @@ export function createMeta(db: Db, cfg: Config, deps: MetaDeps = {}): MetaServic
       title: row.title,
       artist: row.artist_name ?? 'Various Artists',
       ...(row.year == null ? {} : { year: row.year }),
+      ...(row.mb_release_group_id == null ? {} : { mbReleaseGroupId: row.mb_release_group_id }),
     };
     const tracks = tracksStmt.all(albumId) as TrackRef[];
 
-    // Wikipedia first: the ratings table often carries the only accessible
-    // Metacritic/AOTY score, and its Pitchfork citation gives us a direct URL.
-    const wiki = await safe(fetchWikipedia(http, album));
+    // Wikipedia first: the ratings table carries the Metacritic score (we do
+    // not scrape metacritic.com), and its citations give us direct review URLs.
+    const wiki = await safe(
+      fetchWikipedia(http, album, {
+        mb,
+        ...(row.mb_release_group_id == null ? {} : { releaseGroupId: row.mb_release_group_id }),
+      }),
+    );
     const pitchforkKnownUrl =
       wiki?.scores.find((s) => s.outlet === 'Pitchfork')?.url ??
       (wiki ? pickPitchforkReferenceUrl(wiki.referenceUrls, album.title) : undefined);
 
-    const [metacritic, aoty, pitchfork, genius] = await Promise.all([
-      safe(fetchMetacritic(http, album)),
+    const [aoty, pitchfork, genius] = await Promise.all([
       safe(fetchAoty(http, album)),
       safe(fetchPitchfork(http, album, pitchforkKnownUrl)),
       safe(
         fetchGenius(http, album, tracks, {
+          ...(geniusToken == null ? {} : { token: geniusToken }),
           ...(deps.geniusMaxTracks == null ? {} : { maxTracks: deps.geniusMaxTracks }),
           ...(deps.geniusMaxNotes == null ? {} : { maxNotes: deps.geniusMaxNotes }),
         }),
       ),
     ]);
 
-    const scores = mergeScores(wiki?.scores ?? [], [metacritic?.score, aoty?.score, pitchfork?.score]);
-    const quotes = mergeQuotes([pitchfork?.quote]);
+    const scores = mergeScores(wiki?.scores ?? [], [aoty?.score, pitchfork?.score]);
+    const quotes = mergeQuotes([...(wiki?.quotes ?? []), pitchfork?.quote]);
     const artistNotes: GeniusNote[] = genius ?? [];
 
     return {

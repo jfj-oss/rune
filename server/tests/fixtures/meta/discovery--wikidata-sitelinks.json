@@ -1,0 +1,5 @@
+{
+ "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q1901313&props=sitelinks&sitefilter=enwiki&format=json",
+ "status": 200,
+ "body": "{\"entities\":{\"Q1901313\":{\"type\":\"item\",\"id\":\"Q1901313\",\"sitelinks\":{\"enwiki\":{\"site\":\"enwiki\",\"title\":\"Discovery (Daft Punk album)\",\"badges\":[\"Q17437798\"]}}}},\"success\":1}"
+}
