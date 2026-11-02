@@ -3,10 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { useSearchNav } from '../store/searchNav';
-import { AMBIENTS, useUi, type Ambient } from '../store/ui';
+import { AMBIENTS, DITHER_AMBIENTS, useUi, type Ambient } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
 
-const AMBIENT_LABEL: Record<Ambient, string> = { cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off' };
+const AMBIENT_LABEL: Record<Ambient, string> = {
+  cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off',
+  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-cycle': 'Dither · Cycle',
+};
 
 export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: boolean }) {
   const nav = useNavigate();
@@ -77,7 +80,7 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
           <div role="menu" className="menu">
             <MenuItem icon={<RefreshCw size={16} />} onClick={() => { close(); void api.scan().then(() => toast('Library rescan started')).catch(() => toast('Could not reach the server')); }}>Rescan library</MenuItem>
             <div className="popover__title">Ambient colours</div>
-            {AMBIENTS.map((a) => (
+            {[...AMBIENTS, ...DITHER_AMBIENTS].map((a) => (
               <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>
                 <i className={`ambdot ambdot--${a}`} />
                 <span>{AMBIENT_LABEL[a]}</span>

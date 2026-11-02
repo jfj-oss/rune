@@ -123,6 +123,11 @@ an open icon set (Lucide).
 - Content surfaces that currently use `--bg` must become transparent so the ambient shows through; cards/rows keep subtle translucent surfaces (`rgba(255,255,255,.04–.06)`).
 - Album page hero keeps its cover-tinted gradient on top of the ambient.
 
+### Dither backdrop (user request 2026-11-01)
+- Extra ambient modes in the same setting: **Dither · Red** (`dither`, default coral `#d4584f`), **Dither · Blue / Purple / Green** (`dither-blue|purple|green`), **Dither · Cycle** (`dither-cycle`, red → purple → blue → green, 20 s hold + 10 s blend each, ~2 min). Stored in `rune.ambient`; `?ambient=dither` (alias `dither-red`) works too. The gradient modes are unchanged.
+- Look: pure black base with slow original abstract forms (5 drifting light pools + 2 soft ribbons, 45–80 s periods, domain-warped edges), ordered-dithered with a 64×64 blue-noise tile into black + a dark mid tone + the strong colour. Each dot is ~2 CSS px, drawn by a WebGL1 shader into a low-res canvas upscaled with `image-rendering: pixelated`; 30 fps cap, paused while hidden, one still frame under `prefers-reduced-motion`; static Canvas 2D frame without WebGL. Code: `components/DitherBackdrop.tsx`, constants + pure helpers in `lib/dither.ts`.
+- Readability: a form's body is at most 26% strong-colour dots on the mid tone, so the mean backdrop under any text keeps secondary text (raised to `#c2c3d1` in these modes) at ≥ 4.5:1 for every colour (unit-tested, and measured on screenshots). The sidebar glass also dims what it blurs (`brightness(.6)`) so it never glows brighter than the page; the search field gets a dark fill.
+
 ### Liquid glass — sidebar (left) and now-playing bar (bottom); on mobile the bottom tab bar + mini-player
 - Apple-style "liquid glass": translucent panel showing the moving ambient behind it — `backdrop-filter: blur(28–40px) saturate(160–180%)`, a faint white fill (`rgba(255,255,255,.06–.10)`), a 1 px inner highlight on the edge facing the content (top edge for the bottom bar, right edge for the sidebar) `rgba(255,255,255,.18)`, a soft outer shadow, and a subtle vertical gradient sheen (lighter at top → transparent) like the screenshot's top band.
 - Optional specular touch: a very faint diagonal highlight gradient across the panel; no heavy noise textures.
