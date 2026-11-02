@@ -1,0 +1,5 @@
+{
+ "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q912288&props=sitelinks&sitefilter=enwiki&format=json",
+ "status": 200,
+ "body": "{\"entities\":{\"Q912288\":{\"type\":\"item\",\"id\":\"Q912288\",\"sitelinks\":{\"enwiki\":{\"site\":\"enwiki\",\"title\":\"Jar of Flies\",\"badges\":[]}}}},\"success\":1}"
+}

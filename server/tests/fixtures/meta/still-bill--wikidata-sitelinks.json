@@ -1,0 +1,5 @@
+{
+ "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q7617008&props=sitelinks&sitefilter=enwiki&format=json",
+ "status": 200,
+ "body": "{\"entities\":{\"Q7617008\":{\"type\":\"item\",\"id\":\"Q7617008\",\"sitelinks\":{\"enwiki\":{\"site\":\"enwiki\",\"title\":\"Still Bill\",\"badges\":[]}}}},\"success\":1}"
+}

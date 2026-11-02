@@ -1,0 +1,5 @@
+{
+ "url": "https://www.wikidata.org/w/api.php?action=wbgetentities&ids=Q2731499&props=sitelinks&sitefilter=enwiki&format=json",
+ "status": 200,
+ "body": "{\"entities\":{\"Q2731499\":{\"type\":\"item\",\"id\":\"Q2731499\",\"sitelinks\":{\"enwiki\":{\"site\":\"enwiki\",\"title\":\"Fire of Unknown Origin\",\"badges\":[]}}}},\"success\":1}"
+}
