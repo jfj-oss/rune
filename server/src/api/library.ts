@@ -4,6 +4,7 @@ import type { Album, AlbumSummary, Artist, ArtistRef, Credit, Page, Track } from
 import type { Db } from '../db/index.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { loadTrack } from '../play/rows.js';
+import { albumNotHiddenSql } from '../library/dupes.js';
 
 export interface AlbumListQuery {
   q?: string;
@@ -78,6 +79,8 @@ export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
   // Spotify albums that exist only because a playlist/search referenced them stay
   // addressable by id (getAlbum) but are not part of the library grid.
   if (q.inLibrary !== false) where.push('a.in_library = 1');
+  // Albums the user hid from the duplicate finder never appear in grids or search.
+  where.push(albumNotHiddenSql(db, 'a'));
   if (q.source && q.source !== 'all') {
     where.push('a.source = ?');
     args.push(q.source);
@@ -227,11 +230,13 @@ export function search(db: Db, q: string): { albums: AlbumSummary[]; artists: Ar
   const fts = ftsQuery(q);
   const like = `%${q}%`;
   const albums = listAlbums(db, { q, limit: 12, sort: 'artist' }).items;
+  const notHiddenX = albumNotHiddenSql(db, 'x');
+  const notHiddenA = albumNotHiddenSql(db, 'a');
   const artists = db
     .prepare(
       `SELECT id, name FROM artists
        WHERE (name LIKE ? ${fts ? "OR id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'artist')" : ''})
-         AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = artists.id AND x.in_library = 1)
+         AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = artists.id AND x.in_library = 1 AND ${notHiddenX})
        ORDER BY (EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id)) DESC, length(name) LIMIT 8`,
     )
     .all(...(fts ? [like, fts] : [like])) as ArtistRef[];
@@ -240,7 +245,7 @@ export function search(db: Db, q: string): { albums: AlbumSummary[]; artists: Ar
         .prepare(
           `SELECT search_fts.ref_id FROM search_fts
            JOIN tracks t ON t.id = search_fts.ref_id
-           JOIN albums a ON a.id = t.album_id AND a.in_library = 1
+           JOIN albums a ON a.id = t.album_id AND a.in_library = 1 AND ${notHiddenA}
            WHERE search_fts MATCH ? AND search_fts.kind = 'track'
            ORDER BY search_fts.rank LIMIT 12`,
         )

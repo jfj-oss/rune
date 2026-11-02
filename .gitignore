@@ -7,3 +7,4 @@ data/
 server/config.json
 refs/
 shots/
+server/docs/worker-reports/
