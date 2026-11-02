@@ -57,7 +57,10 @@ img { display: block; max-width: 100%; }
 }
 .btn-icon:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, #fff 8%, transparent); }
 .btn-icon:disabled { opacity: 0.35; }
-.btn-icon.is-on { color: var(--accent-2); }
+.btn-icon.is-on { color: var(--on); }
+/* shuffle / repeat in the player: purple plus a small dot underneath when on */
+.transport .btn-icon { position: relative; }
+.transport .btn-icon.is-on::after { content: ''; position: absolute; left: 50%; bottom: 1px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--on); }
 .btn-icon--lg { width: 44px; height: 44px; }
 
 .btn-round { display: inline-grid; place-items: center; border-radius: 50%; flex: none; transition: transform var(--t), background var(--t); }

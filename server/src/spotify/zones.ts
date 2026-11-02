@@ -178,6 +178,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   private closed = false;
   private claimUntil = 0;
   private volumeHold: { volume: number; until: number } | null = null;
+  /** Same for shuffle / repeat right after they were switched. */
+  private toggleHold: { shuffle?: boolean; repeat?: PlayerState['repeat']; until: number } | null = null;
   private lastActiveDevice: string | null = null;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
@@ -269,9 +271,15 @@ export class SpotifyConnectZone implements PlaybackZone {
         return this.refresh();
       case 'shuffle':
         await this.api.setShuffle(cmd.on, device);
+        this.toggleHold = { ...this.toggleHold, shuffle: cmd.on, until: this.now() + VOLUME_HOLD_MS };
+        this.snapshot = { ...this.snapshot, shuffle: cmd.on };
+        for (const cb of this.listeners) cb(this.snapshot);
         return this.refresh();
       case 'repeat':
         await this.api.setRepeat(repeatParam(cmd.mode), device);
+        this.toggleHold = { ...this.toggleHold, repeat: cmd.mode, until: this.now() + VOLUME_HOLD_MS };
+        this.snapshot = { ...this.snapshot, repeat: cmd.mode };
+        for (const cb of this.listeners) cb(this.snapshot);
         return this.refresh();
       default:
         return assertNever(cmd);
@@ -370,6 +378,20 @@ export class SpotifyConnectZone implements PlaybackZone {
     } else {
       next = mapPlaybackState(this.zone, playback, queue, this.startedQueue, this.now);
       this.claimUntil = 0;
+    }
+    const th = this.toggleHold;
+    if (th) {
+      if (this.now() >= th.until) this.toggleHold = null;
+      else {
+        if (th.shuffle !== undefined) {
+          if (next.shuffle === th.shuffle) delete th.shuffle;
+          else next = { ...next, shuffle: th.shuffle };
+        }
+        if (th.repeat !== undefined) {
+          if (next.repeat === th.repeat) delete th.repeat;
+          else next = { ...next, repeat: th.repeat };
+        }
+      }
     }
     const hold = this.volumeHold;
     if (hold) {

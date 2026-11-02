@@ -11,6 +11,8 @@
   --text-3: #a9aab9;
   --accent: #b3a7ff;
   --accent-2: #cfc8ff;
+  /* switched-on toggles (shuffle, repeat): a clear purple, not the near-white accent */
+  --on: #a66bff;
   --ok: #4fd18b;
   --warn: #e8b04a;
   --bad: #e5736f;
