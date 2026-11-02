@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { browseApi } from '../browseApi';
 import { Cover } from '../components/Cover';
 import { Eq } from '../components/Eq';
+import { AddToPlaylistItem } from '../components/AddToPlaylist';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
@@ -203,6 +204,7 @@ function TrackRow({ t, playing, isPlaying, desktop, onPlay }: { t: BrowseTrack; 
             <div role="menu" className="menu">
               <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)], true); }}>Play next</MenuItem>
               <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([toItem(t)]); }}>Add to queue</MenuItem>
+              <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [toItem(t)] }} />
               <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(t.album.id)}`); }}>Go to album</MenuItem>
               {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
             </div>

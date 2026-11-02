@@ -5,6 +5,12 @@ export interface ZoneInfo {
   id: Zone;
   name: string;
   kind: 'pc' | 'browser' | 'spotify';
+  /**
+   * pc zone only: the Spotify desktop app running on the same PC (a Connect device, e.g. "HORSE").
+   * When present the pc zone is hybrid: local files through mpv, Spotify tracks through that app.
+   */
+  spotifyDeviceId?: string;
+  spotifyDeviceName?: string;
 }
 
 /** A track plus just enough album context to put it in a queue. */

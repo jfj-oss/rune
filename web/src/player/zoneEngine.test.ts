@@ -1,0 +1,147 @@
+import { describe, expect, it, vi } from 'vitest';
+import { FakeZone, mkTrack } from './testkit';
+import { ZoneEngine } from './zoneEngine';
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+function setup(opts = {}) {
+  const zone = new FakeZone('spotify:dev');
+  let now = 10_000;
+  const eng = new ZoneEngine(zone, { now: () => now, pollMs: 60_000, startTimeoutMs: 5000, ...opts });
+  const ended = vi.fn(), err = vi.fn(), sync = vi.fn();
+  eng.onEnded(ended); eng.onError(err); eng.onSync(sync);
+  return { zone, eng, ended, err, sync, tick: (ms: number) => { now += ms; } };
+}
+
+describe('ZoneEngine', () => {
+  it('loads a single track into the zone and starts reporting once the zone confirms it', async () => {
+    const { zone, eng, sync, ended } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 5000, true);
+    await flush();
+    expect(zone.log).toContain('play:sp:1@5000');
+    zone.progress(6000);
+    expect(sync).toHaveBeenLastCalledWith(6000, true);
+    expect(ended).not.toHaveBeenCalled();
+    expect(eng.position()).toBe(6000);
+  });
+
+  it('interpolates the position while playing and freezes it on pause', async () => {
+    const { zone, eng, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(1000);
+    tick(1500);
+    expect(eng.position()).toBe(2500);
+    zone.progress(2500); // the zone's own report agrees
+    eng.pause();
+    await flush();
+    expect(zone.log.at(-1)).toBe('pause');
+    tick(4000);
+    expect(eng.position()).toBe(2500);
+  });
+
+  it('starts paused when autoplay is off', async () => {
+    const { zone, eng } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 42_000, false);
+    await flush();
+    expect(zone.log).toContain('play:sp:1@42000:paused');
+  });
+
+  it('detects the end when the zone reports stopped (mpv)', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    zone.progress(190_000);
+    zone.finish();
+    expect(ended).toHaveBeenCalledTimes(1);
+    zone.finish();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('detects the end when Spotify pauses and rewinds after playing to the end', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load(mkTrack('sp:1', 'spotify', 200_000), 0, true);
+    await flush();
+    zone.progress(198_000);
+    zone.finishPaused();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call a user pause (or an external one mid-track) the end', async () => {
+    const { zone, eng, ended, sync } = setup();
+    eng.load(mkTrack('sp:1', 'spotify', 200_000), 0, true);
+    await flush();
+    zone.progress(60_000);
+    zone.externalPause();
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(60_000, false);
+    zone.progress(199_000);
+    eng.pause();
+    await flush();
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('ends when the zone moved on to a different track', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores the previous track’s state until the zone shows the new one', async () => {
+    const { zone, eng, ended, sync } = setup();
+    zone.state = { ...zone.state, queue: [{ queueId: 'x', track: mkTrack('sp:old', 'spotify'), album: { id: 'a', title: 'A' } }], index: 0, status: 'stopped' };
+    eng.load(mkTrack('sp:new', 'spotify'), 0, true);
+    eng.onState(zone.state); // stale snapshot of sp:old
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).not.toHaveBeenCalled();
+    await flush();
+    expect(sync).toHaveBeenCalled();
+  });
+
+  it('reports an error when the device never starts the track', async () => {
+    const { zone, eng, err, tick } = setup();
+    zone.send = async () => zone.state; // accepts commands, plays nothing
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    tick(6000);
+    eng.onState(zone.state);
+    expect(err).toHaveBeenCalledTimes(1);
+    expect(err.mock.calls[0]![0]).toMatch(/Spotify app/);
+  });
+
+  it('reports an error when the command fails', async () => {
+    const { zone, eng, err } = setup();
+    zone.fail = true;
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    expect(err).toHaveBeenCalled();
+  });
+
+  it('stop pauses the zone only if it was playing our track, and goes quiet', async () => {
+    const { zone, eng, ended } = setup();
+    eng.stop();
+    await flush();
+    expect(zone.log).toEqual([]);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(1000);
+    eng.stop();
+    await flush();
+    expect(zone.log.at(-1)).toBe('pause');
+    zone.finish();
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('brings the zone volume in line before playing, and only talks volume while loaded', async () => {
+    const { zone, eng } = setup();
+    eng.setVolume(35);
+    expect(zone.log).toEqual([]);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    expect(zone.log.slice(0, 2)).toEqual(['volume:35', 'play:sp:1@0']);
+    eng.setVolume(50);
+    await flush();
+    expect(zone.log.at(-1)).toBe('volume:50');
+  });
+});

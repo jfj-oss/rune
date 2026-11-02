@@ -6,6 +6,7 @@ import { albumItems } from '../../hooks/usePlay';
 import { encId, formatDuration } from '../../lib/format';
 import { currentItem, usePlayer } from '../../store/player';
 import { Eq } from '../Eq';
+import { AddToPlaylistItem } from '../AddToPlaylist';
 import { MenuItem, Popover } from '../Popover';
 
 export function TrackList({ album }: { album: Album }) {
@@ -55,6 +56,7 @@ export function TrackList({ album }: { album: Album }) {
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([it], true); }}>Play next</MenuItem>
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([it]); }}>Add to queue</MenuItem>
+                    <AddToPlaylistItem close={close} target={{ what: t.title, resolve: () => [it] }} />
                     {t.artists[0] && <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(t.artists[0]!.id)}`); }}>Go to artist</MenuItem>}
                   </div>
                 )}

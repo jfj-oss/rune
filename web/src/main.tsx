@@ -10,6 +10,7 @@ import './styles/pages.css';
 import './styles/browse.css';
 import './styles/ambient.css';
 import './styles/spotify.css';
+import './styles/playlists.css';
 
 installClientLog();
 createRoot(document.getElementById('root')!).render(

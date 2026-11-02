@@ -1,4 +1,5 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, PlaylistDetail, PlaylistSummary, Zone } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, Zone } from '@liner/shared';
+import type { RunePlaylistDetail, RunePlaylistSummary } from './lib/playlists';
 import { mockCover } from './mock/covers';
 import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from './lib/types';
 
@@ -22,7 +23,7 @@ export class ApiError extends Error {
   }
 }
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch('/api' + path, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
@@ -102,11 +103,11 @@ export const api = {
       return { connected: false };
     }
   },
-  async playlists(): Promise<PlaylistSummary[]> {
+  async playlists(): Promise<RunePlaylistSummary[]> {
     if (isMock) return (await mock()).mockApi.playlists();
     return http('/playlists');
   },
-  async playlist(id: string): Promise<PlaylistDetail> {
+  async playlist(id: string): Promise<RunePlaylistDetail> {
     if (isMock) return (await mock()).mockApi.playlist(id);
     return http(`/playlists/${encodeURIComponent(id)}`);
   },

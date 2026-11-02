@@ -1,7 +1,9 @@
 import { ArrowRight, Check, Monitor, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Smartphone, Speaker, Volume1, Volume2, VolumeX, Globe } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { formatDuration } from '../../lib/format';
 import { usePosition } from '../../hooks/usePosition';
+import type { ZoneInfo } from '../../lib/types';
+import { isMixedQueue } from '../../player/pc';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
 import { Popover } from '../Popover';
 import { detectIOS } from '../../lib/volume';
@@ -147,7 +149,6 @@ const kindIcon = { pc: Speaker, browser: Globe, spotify: Smartphone } as const;
 export function ZonePicker({ placement = 'top-end', compact = false }: { placement?: 'top-end' | 'bottom-end'; compact?: boolean }) {
   const zones = usePlayer((s) => s.zones);
   const zone = usePlayer((s) => s.zone);
-  const setZone = usePlayer((s) => s.setZone);
   const cur = zones.find((z) => z.id === zone);
   const Icon = kindIcon[cur?.kind ?? 'pc'] ?? Monitor;
   return (
@@ -161,21 +162,40 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
         </button>
       )}
     >
-      {(close) => (
-        <>
-          <div className="popover__title">Play on</div>
-          {zones.map((z) => {
-            const I = kindIcon[z.kind] ?? Monitor;
-            return (
-              <button key={z.id} className={`menu__item${z.id === zone ? ' is-current' : ''}`} onClick={() => { void setZone(z.id); close(); }}>
-                <I size={16} />
-                <span>{z.name}</span>
-                {z.id === zone && <Check size={16} className="menu__check" />}
-              </button>
-            );
-          })}
-        </>
-      )}
+      {(close) => <ZoneList close={close} />}
     </Popover>
+  );
+}
+
+/** What a zone can play, as a one-line hint under its name. */
+export function zoneHint(z: ZoneInfo, mixed: boolean): string | null {
+  if (z.kind !== 'pc') return null;
+  if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)`;
+  return 'Local files · open the Spotify app on the PC for Spotify';
+}
+
+function ZoneList({ close }: { close(): void }) {
+  const zones = usePlayer((s) => s.zones);
+  const zone = usePlayer((s) => s.zone);
+  const setZone = usePlayer((s) => s.setZone);
+  const refresh = usePlayer((s) => s.refreshZones);
+  const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
+  // the Spotify app on the PC (and phones) come and go: look again whenever the list is opened
+  useEffect(() => { void refresh(); }, [refresh]);
+  return (
+    <>
+      <div className="popover__title">Play on</div>
+      {zones.map((z) => {
+        const I = kindIcon[z.kind] ?? Monitor;
+        const hint = zoneHint(z, mixed && z.id === zone);
+        return (
+          <button key={z.id} className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`} onClick={() => { void setZone(z.id); close(); }}>
+            <I size={16} />
+            <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
+            {z.id === zone && <Check size={16} className="menu__check" />}
+          </button>
+        );
+      })}
+    </>
   );
 }

@@ -2,7 +2,7 @@ import type { Track } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
 import { sdkSupportedFor } from '../lib/device';
 import type { PlayItem, ZoneInfo } from '../lib/types';
-import { playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, zoneCanPlay } from './routing';
+import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from './routing';
 
 const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotify' ? 'sp:alb1' : 'la:a'): PlayItem => ({
   track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
@@ -90,5 +90,28 @@ describe('sdkSupportedFor', () => {
     expect(sdkSupportedFor({ ...desktop, ua: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148' })).toBe(false);
     expect(sdkSupportedFor({ ...desktop, touchPoints: 5 })).toBe(false);
     expect(sdkSupportedFor({ ...desktop, ua: 'Mozilla/5.0 (Linux; Android 14) Chrome/120 Mobile Safari/537.36' })).toBe(false);
+  });
+});
+
+describe('pc zone with the PC’s Spotify app', () => {
+  const PC: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'abc123', spotifyDeviceName: 'HORSE' };
+  it('plays Spotify only when the app is there', () => {
+    expect(zoneCanPlay(PC, 'spotify', NO_SDK)).toBe(true);
+    expect(zoneCanPlay(PC, 'local', NO_SDK)).toBe(true);
+    expect(zoneCanPlay({ ...PC, spotifyDeviceId: undefined }, 'spotify', SDK)).toBe(false);
+    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(false);
+  });
+  it('keeps a mixed list intact on the hybrid pc zone', () => {
+    const r = routeItems(PC, [t('l:1', 'local'), t('sp:1', 'spotify')], 1, NO_SDK);
+    expect(r.ok && r.dropped).toBe(0);
+  });
+  it('lists the pc zone as a Spotify target and hides its duplicate Connect device', () => {
+    const zones: ZoneInfo[] = [PC, { id: 'spotify:abc123', name: 'HORSE', kind: 'spotify' }, { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' }];
+    expect(withoutPcDevice(zones).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
+    expect(playableZones(withoutPcDevice(zones), 'spotify', NO_SDK).map((o) => o.zone.id)).toEqual(['spotify:phone', 'pc']);
+  });
+  it('gives an actionable message when the app is missing', () => {
+    expect(cantPlayMessage({ kind: 'pc', name: 'Linux PC speakers' }, 'spotify')).toBe('Open the Spotify app on the PC to play Spotify through the Linux speakers');
+    expect(cantPlayMessage({ kind: 'spotify', name: 'iPhone' }, 'local')).toContain('iPhone');
   });
 });
