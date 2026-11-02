@@ -9,7 +9,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AlbumDetails, CriticQuote, CriticScore } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
-import { MbClient, RateLimiter } from '../match/mb.js';
+import { MbClient, RateLimiter, sharedMbClient } from '../match/mb.js';
 import { CachedHttp, type HttpDeps } from './http.js';
 import { fetchWikipedia } from './wikipedia.js';
 import { fetchAoty } from './albumoftheyear.js';
@@ -119,17 +119,22 @@ export function createMeta(db: Db, cfg: Config, deps: MetaDeps = {}): MetaServic
   const geniusToken = (cfg as Config & { geniusToken?: string }).geniusToken;
   // Meta only needs MusicBrainz for release-group -> Wikipedia links. Sharing
   // the matcher's RateLimiter keeps the combined request rate at 1/s.
-  const mb =
-    deps.mbClient ??
-    new MbClient({
-      userAgent: cfg.userAgent,
-      db,
-      fetch: deps.fetch,
-      sleep: deps.sleep,
-      now: deps.now,
-      rateLimitMs: deps.mbRateLimitMs ?? 1000,
-      limiter: deps.mbLimiter,
-    });
+  const mbOpts = {
+    userAgent: cfg.userAgent,
+    db,
+    fetch: deps.fetch,
+    sleep: deps.sleep,
+    now: deps.now,
+    rateLimitMs: deps.mbRateLimitMs ?? 1000,
+    limiter: deps.mbLimiter,
+  };
+  const injectedMb =
+    deps.fetch != null ||
+    deps.sleep != null ||
+    deps.now != null ||
+    deps.mbLimiter != null ||
+    deps.mbRateLimitMs != null;
+  const mb = deps.mbClient ?? (injectedMb ? new MbClient(mbOpts) : sharedMbClient(db, mbOpts));
 
   const albumStmt = db.prepare(
     `SELECT a.id, a.title, a.year, a.release_date, a.source, a.mb_release_id,
@@ -265,3 +270,13 @@ export function registerMetaRoutes(app: FastifyInstance, meta: MetaService): voi
     return details;
   });
 }
+
+// ---------- Artist metadata (worker H) ----------
+export { createArtistMeta, registerArtistMetaRoutes, ensureArtistMetaSchema } from './artist.js';
+export type {
+  ArtistImageCredit,
+  ArtistInfo,
+  ArtistMeta,
+  ArtistMetaDeps,
+  CreateArtistMeta,
+} from './artist.js';

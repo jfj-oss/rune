@@ -1,0 +1,5 @@
+{
+ "url": "https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=Xzzyq+Fnord+Trio+band+musician&gsrlimit=10&prop=categories%7Cextracts%7Cpageprops&exintro=1&explaintext=1&cllimit=50&redirects=1&format=json",
+ "status": 200,
+ "body": "{\"batchcomplete\":\"\"}"
+}

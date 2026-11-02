@@ -1,0 +1,5 @@
+{
+ "url": "https://en.wikipedia.org/w/api.php?action=query&titles=Xzzyq+Fnord+Trio+%28band%29%7CXzzyq+Fnord+Trio+%28musician%29%7CXzzyq+Fnord+Trio&redirects=1&prop=categories%7Cextracts%7Cpageprops&exintro=1&explaintext=1&cllimit=50&format=json",
+ "status": 200,
+ "body": "{\"batchcomplete\":\"\",\"query\":{\"pages\":{\"-1\":{\"ns\":0,\"title\":\"Xzzyq Fnord Trio (band)\",\"missing\":\"\"},\"-2\":{\"ns\":0,\"title\":\"Xzzyq Fnord Trio (musician)\",\"missing\":\"\"},\"-3\":{\"ns\":0,\"title\":\"Xzzyq Fnord Trio\",\"missing\":\"\"}}}}"
+}

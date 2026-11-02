@@ -465,6 +465,24 @@ export class MbClient {
   }
 }
 
+// ---------- sharing ----------
+
+const sharedClients = new WeakMap<object, MbClient>();
+
+/**
+ * One MusicBrainz client per database (and therefore one 1 req/s limiter and
+ * one HTTP cache). The matcher, album meta and artist meta all use this in
+ * production, so their combined request rate stays within MusicBrainz's limit.
+ * Tests that inject a fake `fetch` build their own client instead.
+ */
+export function sharedMbClient(db: Db, opts: MbClientOptions): MbClient {
+  const existing = sharedClients.get(db);
+  if (existing) return existing;
+  const client = new MbClient(opts);
+  sharedClients.set(db, client);
+  return client;
+}
+
 // ---------- helpers ----------
 
 /** Escape Lucene special characters inside a quoted phrase. */
