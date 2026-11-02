@@ -178,6 +178,55 @@ describe('syncPlaylists', () => {
     });
   });
 
+  it('probes Liked Songs and skips the full pass while unchanged and fresh', async () => {
+    const db = freshDb();
+    let clock = Date.parse('2024-06-01T00:00:00Z');
+    const now = () => clock;
+    let probeTotal = 1;
+    let probeItems = [{ added_at: '2024-05-01T00:00:00Z', track: sampleTrack('t1') }];
+    let all = probeItems;
+    const counts = { probe: 0, full: 0 };
+    const source = {
+      allPlaylists: async () => [],
+      allPlaylistTracks: async () => [],
+      savedTracks: async () => {
+        counts.probe++;
+        return paging(probeItems, { total: probeTotal });
+      },
+      allSavedTracks: async () => {
+        counts.full++;
+        return all;
+      },
+    };
+    const changes = () => (db.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
+
+    const first = await syncPlaylists(source, db, { now });
+    expect(first.liked).toBe(1);
+    expect(counts).toEqual({ probe: 1, full: 1 });
+
+    // Unchanged + under 24 h: exactly one request (the probe) and no DB writes at all.
+    const beforeWrites = changes();
+    const second = await syncPlaylists(source, db, { now });
+    expect(counts).toEqual({ probe: 2, full: 1 });
+    expect(second).toEqual({ playlists: 0, tracks: 0, liked: 0, removed: 0 });
+    expect(changes()).toBe(beforeWrites);
+    expect(count(db, 'playlist_tracks', 'playlist_id = ?', 'pl:sp:liked')).toBe(1);
+
+    // Total / newest added_at changed: full pass as before.
+    probeTotal = 2;
+    probeItems = [{ added_at: '2024-06-01T00:00:00Z', track: sampleTrack('t2') }];
+    all = [...probeItems, { added_at: '2024-05-01T00:00:00Z', track: sampleTrack('t1') }];
+    const third = await syncPlaylists(source, db, { now });
+    expect(counts).toEqual({ probe: 3, full: 2 });
+    expect(third.liked).toBe(2);
+    expect(getPlaylist(db, 'pl:sp:liked')?.tracks.map((t) => t.id)).toEqual(['sp:t2', 'sp:t1']);
+
+    // Unchanged but the last full pass is over 24 h old: full pass again.
+    clock += 24 * 60 * 60_000 + 1;
+    await syncPlaylists(source, db, { now });
+    expect(counts).toEqual({ probe: 4, full: 3 });
+  });
+
   it('stores Liked Songs as a virtual playlist and removes playlists Spotify no longer returns', async () => {
     const db = freshDb();
     const source = {

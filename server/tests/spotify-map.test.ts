@@ -266,6 +266,39 @@ describe('syncSavedAlbums', () => {
     expect(count(db, 'tracks')).toBe(2);
   });
 
+  it('keeps an unchanged album’s track rows instead of deleting and re-inserting them', async () => {
+    const db = freshDb();
+    const source = {
+      allSavedAlbums: async () => [{ added_at: '2024-01-01T00:00:00Z', album: sampleAlbum() }],
+      allAlbumTracks: async () => [],
+    };
+    await syncSavedAlbums(source, db);
+    expect(count(db, 'tracks')).toBe(2);
+
+    db.exec('CREATE TABLE __track_writes (kind TEXT)');
+    db.exec("CREATE TRIGGER __trk_ins AFTER INSERT ON tracks BEGIN INSERT INTO __track_writes VALUES ('insert'); END");
+    db.exec("CREATE TRIGGER __trk_del AFTER DELETE ON tracks BEGIN INSERT INTO __track_writes VALUES ('delete'); END");
+
+    const unchanged = await syncSavedAlbums(source, db);
+    expect(unchanged).toEqual({ albums: 1, tracks: 2, artists: 1, removed: 0 });
+    expect(db.prepare('SELECT kind FROM __track_writes').all()).toEqual([]);
+
+    // Same track ids but a different added_at is a change: the list is replaced wholesale.
+    const changed = await syncSavedAlbums(
+      {
+        allSavedAlbums: async () => [{ added_at: '2025-01-01T00:00:00Z', album: sampleAlbum() }],
+        allAlbumTracks: async () => [],
+      },
+      db,
+    );
+    expect(changed.albums).toBe(1);
+    const kinds = (db.prepare('SELECT kind FROM __track_writes').all() as { kind: string }[]).map(
+      (r) => r.kind,
+    );
+    expect(kinds.filter((k) => k === 'delete')).toHaveLength(2);
+    expect(kinds.filter((k) => k === 'insert')).toHaveLength(2);
+  });
+
   it('merges a synced Spotify album onto an existing local artist', async () => {
     const db = freshDb();
     const localId = ids.artistByName('The Beatles');

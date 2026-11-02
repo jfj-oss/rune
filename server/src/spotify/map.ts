@@ -298,6 +298,13 @@ export async function syncSavedAlbums(
        ON CONFLICT(track_id, artist_id) DO UPDATE SET position = excluded.position`,
     );
     const oldTracks = db.prepare('SELECT id FROM tracks WHERE album_id = ?');
+    const storedAlbum = db.prepare('SELECT added_at FROM albums WHERE id = ?');
+    const storedTrackIds = db.prepare(
+      'SELECT id FROM tracks WHERE album_id = ? ORDER BY disc, number, id',
+    );
+    const storedTrackArtists = db.prepare(
+      'SELECT DISTINCT artist_id FROM track_artists WHERE track_id IN (SELECT id FROM tracks WHERE album_id = ?)',
+    );
 
     for (const { album, tracks, addedAt } of prepared) {
       const albumId = spotifyAlbumId(album.id);
@@ -321,6 +328,26 @@ export async function syncSavedAlbums(
         album.id,
         addedAt,
       );
+
+      const expectedIds = tracks.filter((t) => !!t.id).map((t) => spotifyTrackId(t.id!));
+      const stored = storedAlbum.get(albumId) as { added_at: number } | undefined;
+      const storedIds = (storedTrackIds.all(albumId) as { id: string }[]).map((r) => r.id);
+      // Unchanged (same tracks in the same order, same count, same added_at): keep the rows.
+      const unchanged =
+        !!stored &&
+        stored.added_at === addedAt &&
+        storedIds.length === expectedIds.length &&
+        storedIds.every((id, index) => id === expectedIds[index]);
+      if (unchanged) {
+        // Their artists are already stored; re-add them so FTS refresh and counts stay right.
+        for (const row of storedTrackArtists.all(albumId) as { artist_id: string }[]) {
+          artistIds.add(row.artist_id);
+        }
+        result.tracks += expectedIds.length;
+        result.albums++;
+        ftsReplace(db, 'album', albumId, `${album.name} ${albumArtistName}`);
+        continue;
+      }
 
       // Replace the track list wholesale so re-syncs drop removed tracks.
       for (const old of oldTracks.all(albumId) as { id: string }[]) {

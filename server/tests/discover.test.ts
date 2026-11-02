@@ -17,6 +17,7 @@ import { LastFm } from '../src/discover/lastfm.js';
 import { ListenBrainz } from '../src/discover/listenbrainz.js';
 import { artistMatches, titleMatches } from '../src/discover/match.js';
 import { DiscoverMb, pickArtist, pickRecording } from '../src/discover/mb.js';
+import { SpotifyGateway } from '../src/discover/gateway.js';
 import { DiscoverCache, ensureDiscoverSchema } from '../src/discover/schema.js';
 import { createDiscover, type DiscoverSpotify } from '../src/discover/service.js';
 import { fakeFetch, jsonResponse, paging } from './spotify-helpers.js';
@@ -159,14 +160,11 @@ function fakeSpotify(): FakeSpotify {
       return jsonResponse(200, { tracks: topTracks(name) });
     }
 
-    if (url.pathname === '/v1/tracks') {
+    const single = /^\/v1\/tracks\/([^/]+)$/.exec(url.pathname);
+    if (single) {
       return jsonResponse(200, {
-        tracks: [
-          {
-            ...spotifyTrack('seed-spotify', 'Creep', 'Radiohead'),
-            external_ids: { isrc: 'USUG11904206' },
-          },
-        ],
+        ...spotifyTrack(decodeURIComponent(single[1]!), 'Creep', 'Radiohead'),
+        external_ids: { isrc: 'USUG11904206' },
       });
     }
     return jsonResponse(404, { error: 'not found' });
@@ -327,6 +325,53 @@ describe('DiscoverBudget', () => {
       }).value,
     ).toBe(String(until));
     await expect(budget.take()).rejects.toMatchObject({ until });
+  });
+});
+
+describe('gateway trackInfo', () => {
+  it('uses GET /tracks/{id} and caches hits and refusals', async () => {
+    const db = openDb(':memory:');
+    const fl = fakeFetch((url) => {
+      if (url.pathname === '/v1/tracks/known') {
+        return jsonResponse(200, {
+          ...spotifyTrack('known', 'Known Song', 'Artist'),
+          external_ids: { isrc: 'ISRC-1' },
+        });
+      }
+      if (url.pathname === '/v1/tracks/refused') return jsonResponse(403, { error: 'forbidden' });
+      if (url.pathname === '/v1/tracks/missing') return jsonResponse(404, { error: 'not found' });
+      return jsonResponse(500, { error: 'unexpected' });
+    });
+    const api = new SpotifyApi({
+      fetch: fl.fetch,
+      getToken: async () => 'tok',
+      baseUrl: 'http://api.test/v1',
+      sleep: async () => undefined,
+      maxRateLimitRetries: 0,
+    });
+    const budget = new SpotifyDiscoverBudget(db, {
+      minIntervalMs: 0,
+      hourlyLimit: 1000,
+      now: () => NOW,
+      sleep: async () => undefined,
+    });
+    const gateway = new SpotifyGateway(api, budget, new DiscoverCache(db, () => NOW));
+
+    expect((await gateway.trackInfo('known'))?.external_ids?.isrc).toBe('ISRC-1');
+    expect(await gateway.trackInfo('refused')).toBeUndefined();
+    expect(await gateway.trackInfo('missing')).toBeUndefined();
+
+    // Every one of them, including the 403/404 refusals, is cached: no repeat requests.
+    expect((await gateway.trackInfo('known'))?.id).toBe('known');
+    expect(await gateway.trackInfo('refused')).toBeUndefined();
+    expect(await gateway.trackInfo('missing')).toBeUndefined();
+
+    expect(fl.calls.map((c) => c.url.pathname)).toEqual([
+      '/v1/tracks/known',
+      '/v1/tracks/refused',
+      '/v1/tracks/missing',
+    ]);
+    expect(fl.calls.some((c) => c.url.pathname === '/v1/tracks')).toBe(false);
   });
 });
 
