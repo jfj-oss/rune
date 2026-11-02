@@ -1,3 +1,4 @@
+import { isPlaceholderArtist } from './apply.js';
 // Builds album credits from MusicBrainz release/recording/work relationships.
 import type { MbArtist, MbRelation, MbRelease, MbTrack } from './mb.js';
 import { titleCase } from './scoring.js';
@@ -103,12 +104,12 @@ export function collectCredits(
   };
 
   const processRelation = (relation: MbRelation, trackId: string | null): void => {
-    if (relation.artist) {
+    if (relation.artist && !isPlaceholderArtist(relation.artist.id, relation.artist.name)) {
       for (const role of rolesForRelation(relation)) add(relation.artist, role, trackId);
     }
     // Composer / lyricist live on the work linked by a "performance" relation.
     for (const workRelation of relation.work?.relations ?? []) {
-      if (!workRelation.artist) continue;
+      if (!workRelation.artist || isPlaceholderArtist(workRelation.artist.id, workRelation.artist.name)) continue;
       const role = SIMPLE_ROLES[workRelation.type.toLowerCase()];
       if (role === 'Composer' || role === 'Lyricist') add(workRelation.artist, role, trackId);
     }

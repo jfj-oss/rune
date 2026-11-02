@@ -304,6 +304,18 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           broadcast({ type: 'scan', progress: last });
           if (done % 10 === 0 || done === total) broadcast({ type: 'library-changed' });
         });
+        // One-off: the improved matcher retries albums the old one missed or matched weakly.
+        if (getState('match.rematchVersion') !== '2') {
+          const r = await matcher.rematchWeak(0.8).catch((e) => {
+            app.log.warn({ err: e }, 'rematch failed');
+            return null;
+          });
+          if (r) {
+            setState('match.rematchVersion', '2');
+            app.log.warn({ rematch: r }, 'rematch done');
+            broadcast({ type: 'library-changed' });
+          }
+        }
         lastScanAt = Date.now();
         if (!loudnessStarted) {
           loudnessStarted = true;

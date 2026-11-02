@@ -150,11 +150,25 @@ function pickLabel(release: MbRelease): string | null {
   return unique.length === 0 ? null : unique.join(', ');
 }
 
+/** MusicBrainz special-purpose artists ("[unknown]", "[anonymous]", "[no artist]", …) are
+ *  placeholders, not people — never show them as track artists or credits. */
+export const MB_PLACEHOLDER_ARTISTS = new Set([
+  '125ec42a-7229-4250-afc5-e057484327fe', // [unknown]
+  'f731ccc4-e22a-43af-a747-64213329e088', // [anonymous]
+  '33cf029c-63b0-41a0-9855-be2a3665fb3b', // [no artist]
+  '89ad4ac3-39f7-470e-963a-56509c546377', // Various Artists is handled elsewhere; kept for credits
+]);
+export function isPlaceholderArtist(id?: string, name?: string): boolean {
+  return (!!id && MB_PLACEHOLDER_ARTISTS.has(id) && id !== '89ad4ac3-39f7-470e-963a-56509c546377') || (!!name && /^\[(unknown|anonymous|no artist|traditional)\]$/i.test(name.trim()));
+}
+
 function trackArtistCredit(track: MbTrack, release: MbRelease): MbArtistCredit[] {
-  if (track['artist-credit'] && track['artist-credit'].length > 0) return track['artist-credit'];
-  const recordingCredit = track.recording?.['artist-credit'];
-  if (recordingCredit && recordingCredit.length > 0) return recordingCredit;
-  return release['artist-credit'] ?? [];
+  const real = (c: MbArtistCredit[] | undefined) => (c ?? []).filter((x) => !isPlaceholderArtist(x.artist?.id, x.artist?.name ?? x.name));
+  const own = real(track['artist-credit']);
+  if (own.length > 0) return own;
+  const recordingCredit = real(track.recording?.['artist-credit']);
+  if (recordingCredit.length > 0) return recordingCredit;
+  return real(release['artist-credit']);
 }
 
 function replaceTrackArtists(db: Db, trackId: string, credit: MbArtistCredit[]): void {
