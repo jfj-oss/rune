@@ -1,0 +1,51 @@
+{
+  "id": "8ed2e0b3-aa4c-4e13-bec3-dc7393ed4d6b",
+  "name": "Thom Yorke",
+  "sort-name": "Yorke, Thom",
+  "type": "Person",
+  "country": "GB",
+  "relations": [
+    {
+      "type": "member of band",
+      "direction": "forward",
+      "begin": "1985",
+      "end": "2025",
+      "ended": true,
+      "attributes": ["guitar", "lead vocals"],
+      "artist": {
+        "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+        "name": "Radiohead",
+        "sort-name": "Radiohead"
+      }
+    },
+    {
+      "type": "member of band",
+      "direction": "forward",
+      "begin": "2009",
+      "attributes": [],
+      "artist": {
+        "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "name": "Atoms for Peace",
+        "sort-name": "Atoms for Peace"
+      }
+    },
+    {
+      "type": "member of band",
+      "direction": "forward",
+      "attributes": ["2004", "2013", "keyboard"],
+      "artist": {
+        "id": "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        "name": "The Eraser Band",
+        "sort-name": "Eraser Band, The"
+      }
+    },
+    {
+      "type": "founder",
+      "direction": "forward",
+      "artist": {
+        "id": "cccccccc-dddd-eeee-ffff-000000000000",
+        "name": "Not A Band"
+      }
+    }
+  ]
+}

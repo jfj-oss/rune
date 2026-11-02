@@ -1,0 +1,31 @@
+{
+  "id": "a74b1b7f-71a5-4011-9441-d0b5e4122711",
+  "name": "Radiohead",
+  "sort-name": "Radiohead",
+  "type": "Group",
+  "country": "GB",
+  "relations": [
+    {
+      "type": "member of band",
+      "direction": "backward",
+      "begin": "1985",
+      "attributes": ["guitar", "lead vocals"],
+      "artist": {
+        "id": "8ed2e0b3-aa4c-4e13-bec3-dc7393ed4d6b",
+        "name": "Thom Yorke",
+        "sort-name": "Yorke, Thom"
+      }
+    },
+    {
+      "type": "member of band",
+      "direction": "backward",
+      "begin": "1985",
+      "attributes": ["bass"],
+      "artist": {
+        "id": "d1f8be4e-1e2c-4e1a-9b4a-000000000001",
+        "name": "Colin Greenwood",
+        "sort-name": "Greenwood, Colin"
+      }
+    }
+  ]
+}
