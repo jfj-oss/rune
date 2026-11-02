@@ -120,7 +120,13 @@ export class SpotifySdkEngine implements Engine {
         for (const x of this.readyWaiters.splice(0)) x.resolve(device_id);
       }) as never);
       player.addListener('not_ready', (() => this.setStatus({ phase: 'loading', deviceId: null })) as never);
-      player.addListener('initialization_error', (({ message }: { message: string }) => fail(`This browser cannot play Spotify (${message})`)) as never);
+      player.addListener('initialization_error', (({ message }: { message: string }) => {
+        // Brave ships with Widevine (the DRM Spotify needs) switched off.
+        const brave = 'brave' in navigator;
+        fail(brave
+          ? 'Brave has Widevine switched off — turn on "Widevine" in brave://settings/extensions, restart Brave, then reload rune'
+          : `This browser cannot play Spotify (${message}) — it needs Widevine DRM enabled`);
+      }) as never);
       player.addListener('authentication_error', (({ message }: { message: string }) => fail(`Spotify sign-in problem (${message})`)) as never);
       player.addListener('account_error', (() => fail('Spotify Premium is required to play in the browser')) as never);
       player.addListener('playback_error', (({ message }: { message: string }) => { if (this.cur) this.errorFn(`Spotify could not play this (${message})`); }) as never);
