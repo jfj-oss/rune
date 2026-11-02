@@ -427,10 +427,15 @@ export interface SpotifyZoneInfo {
 export class SpotifyZones {
   private readonly zones = new Map<string, SpotifyConnectZone>();
 
+  private readonly api: SpotifyZoneApi;
+
   constructor(
-    private readonly api: SpotifyZoneApi,
+    api: SpotifyZoneApi,
     private readonly opts: ConnectZoneOptions = {},
-  ) {}
+  ) {
+    // /me/player describes the whole account, so every zone polling it can share one answer.
+    this.api = sharedPlaybackReads(api, opts.now ?? Date.now);
+  }
 
   /** Devices for GET /zones; shapes merge cleanly with the PC/browser zones. */
   async listZones(): Promise<SpotifyZoneInfo[]> {
@@ -466,4 +471,48 @@ export class SpotifyZones {
 
 export function createSpotifyZones(api: SpotifyZoneApi, opts: ConnectZoneOptions = {}): SpotifyZones {
   return new SpotifyZones(api, opts);
+}
+
+/** How long one /me/player (or /me/player/queue) answer is reused by all zones. */
+const SHARED_READ_MS = 800;
+
+/**
+ * Wrap the API so concurrent zone polls share /me/player and /me/player/queue reads
+ * (N watched devices cost about one poll), and any command drops the cached answer.
+ */
+export function sharedPlaybackReads(api: SpotifyZoneApi, now: () => number = Date.now): SpotifyZoneApi {
+  type Slot<T> = { at: number; value: Promise<T> } | null;
+  let playback: Slot<SpotifyPlaybackState | null> = null;
+  let queue: Slot<SpotifyQueue> = null;
+  const read = <T>(slot: Slot<T>, set: (s: Slot<T>) => void, load: () => Promise<T>): Promise<T> => {
+    if (slot && now() - slot.at < SHARED_READ_MS) return slot.value;
+    const value = load();
+    const mine = { at: now(), value };
+    set(mine);
+    value.catch(() => undefined);
+    return value;
+  };
+  const write = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } finally {
+      playback = null;
+      queue = null;
+    }
+  };
+  return {
+    devices: () => api.devices(),
+    tracks: (ids) => api.tracks(ids),
+    currentPlayback: () => read(playback, (s) => (playback = s), () => api.currentPlayback()),
+    queue: () => read(queue, (s) => (queue = s), () => api.queue()),
+    play: (body, deviceId) => write(() => api.play(body, deviceId)),
+    pause: (deviceId) => write(() => api.pause(deviceId)),
+    next: (deviceId) => write(() => api.next(deviceId)),
+    previous: (deviceId) => write(() => api.previous(deviceId)),
+    seek: (ms, deviceId) => write(() => api.seek(ms, deviceId)),
+    setVolume: (v, deviceId) => write(() => api.setVolume(v, deviceId)),
+    setShuffle: (on, deviceId) => write(() => api.setShuffle(on, deviceId)),
+    setRepeat: (mode, deviceId) => write(() => api.setRepeat(mode, deviceId)),
+    enqueue: (uri, deviceId) => write(() => api.enqueue(uri, deviceId)),
+  };
 }

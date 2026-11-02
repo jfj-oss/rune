@@ -12,7 +12,15 @@ class Socket {
   private listeners = new Set<Listener>();
   private retry = 0;
   private closed = false;
+  private everOpen = false;
+  private reconnectFns = new Set<() => void>();
   connected = false;
+
+  /** Called after the socket comes back (server restart, network blip): events were missed meanwhile. */
+  onReconnect(fn: () => void) {
+    this.reconnectFns.add(fn);
+    return () => { this.reconnectFns.delete(fn); };
+  }
 
   on(fn: Listener) {
     this.listeners.add(fn);
@@ -24,7 +32,12 @@ class Socket {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
     this.ws = ws;
-    ws.onopen = () => { this.retry = 0; this.connected = true; };
+    ws.onopen = () => {
+      this.retry = 0;
+      this.connected = true;
+      if (this.everOpen) for (const f of this.reconnectFns) f();
+      this.everOpen = true;
+    };
     ws.onmessage = (m) => {
       try {
         const ev = JSON.parse(String(m.data)) as ServerEvent;
@@ -50,12 +63,15 @@ export class RemoteBackend implements Backend {
   state: PlayerState;
   private subs = new Set<(s: PlayerState) => void>();
   private off: () => void;
+  private offReconnect: () => void;
 
   constructor(readonly zone: string) {
     this.state = emptyState(zone);
     this.off = socket.on((e) => {
       if (e.type === 'player' && e.state.zone === this.zone) this.apply(e.state);
     });
+    // Re-read the state (this also makes the server watch the zone again after a restart).
+    this.offReconnect = socket.onReconnect(() => void this.refresh());
     void this.refresh();
   }
   subscribe(fn: (s: PlayerState) => void) {
@@ -69,7 +85,7 @@ export class RemoteBackend implements Backend {
   async refresh() {
     try { this.apply(await api.playerState(this.zone)); } catch { /* server offline; keep last */ }
   }
-  dispose() { this.off(); this.subs.clear(); }
+  dispose() { this.off(); this.offReconnect(); this.subs.clear(); }
 
   async send(cmd: ExtCommand, _items?: PlayItem[]): Promise<void> {
     const s = this.state;

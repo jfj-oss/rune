@@ -908,6 +908,8 @@ export function createArtistMeta(db: Db, cfg: Config, deps: ArtistMetaDeps = {})
 
 // ---------- routes ----------
 
+const IMAGE_WAIT_MS = 6000;
+
 function publicArtistInfo(artistId: string, info: ArtistInfo): Record<string, unknown> {
   return {
     ...(info.bio ? { bio: info.bio } : {}),
@@ -917,7 +919,15 @@ function publicArtistInfo(artistId: string, info: ArtistInfo): Record<string, un
 }
 
 /** Wire artist routes. The API prefix (`/api`) is added by the app. */
-export function registerArtistMetaRoutes(app: FastifyInstance, artistMeta: ArtistMeta): void {
+export function registerArtistMetaRoutes(
+  app: FastifyInstance,
+  artistMeta: ArtistMeta,
+  opts: {
+    externalImage?: (artistId: string) => Promise<string | null> | null;
+    /** Picture to use when Wikimedia has none (e.g. the same-named Spotify artist). */
+    fallbackImage?: (artistId: string) => string | null;
+  } = {},
+): void {
   app.get('/artists/:id/info', async (request, reply) => {
     const { id } = request.params as { id?: string };
     if (!id) return reply.code(400).send({ error: 'missing artist id' });
@@ -930,8 +940,34 @@ export function registerArtistMetaRoutes(app: FastifyInstance, artistMeta: Artis
   app.get('/artist-image/:id', async (request, reply) => {
     const { id } = request.params as { id?: string };
     if (!id) return reply.code(400).send({ error: 'missing artist id' });
-    const info = await artistMeta.getArtistInfo(id);
-    if (!info?.imagePath || !existsSync(info.imagePath)) return reply.code(404).send({ error: 'no image' });
+    // Spotify artists: Spotify's own picture (a Wikipedia name search could pick the wrong person).
+    const external = opts.externalImage?.(id);
+    if (external) {
+      const url = await external.catch(() => null);
+      if (url) {
+        reply.header('cache-control', 'public, max-age=86400');
+        return reply.redirect(url);
+      }
+      return reply.code(404).send({ error: 'no image' });
+    }
+    // Don't hold the page for a first-time lookup stuck behind the MusicBrainz queue: give up
+    // after a few seconds (the lookup keeps going and is cached) and let the browser retry later.
+    const info = await Promise.race([
+      artistMeta.getArtistInfo(id),
+      new Promise<'slow'>((r) => setTimeout(() => r('slow'), IMAGE_WAIT_MS)),
+    ]);
+    if (info === 'slow') {
+      reply.header('cache-control', 'no-store');
+      return reply.code(404).send({ error: 'image not fetched yet' });
+    }
+    if (!info?.imagePath || !existsSync(info.imagePath)) {
+      const fallback = opts.fallbackImage?.(id);
+      if (fallback) {
+        reply.header('cache-control', 'public, max-age=86400');
+        return reply.redirect(fallback);
+      }
+      return reply.code(404).send({ error: 'no image' });
+    }
     const bytes = readFileSync(info.imagePath);
     reply.header('cache-control', 'public, max-age=86400');
     reply.type(sniffImageMime(bytes));

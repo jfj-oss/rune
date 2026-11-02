@@ -14,6 +14,7 @@ import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes, type PcZone } from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
+import { normalizeName } from '../db/index.js';
 import { spotifyAlbumIsFull } from '../spotify/library.js';
 import { createLinking, registerLinkRoutes, ensureLinkSchema } from '../spotify/linking.js';
 import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
@@ -237,26 +238,70 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (id.startsWith('spotify:') && spotify) {
       // After a restart the Connect zones are unknown until the device list is read.
       if (!spotify.zones.get(id)) await spotify.zones.listZones().catch(() => undefined);
-      const z = spotify.zones.get(id);
-      if (z && !spotifyListeners.has(id)) {
-        spotifyListeners.set(
-          id,
-          z.onChange((state) => {
-            recordHistory(state);
-            broadcast({ type: 'player', state: sanitize(state) });
-          }),
-        );
-      }
-      return z;
+      return watchSpotifyZone(id);
     }
     return undefined;
   }
+
+  /** Keep polling a Connect zone and broadcasting its changes (track changes on their own,
+   *  e.g. the next song of a playlist, must reach every open rune page). */
+  function watchSpotifyZone(id: Zone): PlaybackZone | undefined {
+    const z = spotify?.zones.get(id);
+    if (z && !spotifyListeners.has(id)) {
+      spotifyListeners.set(
+        id,
+        z.onChange((state) => {
+          recordHistory(state);
+          broadcast({ type: 'player', state: sanitize(state) });
+        }),
+      );
+    }
+    return z;
+  }
+
+  /** After a (re)start nothing would watch the Spotify devices until a page asked: watch them all now. */
+  async function watchAllSpotifyZones(): Promise<void> {
+    if (!spotify) return;
+    try {
+      if (!(await spotify.auth.status()).connected) return;
+      for (const z of await spotify.zones.listZones()) watchSpotifyZone(z.id);
+    } catch (err) {
+      app.log.warn({ err }, 'watching spotify devices failed');
+    }
+  }
+  setTimeout(() => void watchAllSpotifyZones(), 2000).unref();
 
   // ---------- scan + match pipeline
   const scanner = createScanner(db, cfg);
   const matcher = createMatcher(db, cfg);
   const meta = createMeta(db, cfg);
   const artistMeta = createArtistMeta(db, cfg);
+  /** Local artists without a Wikimedia photo: the exact-name Spotify artist's picture (looked up once). */
+  const spotifyArtistPhoto = (() => {
+    db.exec('CREATE TABLE IF NOT EXISTS artist_spotify_photo (artist_id TEXT PRIMARY KEY, url TEXT, checked_at INTEGER NOT NULL)');
+    const get = db.prepare('SELECT url, checked_at FROM artist_spotify_photo WHERE artist_id = ?');
+    const put = db.prepare('INSERT OR REPLACE INTO artist_spotify_photo (artist_id, url, checked_at) VALUES (?, ?, ?)');
+    const nameOf = db.prepare('SELECT name FROM artists WHERE id = ?');
+    return {
+      get: (id: string): string | null => (get.get(id) as { url: string | null } | undefined)?.url ?? null,
+      async lookup(id: string): Promise<void> {
+        if (!spotify || get.get(id)) return;
+        const name = (nameOf.get(id) as { name: string } | undefined)?.name;
+        if (!name) return;
+        try {
+          if (!(await spotify.auth.status()).connected) return;
+          const res = await spotify.api.search(name, { types: ['artist'], limit: 5 });
+          const want = normalizeName(name);
+          const hit = (res.artists?.items ?? []).find((a) => normalizeName(a.name) === want);
+          const url = hit?.images?.length ? [...hit.images].sort((x, y) => (y.width ?? 0) - (x.width ?? 0))[0]!.url : null;
+          put.run(id, url, Date.now());
+          await new Promise((r) => setTimeout(r, 1500)); // gentle on Spotify's rate limit
+        } catch (err) {
+          app.log.warn({ err, id }, 'spotify artist photo lookup failed'); // not stored: retried next run
+        }
+      },
+    };
+  })();
   let detailsRunning = false;
   /** Prefetch album details in the background (one album at a time, after matching). */
   async function prefetchDetails(): Promise<void> {
@@ -269,6 +314,33 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
            WHERE d.album_id IS NULL AND a.source = 'local' ORDER BY a.mb_release_id IS NULL, a.added_at DESC`,
         )
         .all() as { id: string }[];
+      // Artist photos + bios first (the Artists grid shows them), one artist at a time; the
+      // MusicBrainz limiter paces it. Spotify artists use Spotify's own picture instead.
+      const artists = db
+        .prepare(
+          `SELECT DISTINCT a.artist_id AS id FROM albums a LEFT JOIN artist_info i ON i.artist_id = a.artist_id
+           WHERE a.in_library = 1 AND a.source = 'local' AND i.artist_id IS NULL`,
+        )
+        .all() as { id: string }[];
+      for (const { id } of artists) {
+        if (scanning) break;
+        const info = await artistMeta.getArtistInfo(id).catch((e) => {
+          app.log.warn({ err: e, id }, 'artist info failed');
+          return null;
+        });
+        if (info && !info.imagePath) await spotifyArtistPhoto.lookup(id);
+      }
+      // Artists looked up before the Spotify fallback existed.
+      const noPhoto = db
+        .prepare(
+          `SELECT DISTINCT a.artist_id AS id FROM albums a JOIN artist_info i ON i.artist_id = a.artist_id
+           WHERE a.in_library = 1 AND a.source = 'local' AND i.image_path IS NULL`,
+        )
+        .all() as { id: string }[];
+      for (const { id } of noPhoto) {
+        if (scanning) break;
+        await spotifyArtistPhoto.lookup(id);
+      }
       for (const { id } of pending) {
         if (scanning) break; // a rescan/match is running; resume afterwards
         await meta.getDetails(id).catch((e) => app.log.warn({ err: e, id }, 'details failed'));
@@ -517,7 +589,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
 
       registerMetaRoutes(r, meta);
-      registerArtistMetaRoutes(r, artistMeta);
+      registerArtistMetaRoutes(r, artistMeta, {
+        externalImage: (id) => (spotify && id.startsWith('ar:sp:') ? spotify.artistImage(id) : null),
+        fallbackImage: (id) => spotifyArtistPhoto.get(id),
+      });
       registerBrowseRoutes(r, db);
       registerSavedRoute(r, db);
       registerFrameRoutes(r);
@@ -678,6 +753,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         if (spotify && (await spotify.auth.status()).connected) {
           try {
             spotifyZones = await spotify.zones.listZones();
+            for (const z of spotifyZones) watchSpotifyZone(z.id);
             zones.push(...spotifyZones);
           } catch (e) {
             app.log.warn({ err: e }, 'spotify devices failed');

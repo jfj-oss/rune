@@ -55,6 +55,8 @@ export interface SpotifyModule {
   fetchAlbum(albumId: string): Promise<Album | undefined>;
   /** Spotify artist + discography for GET /api/artists/ar:sp:<id> (null for other ids). */
   artistPage(artistId: string): Promise<SpotifyArtistPage> | null;
+  /** Spotify's picture of an ar:sp: artist (null when none / not a Spotify artist). */
+  artistImage(artistId: string): Promise<string | null>;
   /** Save/unsave an album on Spotify and flip albums.in_library. */
   setAlbumSaved(albumId: string, saved: boolean): Promise<Album | undefined>;
   listPlaylists(): PlaylistSummary[];
@@ -97,6 +99,7 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     searchCatalog: (q) => catalog.search(q),
     fetchAlbum: (albumId) => fetchSpotifyAlbum(api, db, albumId, { now }),
     artistPage: (artistId) => artistPages.get(artistId),
+    artistImage: (artistId) => artistPages.image(artistId),
     setAlbumSaved: async (albumId, saved) => {
       if (saved && !getAlbum(db, albumId)) {
         await fetchSpotifyAlbum(api, db, albumId, { now });

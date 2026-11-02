@@ -11,6 +11,7 @@ import {
   createSpotifyZones,
   emptyPlayerState,
   mapPlaybackState,
+  sharedPlaybackReads,
   type SpotifyZoneApi,
 } from '../src/spotify/zones.js';
 import { mapTrack } from '../src/spotify/map.js';
@@ -283,5 +284,22 @@ describe('mapPlaybackState', () => {
     expect(state.queue.map((q) => q.track.id)).toEqual(['sp:t1', 'sp:t2']);
     expect(state.index).toBe(0);
     expect(state.status).toBe('playing');
+  });
+});
+
+describe('sharedPlaybackReads', () => {
+  it('shares /me/player between zones and drops the cache after a command', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    let t = 1000;
+    const shared = sharedPlaybackReads(api, () => t);
+    await Promise.all([shared.currentPlayback(), shared.currentPlayback(), shared.currentPlayback()]);
+    expect(api.currentPlaybackCalls).toBe(1);
+    await shared.pause('dev1');
+    await shared.currentPlayback();
+    expect(api.currentPlaybackCalls).toBe(2);
+    t += 5000;
+    await shared.currentPlayback();
+    expect(api.currentPlaybackCalls).toBe(3);
   });
 });

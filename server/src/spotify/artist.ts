@@ -39,10 +39,30 @@ export class SpotifyArtistPages {
     return value;
   }
 
+  private artists = new Map<string, { at: number; value: Promise<SpotifyArtist> }>();
+
+  /** One /artists/{id} call per artist per TTL, shared by the page and the avatar image. */
+  private artist(id: string): Promise<SpotifyArtist> {
+    const hit = this.artists.get(id);
+    if (hit && this.now() - hit.at < TTL_MS) return hit.value;
+    const value = this.api.artist(id);
+    this.artists.set(id, { at: this.now(), value });
+    value.catch(() => this.artists.delete(id));
+    if (this.artists.size > 2000) this.artists.delete(this.artists.keys().next().value as string);
+    return value;
+  }
+
+  /** Spotify's picture of the artist (largest), or null. */
+  async image(artistId: string): Promise<string | null> {
+    const id = spotifyArtistIdOf(artistId);
+    if (!id) return null;
+    return largestImage((await this.artist(id)).images) ?? null;
+  }
+
   private async load(id: string): Promise<SpotifyArtistPage> {
     // 10 per page: up to 30 albums + 10 singles/EPs = at most 5 calls, then cached.
     const [artist, albums, singles] = await Promise.all([
-      this.api.artist(id),
+      this.artist(id),
       this.api.allArtistAlbums(id, 'album', 3),
       this.api.allArtistAlbums(id, 'single', 1).catch(() => [] as SpotifyAlbum[]),
     ]);
