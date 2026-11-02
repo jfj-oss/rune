@@ -41,6 +41,14 @@ export class HybridEngine implements Engine {
     for (const t of upcoming) { if (this.engineFor(t) !== target) break; run.push(t); }
     target.load(track, startMs, autoplay, run);
   }
+  setUpcoming(upcoming: Track[]) {
+    if (!this.active) return;
+    // Look ahead only through the run of songs the active engine will play next.
+    const run: Track[] = [];
+    for (const t of upcoming) { if (this.engineFor(t) !== this.active) break; run.push(t); }
+    this.active.setUpcoming?.(run);
+  }
+
   play() { this.active?.play(); }
   pause() { this.active?.pause(); }
   seek(ms: number) { this.active?.seek(ms); }

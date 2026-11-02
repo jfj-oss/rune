@@ -797,10 +797,14 @@ class PcZoneImpl implements PcZone {
       this.emitChange();
       return;
     }
-    this.q = result.state;
+    const target = result.state.items[result.state.index];
     if (wasActive) {
+      // Already loaded ahead by gapless 'append-play': switch in place, no reload.
+      if (await this.switchToLoaded(target?.queueId, { next: true, paused: wasPaused })) return;
+      this.q = result.state;
       await this.startPlayback({ positionMs: 0, paused: wasPaused });
     } else {
+      this.q = result.state;
       this.positionMs = 0;
       this.emitChange();
     }
@@ -848,6 +852,8 @@ class PcZoneImpl implements PcZone {
     const wasPaused = this.status === 'paused';
     const wasActive =
       this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
+    const target = this.q.items[index];
+    if (wasActive && (await this.switchToLoaded(target?.queueId, { paused: wasPaused }))) return;
     this.q = queueJump(this.q, index);
     if (wasActive) {
       await this.startPlayback({ positionMs: 0, paused: wasPaused });
@@ -855,6 +861,39 @@ class PcZoneImpl implements PcZone {
       this.positionMs = 0;
       this.emitChange();
     }
+  }
+
+  /**
+   * If `queueId` is already in mpv's playlist (the current entry or one of the
+   * preloaded ones), make it current in place. A gapless 'append-play' already
+   * decoded the file, so stopping and reloading it would cause an audible gap.
+   * Returns false when the target is not loaded, so callers fall back to
+   * startPlayback. The queue index follows from mpv's playlist-pos event.
+   */
+  private async switchToLoaded(
+    queueId: string | undefined,
+    opts: { next?: boolean; paused?: boolean } = {},
+  ): Promise<boolean> {
+    const ipc = this.ipc;
+    if (!queueId || !ipc || this.rebuilding || this.closed) return false;
+    if (this.status !== 'playing' && this.status !== 'paused') return false;
+    if (this.currentMpvPos < 0) return false;
+    const pos = this.window.findIndex(
+      (entry, i) => i !== this.currentMpvPos && entry.queueId === queueId,
+    );
+    if (pos < 0) return false;
+    try {
+      if (opts.next && pos === this.currentMpvPos + 1) await ipc.command(['playlist-next']);
+      else await ipc.command(['set_property', 'playlist-pos', pos]);
+    } catch {
+      return false;
+    }
+    // A paused Next must stay silent even on mpv builds where playlist-next resumes.
+    if (opts.paused) {
+      this.props.pause = true;
+      await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
+    }
+    return true;
   }
 
   private async cmdRemove(queueId: string): Promise<void> {
