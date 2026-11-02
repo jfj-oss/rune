@@ -4,3 +4,5 @@ dist
 *.db-*
 .env
 data/
+refs/
+shots/
