@@ -109,3 +109,26 @@ an open icon set (Lucide).
 - All data via a typed client `web/src/api.ts` using types from `@liner/shared`. A mock mode (`?mock=1` or `VITE_MOCK=1`) serves rich fixture data (≥ 30 albums, one with full details: scores, 4 quotes, artist notes incl. per-track, 20 credits; one multi-disc; one low-confidence; a few Spotify) so the UI can be built before the server is done.
 - Live updates: websocket `/api/ws` `ServerEvent` → player state store.
 - Player store: Zustand. Routing: React Router. Server cache: TanStack Query.
+
+## v1.1 — Ambient background + liquid glass (user request 2026-11-01)
+
+### Ambient background (whole app)
+- The app background slowly cycles through three dark hues, crossfading continuously:
+  1. **Solarized blue** — base `#002b36` with a `#073642` lift (Solarized base03/base02)
+  2. **Indigo purple** (from the user's screenshot) — top `#290893`, mid `#1f0862`, low `#190c41`, fades to `#150f25`
+  3. **Dark green** — `#0B3A0B` (exact, user-specified), deepening to ~`#061f06`
+- Shape: a vertical gradient — the hue is saturated at the top of the viewport and sinks into near-black at the bottom (like the screenshot: bright band at top → `#150f25`-ish at the bottom). Optionally one or two very large, soft radial blobs drifting slowly for depth.
+- Timing: full cycle ~90 s (≈30 s per colour), eased crossfades, never a visible jump. Must respect `prefers-reduced-motion` (then: static, pick one colour) and offer a setting: Ambient colours: Cycle / Blue / Purple / Green / Off (Off = the current flat `--bg`).
+- Performance: animate only `opacity`/`transform` of stacked fixed layers (or a single `@property`-registered colour custom property) — never repaint the whole page per frame. Must stay smooth on a MacBook Air and iPhone; check that scrolling the album grid does not drop frames.
+- Content surfaces that currently use `--bg` must become transparent so the ambient shows through; cards/rows keep subtle translucent surfaces (`rgba(255,255,255,.04–.06)`).
+- Album page hero keeps its cover-tinted gradient on top of the ambient.
+
+### Liquid glass — sidebar (left) and now-playing bar (bottom); on mobile the bottom tab bar + mini-player
+- Apple-style "liquid glass": translucent panel showing the moving ambient behind it — `backdrop-filter: blur(28–40px) saturate(160–180%)`, a faint white fill (`rgba(255,255,255,.06–.10)`), a 1 px inner highlight on the edge facing the content (top edge for the bottom bar, right edge for the sidebar) `rgba(255,255,255,.18)`, a soft outer shadow, and a subtle vertical gradient sheen (lighter at top → transparent) like the screenshot's top band.
+- Optional specular touch: a very faint diagonal highlight gradient across the panel; no heavy noise textures.
+- Text/icons on glass must keep WCAG AA contrast against every ambient colour (check all three: blue, purple, green). Raise text opacity or add a slight dark tint under the glass if needed.
+- Fallback when `backdrop-filter` is unsupported: a solid `rgba(15,16,19,.85)` panel.
+- The sidebar and bar float over content: page content scrolls underneath the bottom bar (add bottom padding so the last row is reachable).
+
+### Accent check
+- The lavender accent `#8f7cff` sits poorly on the purple phase. Verify contrast of accent buttons/links on all three phases; if needed, shift the Play button to a light fill (`#ece9ff` text dark) or brighten accent to `#a99bff` during the purple phase.
