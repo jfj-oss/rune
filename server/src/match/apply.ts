@@ -3,6 +3,7 @@
 import type { Db } from '../db/index.js';
 import { ids } from '../db/index.js';
 import {
+  artistCreditName,
   flattenReleaseTracks,
   yearFromDate,
   type MbArtist,
@@ -215,16 +216,20 @@ export function applyRelease(db: Db, albumId: string, release: MbRelease, confid
       }
     }
 
-    // Release-level metadata.
+    // Release-level metadata. The album title comes from MusicBrainz too: a
+    // folder tagged "X" must become Chicago's "Chicago X". The scanner keeps
+    // matcher-owned columns (title included) for matched albums when rescanning.
     const releaseDate = release.date ?? release['release-group']?.['first-release-date'] ?? album.release_date ?? null;
     const year = yearFromDate(releaseDate) ?? album.year;
     const label = pickLabel(release) ?? album.label;
     const genres = extractGenres(release);
     const releaseGroupId = release['release-group']?.id ?? null;
+    const canonicalTitle = release.title?.trim() || album.title;
 
     db.prepare(
       `UPDATE albums
-          SET artist_id = ?,
+          SET title = ?,
+              artist_id = ?,
               mb_release_id = ?,
               mb_release_group_id = ?,
               release_date = ?,
@@ -234,6 +239,7 @@ export function applyRelease(db: Db, albumId: string, release: MbRelease, confid
               match_confidence = ?
         WHERE id = ?`,
     ).run(
+      canonicalTitle,
       canonicalArtistId,
       release.id,
       releaseGroupId,
@@ -244,6 +250,19 @@ export function applyRelease(db: Db, albumId: string, release: MbRelease, confid
       confidence,
       albumId,
     );
+
+    // Keep the search index in sync with the canonical title/artist (the
+    // scanner skips matched albums, so it will not rebuild this row).
+    try {
+      const artistLabel = artistCreditName(release['artist-credit']) || album.artist_name || '';
+      db.prepare("DELETE FROM search_fts WHERE kind = 'album' AND ref_id = ?").run(albumId);
+      db.prepare("INSERT INTO search_fts (kind, ref_id, text) VALUES ('album', ?, ?)").run(
+        albumId,
+        `${canonicalTitle} ${artistLabel}`.trim(),
+      );
+    } catch {
+      // FTS maintenance must never break matching.
+    }
 
     // Track mapping by disc + position, falling back to duration + title.
     const flat = flattenReleaseTracks(release);

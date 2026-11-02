@@ -7,6 +7,8 @@ import { ids } from '../../src/db/index.js';
 import type { FetchLike, MbRelease } from '../../src/match/mb.js';
 
 export const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'mb');
+/** Real-library albums that the old matcher failed on (recorded by scripts/record-mb-fix.ts). */
+export const FIX_FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'mb-fix');
 
 export interface FixtureAlbumTrack {
   id: string;
@@ -31,6 +33,8 @@ export interface FixtureAlbum {
   targetArtist: string;
   targetDate: string | null;
   confidence: number;
+  /** Real library folder (root sanitized to /music) used for folder-name variants. */
+  folderPath?: string;
   tracks: FixtureAlbumTrack[];
 }
 
@@ -41,25 +45,44 @@ interface ManifestEntry {
 }
 type Manifest = Record<string, ManifestEntry>;
 
-const albums: FixtureAlbum[] = JSON.parse(readFileSync(join(FIXTURES_DIR, 'albums.json'), 'utf8')) as FixtureAlbum[];
-const manifest: Manifest = JSON.parse(readFileSync(join(FIXTURES_DIR, 'manifest.json'), 'utf8')) as Manifest;
-
-export function loadFixtureAlbums(): FixtureAlbum[] {
-  return albums;
+interface FixtureSet {
+  dir: string;
+  albums: FixtureAlbum[];
+  manifest: Manifest;
 }
 
-export function fixtureAlbum(slug: string): FixtureAlbum {
-  const album = albums.find((a) => a.slug === slug);
+const sets = new Map<string, FixtureSet>();
+
+function loadSet(dir: string): FixtureSet {
+  let set = sets.get(dir);
+  if (!set) {
+    set = {
+      dir,
+      albums: JSON.parse(readFileSync(join(dir, 'albums.json'), 'utf8')) as FixtureAlbum[],
+      manifest: JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as Manifest,
+    };
+    sets.set(dir, set);
+  }
+  return set;
+}
+
+export function loadFixtureAlbums(dir = FIXTURES_DIR): FixtureAlbum[] {
+  return loadSet(dir).albums;
+}
+
+export function fixtureAlbum(slug: string, dir = FIXTURES_DIR): FixtureAlbum {
+  const album = loadSet(dir).albums.find((a) => a.slug === slug);
   if (!album) throw new Error(`unknown fixture album: ${slug}`);
   return album;
 }
 
-export function loadRelease(id: string): MbRelease {
+export function loadRelease(id: string, dir = FIXTURES_DIR): MbRelease {
+  const { manifest, dir: fixturesDir } = loadSet(dir);
   const entry = Object.entries(manifest).find(
     ([url]) => url.includes(`/ws/2/release/${id}?`) || url.includes(`/ws/2/release/${encodeURIComponent(id)}?`),
   );
   if (!entry) throw new Error(`release ${id} not in fixture manifest`);
-  return JSON.parse(readFileSync(join(FIXTURES_DIR, entry[1].file), 'utf8')) as MbRelease;
+  return JSON.parse(readFileSync(join(fixturesDir, entry[1].file), 'utf8')) as MbRelease;
 }
 
 export function urlOf(input: string | URL | Request): string {
@@ -72,7 +95,8 @@ export function urlOf(input: string | URL | Request): string {
  * Fetch implementation that serves every recorded URL from disk. Unrecorded
  * MusicBrainz URLs and Cover Art Archive URLs return 404 (offline default).
  */
-export function fixtureFetch(): FetchLike {
+export function fixtureFetch(dir = FIXTURES_DIR): FetchLike {
+  const { manifest, dir: fixturesDir } = loadSet(dir);
   return async (input) => {
     const url = urlOf(input);
     const entry = manifest[url];
@@ -82,7 +106,7 @@ export function fixtureFetch(): FetchLike {
         headers: { 'content-type': 'application/json' },
       });
     }
-    return new Response(readFileSync(join(FIXTURES_DIR, entry.file), 'utf8'), {
+    return new Response(readFileSync(join(fixturesDir, entry.file), 'utf8'), {
       status: entry.status,
       headers: { 'content-type': 'application/json' },
     });
@@ -96,6 +120,8 @@ export interface InsertOptions {
   locked?: boolean;
   coverPath?: string | null;
   addedAt?: number;
+  /** Override the folder (real-library fixtures need their original folder name). */
+  folderPath?: string;
 }
 
 /** Insert a local album + artist + tracks + track_artists exactly like the scanner would. */
@@ -103,7 +129,10 @@ export function insertLocalAlbum(db: Db, album: FixtureAlbum, options: InsertOpt
   const title = options.title ?? album.title;
   const artistName = options.artist ?? album.artist;
   const year = options.year ?? album.year;
-  const folder = `/music/${album.slug}${options.title || options.artist ? '-custom' : ''}`;
+  const folder =
+    options.folderPath ??
+    album.folderPath ??
+    `/music/${album.slug}${options.title || options.artist ? '-custom' : ''}`;
   const albumId = ids.localAlbum(folder);
   const artistId = ids.artistByName(artistName);
 

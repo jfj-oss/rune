@@ -16,6 +16,11 @@ export interface Matcher {
   /** Match every local album without a locked match; fills mb ids, confidence,
    *  canonical artist ids/names, release date, label, genres, credits, cover (if no local). */
   matchPending(onProgress?: (done: number, total: number) => void): Promise<void>;
+  /** Retry unmatched or weakly matched (< threshold) albums; never touches locked ones. */
+  rematchWeak(
+    threshold?: number,
+    options?: { limit?: number; maxMs?: number; onProgress?: (done: number, total: number) => void },
+  ): Promise<{ attempted: number; matched: number; improved: number; remaining: number }>;
   /** Manual fix: set release id, lock it, refetch. */
   setRelease(albumId: string, mbReleaseId: string): Promise<void>;
   /** Candidate releases for the "fix match" dialog. */
