@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>rune</title>
+  <defs>
+    <linearGradient id="rune-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1e25"/>
+      <stop offset="1" stop-color="#111216"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="190" fill="url(#rune-tile)"/>
+  <g transform="matrix(1.0916 0 0 1.0916 -46.89 -35.97)">
+    <defs>
+      <!-- knock the upper forearm out where it passes behind the right arm -->
+      <mask id="rune-tuck" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+        <rect width="1024" height="1024" fill="#fff"/>
+        <path d="M762 640V750" stroke="#000" stroke-width="172"/>
+      </mask>
+    </defs>
+    <g fill="none" stroke="#f4f4f7" stroke-width="92" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="512" cy="250" r="96"/>
+      <!-- upper forearm: from behind the right arm into the left elbow -->
+      <path mask="url(#rune-tuck)" d="M762 694H330C288 694 262 670 262 630"/>
+      <!-- left arm, coat-hanger shoulders, right arm, right elbow -->
+      <path d="M262 630V600C262 552 290 528 340 520L512 492L684 520C734 528 762 552 762 600V788C762 826 740 850 700 850"/>
+      <!-- front forearm -->
+      <path d="M700 850H372"/>
+    </g>
+  </g>
+</svg>
