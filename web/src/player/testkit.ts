@@ -17,6 +17,8 @@ export class FakeZone implements ZoneTransport {
   private subs = new Set<(s: PlayerState) => void>();
   private clock = 1_000;
   fail = false;
+  /** No push channel by default: the engine then polls at `pollMs`. */
+  connected: (() => boolean) | undefined = () => false;
   constructor(public id: string) { this.state = emptyState(id); }
 
   private bump(patch: Partial<PlayerState>) {

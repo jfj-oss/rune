@@ -133,6 +133,62 @@ describe('ZoneEngine', () => {
     expect(ended).not.toHaveBeenCalled();
   });
 
+  it('polls fast only while the socket is down, then falls back to a 15 s safety poll', async () => {
+    vi.useFakeTimers();
+    try {
+      const zone = new FakeZone('pc');
+      let connected = false;
+      zone.connected = () => connected;
+      let now = 1_000_000;
+      const eng = new ZoneEngine(zone, { now: () => now, pollMs: 2000, safetyPollMs: 15_000 });
+      const get = vi.spyOn(zone, 'get');
+      eng.load(mkTrack('l:1', 'local'), 0, true);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      get.mockClear();
+
+      const tick = async () => { now += 2000; await vi.advanceTimersByTimeAsync(2000); };
+
+      await tick();
+      await tick();
+      expect(get).toHaveBeenCalledTimes(2); // disconnected: every 2 s
+
+      connected = true;
+      for (let i = 0; i < 7; i++) await tick(); // 14 s since the last poll
+      expect(get).toHaveBeenCalledTimes(2);
+      await tick(); // 16 s: the safety poll fires
+      expect(get).toHaveBeenCalledTimes(3);
+
+      connected = false; // the socket drops: back to the fast poll
+      await tick();
+      expect(get).toHaveBeenCalledTimes(4);
+      eng.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a transport with no connected() as having no push channel (legacy polling)', async () => {
+    vi.useFakeTimers();
+    try {
+      const zone = new FakeZone('pc');
+      zone.connected = undefined;
+      let now = 1_000_000;
+      const eng = new ZoneEngine(zone, { now: () => now, pollMs: 2000 });
+      const get = vi.spyOn(zone, 'get');
+      eng.load(mkTrack('l:1', 'local'), 0, true);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      get.mockClear();
+      now += 2000;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(get).toHaveBeenCalledTimes(1);
+      eng.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('brings the zone volume in line before playing, and only talks volume while loaded', async () => {
     const { zone, eng } = setup();
     eng.setVolume(35);

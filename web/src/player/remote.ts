@@ -152,5 +152,6 @@ export function zoneTransport(zone: string): ZoneTransport {
     send: (cmd) => api.playerSend(zone, cmd),
     get: () => api.playerState(zone),
     subscribe: (fn) => socket.on((e) => { if (e.type === 'player' && e.state.zone === zone) fn(e.state); }),
+    connected: () => socket.connected,
   };
 }

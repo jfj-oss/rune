@@ -7,12 +7,16 @@ export interface ZoneTransport {
   get(): Promise<PlayerState>;
   /** Pushed state changes (websocket `player` events for this zone). */
   subscribe(fn: (s: PlayerState) => void): () => void;
+  /** Is the push channel connected right now? Absent = no push channel, so poll at `pollMs`. */
+  connected?(): boolean;
 }
 
 export interface ZoneEngineOptions {
   now?: () => number;
-  /** Poll interval while a track is loaded (the websocket is the fast path; this is the safety net). */
+  /** Poll interval while a track is loaded and the push channel is down. */
   pollMs?: number;
+  /** Safety poll interval while the push channel is up (the websocket is the fast path). */
+  safetyPollMs?: number;
   /** Give up waiting for the zone to start the track after this long. */
   startTimeoutMs?: number;
   /** Paused this close to the end (after playing up to there) counts as "finished". */
@@ -39,6 +43,7 @@ export class ZoneEngine implements Engine {
   private snap: { pos: number; at: number; playing: boolean } | null = null;
   private off: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private lastPollAt = 0;
   private volume = 70;
   private serverVolume: number | null = null;
   private endedFn: () => void = () => {};
@@ -46,12 +51,14 @@ export class ZoneEngine implements Engine {
   private syncFn: (pos: number, playing: boolean) => void = () => {};
   private readonly now: () => number;
   private readonly pollMs: number;
+  private readonly safetyPollMs: number;
   private readonly startTimeoutMs: number;
   private readonly endSlackMs: number;
 
   constructor(private t: ZoneTransport, opts: ZoneEngineOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.pollMs = opts.pollMs ?? 2000;
+    this.safetyPollMs = opts.safetyPollMs ?? 15_000;
     this.startTimeoutMs = opts.startTimeoutMs ?? 12_000;
     this.endSlackMs = opts.endSlackMs ?? 5000;
   }
@@ -143,7 +150,16 @@ export class ZoneEngine implements Engine {
 
   private attach(gen: number) {
     this.off = this.t.subscribe((s) => this.onState(s, gen));
-    this.timer = setInterval(() => { void this.t.get().then((s) => this.onState(s, gen)).catch(() => undefined); }, this.pollMs);
+    // The websocket is the fast path: poll at `pollMs` only while it is disconnected, and otherwise
+    // just often enough to recover from a socket that is up but silent.
+    this.lastPollAt = this.now();
+    this.timer = setInterval(() => {
+      const connected = this.t.connected?.() ?? false;
+      const now = this.now();
+      if (connected && now - this.lastPollAt < this.safetyPollMs) return;
+      this.lastPollAt = now;
+      void this.t.get().then((s) => this.onState(s, gen)).catch(() => undefined);
+    }, this.pollMs);
   }
   private detach() {
     this.off?.();
