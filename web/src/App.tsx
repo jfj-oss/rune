@@ -7,6 +7,7 @@ import AlbumPage from './pages/Album';
 import Albums from './pages/Albums';
 import ArtistPage from './pages/Artist';
 import Artists from './pages/Artists';
+import Discover from './pages/Discover';
 import Genres, { GenrePage } from './pages/Genres';
 import Home from './pages/Home';
 import Placeholder from './pages/Placeholder';
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/tracks" element={<Tracks />} />
             <Route path="/genres" element={<Genres />} />
             <Route path="/genres/:genre" element={<GenrePage />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/playlists" element={<Playlists />} />
             <Route path="/playlist/:id" element={<PlaylistPage />} />
             <Route path="*" element={<Placeholder title="Not found" />} />

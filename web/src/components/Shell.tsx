@@ -2,12 +2,15 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ScrollRootContext } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
+import { useDiscoverUi } from '../store/discoverUi';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { MediaSessionBridge } from './MediaSession';
 import { PlayOnSheet } from './PlayOnSheet';
 import { PlaylistDialogsHost } from './PlaylistDialogs';
 import { MobileTabs } from './MobileTabs';
+import { SongRadio } from './SongRadio';
+import { TrackContextMenu } from './TrackMenu';
 import { NowPlaying } from './player/NowPlaying';
 import { MiniPlayer } from './player/MiniPlayer';
 import { NowPlayingBar } from './player/NowPlayingBar';
@@ -42,6 +45,8 @@ export function Shell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setQueue(false);
     setNp(false);
+    useDiscoverUi.getState().closeTrackMenu();
+    useDiscoverUi.getState().closeRadio();
   }, [loc.pathname, setQueue, setNp]);
 
   const canBack = idx > 0;
@@ -66,6 +71,8 @@ export function Shell({ children }: { children: ReactNode }) {
       <MediaSessionBridge />
       <PlayOnSheet />
       <PlaylistDialogsHost />
+      <TrackContextMenu />
+      <SongRadio />
       <Toast />
     </div>
   );

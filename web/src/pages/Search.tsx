@@ -1,15 +1,18 @@
 import { useQuery } from '@tanstack/react-query';
-import { Play, Search as SearchIcon } from 'lucide-react';
+import { MoreHorizontal, Play, Search as SearchIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { AlbumCard, FormatBadge } from '../components/AlbumCard';
 import { Avatar } from '../components/album/Credits';
 import { Cover } from '../components/Cover';
+import { Popover } from '../components/Popover';
 import { Empty, HScroll, SectionHead } from '../components/Rows';
+import { TrackMenuItems, trackMenuHandler } from '../components/TrackMenu';
 import { useIsDesktop } from '../hooks/useMedia';
 import { usePlay } from '../hooks/usePlay';
 import { encId, formatDuration } from '../lib/format';
+import type { PlayItem } from '../lib/types';
 import { useSearchNav, type NavItem } from '../store/searchNav';
 
 export default function SearchPage() {
@@ -135,20 +138,30 @@ export default function SearchPage() {
             <section className="section">
               <SectionHead title="Tracks" />
               <ul className="tlist">
-                {tracks.map((t) => (
-                  <li key={t.id} className="tlist__row" {...nv(`tr:${t.id}`)}>
-                    <button className="tlist__art" aria-label={`Play ${t.title}`} onClick={() => void playTrack(t.albumId, t.id)}>
-                      <Cover album={{ id: t.albumId, title: albumTitle(t.albumId) }} sizes="44px" />
-                      <span className="tlist__play"><Play size={16} fill="currentColor" /></span>
-                    </button>
-                    <div className="tlist__txt">
-                      <b>{t.title}</b>
-                      <span>{t.artists.map((a, i) => <span key={a.id}>{i > 0 && ', '}<Link to={`/artist/${encId(a.id)}`} className="link">{a.name}</Link></span>)}</span>
-                    </div>
-                    <FormatBadge source={t.source} format={t.format === 'flac' ? 'FLAC' : t.format === 'mp3' ? 'MP3' : undefined} />
-                    <span className="tlist__dur">{formatDuration(t.durationMs)}</span>
-                  </li>
-                ))}
+                {tracks.map((t) => {
+                  const item: PlayItem = { track: t, album: { id: t.albumId, title: albumTitle(t.albumId) } };
+                  return (
+                    <li key={t.id} className="tlist__row" {...nv(`tr:${t.id}`)} onContextMenu={trackMenuHandler(item)}>
+                      <button className="tlist__art" aria-label={`Play ${t.title}`} onClick={() => void playTrack(t.albumId, t.id)}>
+                        <Cover album={{ id: t.albumId, title: albumTitle(t.albumId) }} sizes="44px" />
+                        <span className="tlist__play"><Play size={16} fill="currentColor" /></span>
+                      </button>
+                      <div className="tlist__txt">
+                        <b>{t.title}</b>
+                        <span>{t.artists.map((a, i) => <span key={a.id}>{i > 0 && ', '}<Link to={`/artist/${encId(a.id)}`} className="link">{a.name}</Link></span>)}</span>
+                      </div>
+                      <FormatBadge source={t.source} format={t.format === 'flac' ? 'FLAC' : t.format === 'mp3' ? 'MP3' : undefined} />
+                      <span className="tlist__dur">{formatDuration(t.durationMs)}</span>
+                      <Popover
+                        className="tlist__menu"
+                        placement="bottom-end"
+                        trigger={({ toggle }) => <button className="btn-icon" aria-label={`More for ${t.title}`} onClick={toggle}><MoreHorizontal size={18} /></button>}
+                      >
+                        {(close) => <TrackMenuItems item={item} close={close} />}
+                      </Popover>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}

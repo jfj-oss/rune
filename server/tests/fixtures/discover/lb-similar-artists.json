@@ -1,0 +1,227 @@
+[
+  {
+    "artist_mbid": "5b11f4ce-a62d-471e-81fc-a69a8278c7da",
+    "name": "Nirvana",
+    "comment": "1980s–1990s US grunge band",
+    "type": "Group",
+    "gender": null,
+    "score": 11156,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "8bfac288-ccc5-448d-9573-c33ea2aa5c30",
+    "name": "Red Hot Chili Peppers",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 10587,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "9c9f1380-2516-4fc9-a3e6-f9f61941d090",
+    "name": "Muse",
+    "comment": "UK rock band",
+    "type": "Group",
+    "gender": null,
+    "score": 10286,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "cc197bad-dc9c-440d-a5b5-d52ba2e14234",
+    "name": "Coldplay",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 9919,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "ba0d6274-db14-4ef5-b28d-657ebde1a396",
+    "name": "The Smashing Pumpkins",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 9657,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "b10bbbfc-cf9e-42e0-be17-e2c3e1d2600d",
+    "name": "The Beatles",
+    "comment": "UK rock band, “The Fab Four”",
+    "type": "Group",
+    "gender": null,
+    "score": 9530,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "83d91898-7763-47d7-b03b-b92132375c47",
+    "name": "Pink Floyd",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 9191,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "b6b2bb8d-54a9-491f-9607-7b546023b433",
+    "name": "Pixies",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8975,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "5441c29d-3602-4898-b1a1-b77fa23b8e50",
+    "name": "David Bowie",
+    "comment": "English singer‐songwriter",
+    "type": "Person",
+    "gender": "Male",
+    "score": 8852,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "67f66c07-6e61-4026-ade5-7e782fad3a5d",
+    "name": "Foo Fighters",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8765,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "e21857d5-3256-4547-afb3-4b6ded592596",
+    "name": "Gorillaz",
+    "comment": "virtual band",
+    "type": "Group",
+    "gender": null,
+    "score": 8702,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "ba853904-ae25-4ebb-89d6-c44cfbd71bd2",
+    "name": "Blur",
+    "comment": "UK alternative rock band",
+    "type": "Group",
+    "gender": null,
+    "score": 8671,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "ada7a83c-e3e1-40f1-93f9-3e73dbc9298a",
+    "name": "Arctic Monkeys",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8663,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "309c62ba-7a22-4277-9f67-4a162526d18a",
+    "name": "Beck",
+    "comment": "alt rock, multi‐instrumentalist Beck Hansen",
+    "type": "Person",
+    "gender": "Male",
+    "score": 8583,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "ea4dfa26-f633-4da6-a52a-f49ea4897b58",
+    "name": "R.E.M.",
+    "comment": "American rock band",
+    "type": "Group",
+    "gender": null,
+    "score": 8574,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "f181961b-20f7-459e-89de-920ef03c7ed0",
+    "name": "The Strokes",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8503,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "11ae9fbb-f3d7-4a47-936f-4c0a04d3b3b5",
+    "name": "The White Stripes",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8362,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+    "name": "Daft Punk",
+    "comment": "French electronic duo",
+    "type": "Group",
+    "gender": null,
+    "score": 8197,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "39ab1aed-75e0-4140-bd47-540276886b60",
+    "name": "Oasis",
+    "comment": "Noel & Liam Gallagher",
+    "type": "Group",
+    "gender": null,
+    "score": 8188,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "69ee3720-a7cb-4402-b48d-a02c366f2bcf",
+    "name": "The Cure",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 8138,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "6fe07aa5-fec0-4eca-a456-f29bff451b04",
+    "name": "Weezer",
+    "comment": "American rock band",
+    "type": "Group",
+    "gender": null,
+    "score": 7955,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "52074ba6-e495-4ef3-9bb4-0703888a9f68",
+    "name": "Arcade Fire",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 7949,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "084308bd-1654-436f-ba03-df6697104e19",
+    "name": "Green Day",
+    "comment": "",
+    "type": "Group",
+    "gender": null,
+    "score": 7691,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "95e1ead9-4d31-4808-a7ac-32c3614c116b",
+    "name": "The Killers",
+    "comment": "American rock band",
+    "type": "Group",
+    "gender": null,
+    "score": 7613,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  },
+  {
+    "artist_mbid": "0383dadf-2a4e-4d10-a46a-e9e041da8eb3",
+    "name": "Queen",
+    "comment": "UK rock group",
+    "type": "Group",
+    "gender": null,
+    "score": 7591,
+    "reference_mbid": "a74b1b7f-71a5-4011-9441-d0b5e4122711"
+  }
+]

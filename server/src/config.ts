@@ -18,6 +18,8 @@ export interface Config {
   publicUrl?: string;
   /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
   spotifyClientId?: string;
+  /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
+  lastfmApiKey?: string;
   /** Name of the Spotify Connect device that represents this PC (default 'HORSE',
    *  the Spotify desktop app on the same machine). GET /api/zones matches it so the
    *  UI can route Spotify tracks to the PC's Spotify app. */

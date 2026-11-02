@@ -23,8 +23,8 @@ const SORTS: { id: NonNullable<AlbumQuery['sort']>; label: string }[] = [
   { id: 'added', label: 'Date added' }, { id: 'artist', label: 'Artist' }, { id: 'title', label: 'Title' }, { id: 'year', label: 'Year' },
 ];
 
-export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'tracks' | 'genres' | 'playlists' }) {
-  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['playlists', 'Playlists']] as const;
+export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'tracks' | 'genres' | 'playlists' | 'discover' }) {
+  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['playlists', 'Playlists'], ['discover', 'Discover']] as const;
   return (
     <div className="seg seg--tabs" role="tablist">
       {tabs.map(([id, label]) => (
