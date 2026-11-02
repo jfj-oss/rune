@@ -1,24 +1,56 @@
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ListMusic, ListPlus } from 'lucide-react';
-import { useEffect, useRef, useState, type TouchEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { lazy, Suspense, useEffect, useRef, useState, type TouchEvent } from 'react';
+import { Link } from 'react-router-dom';
+import type { AlbumDetails } from '@liner/shared';
 import { api } from '../../api';
+import { discoverApi } from '../../discoverApi';
 import { useCoverColor } from '../../hooks/useCoverColor';
 import { useIsDesktop } from '../../hooks/useMedia';
+import { ditherHueOf, type DitherColour } from '../../lib/dither';
 import { encId, formatDuration } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
 import { liveMeta } from '../../lib/live';
+import { textPreview } from '../../lib/previews';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
 import { usePlaylistUi } from '../../store/playlistUi';
+import { usePreview } from '../../store/preview';
 import { useRadio } from '../../store/radio';
 import { useUi } from '../../store/ui';
+import { Prose, Reception } from '../album/Reception';
 import { Cover } from '../Cover';
+import { SourceLink } from '../Rows';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
 
-function excerpt(s: string, n = 260) {
-  if (s.length <= n) return s;
-  const cut = s.slice(0, n);
-  return cut.slice(0, cut.lastIndexOf(' ')) + '…';
+const DitherBackdrop = lazy(() => import('../DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
+
+/** Backdrop colour: the dither hue nearest the cover's colour, else the user's Dither pick, else purple. */
+function backdropColour(tint: string, ambient: string): DitherColour {
+  const fromCover = ditherHueOf(tint);
+  if (fromCover) return fromCover;
+  if (ambient === 'dither') return 'red';
+  if (ambient.startsWith('dither-')) return ambient.slice(7) as DitherColour;
+  return 'purple';
+}
+
+/** The album's artist notes, the one about the playing song first. */
+function SongNotes({ notes, trackId, trackTitle }: { notes: AlbumDetails['artistNotes']; trackId: string; trackTitle: string }) {
+  const open = usePreview((p) => p.open);
+  const sorted = [...notes].sort((a, b) => Number(b.trackId === trackId) - Number(a.trackId === trackId));
+  return (
+    <div className="notes">
+      {sorted.map((n, i) => {
+        const label = n.trackId === trackId ? trackTitle : n.trackId ? 'Another song on this album' : 'About the album';
+        return (
+          <article key={i} className="note">
+            <header className="note__head"><span className="note__track note__track--album">{label}</span></header>
+            <Prose text={n.value} lines={8} />
+            <SourceLink source={n.source} url={n.url} onPreview={() => open(textPreview(n.verifiedArtist ? 'In the artist’s words' : 'Artist notes', label, n))} />
+          </article>
+        );
+      })}
+    </div>
+  );
 }
 
 export function NowPlaying() {
@@ -29,8 +61,9 @@ export function NowPlaying() {
   const command = usePlayer((s) => s.command);
   const cur = currentItem(state);
   const desktop = useIsDesktop();
-  const nav = useNavigate();
   const tint = useCoverColor(cur?.album);
+  const ambient = useUi((s) => s.ambient);
+  const openPreview = usePreview((s) => s.open);
   const { steps, tone } = useSignalPath();
   const live = isLiveTrack(cur?.track);
   const meta = cur && live ? liveMeta(state, cur) : null;
@@ -46,6 +79,14 @@ export function NowPlaying() {
     queryFn: () => api.details(cur!.album.id),
     enabled: open && !!cur && !live,
     staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const firstArtist = cur && !live ? cur.track.artists[0] : undefined;
+  const artistInfo = useQuery({
+    queryKey: ['artist-info', firstArtist?.id],
+    queryFn: () => discoverApi.artistInfo(firstArtist!.id),
+    enabled: open && !!firstArtist,
+    staleTime: 10 * 60_000,
     retry: false,
   });
 
@@ -76,7 +117,9 @@ export function NowPlaying() {
     touch.current = null;
   };
 
-  const about = details.data?.reception?.value ?? details.data?.background?.value;
+  const d = details.data;
+  const hasReview = !!d && (!!d.reception || d.scores.length > 0 || d.quotes.length > 0);
+  const bio = artistInfo.data?.bio;
   const upNext = state.queue.slice(state.index + 1, state.index + 4);
   const title = meta?.title ?? cur?.track.title ?? 'Nothing playing';
 
@@ -90,8 +133,8 @@ export function NowPlaying() {
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
     >
-      <div className="np__bg" aria-hidden>
-        {cur && <Cover album={cur.album} size={200} className="np__bgimg" eager src={artSrc} />}
+      <div className="np__bg np__bg--dither" aria-hidden>
+        <Suspense fallback={null}><DitherBackdrop colour={backdropColour(tint, ambient)} /></Suspense>
         <div className="np__bgwash" />
       </div>
 
@@ -122,6 +165,7 @@ export function NowPlaying() {
       </header>
 
       <div className="np__body" ref={bodyRef}>
+        <div className="np__main">
         <div className="np__art">
           {cur ? <Cover album={cur.album} size={600} eager className="np__cover" sizes="min(60vh, 50vw)" src={artSrc} /> : <div className="cover np__cover" />}
         </div>
@@ -171,16 +215,48 @@ export function NowPlaying() {
             </section>
           )}
 
-          {cur && !live && about && (
-            <section className="np__sec">
-              <h2 className="eyebrow">About this album</h2>
-              <button className="np__about" onClick={() => { setOpen(false); nav(`/album/${encId(cur.album.id)}#review`); }}>
-                <p className="prose">{excerpt(about)}</p>
-                <span className="link">Read more on the album page →</span>
-              </button>
-            </section>
-          )}
         </div>
+        </div>
+
+        {cur && !live && (details.isLoading || hasReview || d?.background || (d?.artistNotes.length ?? 0) > 0 || bio) && (
+          <div className="np__more">
+            {details.isLoading && (
+              <section className="np__sec">
+                <h2 className="eyebrow">Critical reception</h2>
+                <p className="muted">Looking up reviews…</p>
+              </section>
+            )}
+            {d && hasReview && (
+              <section className="np__sec" id="np-review">
+                <h2 className="eyebrow">Critical reception</h2>
+                <Reception details={d} />
+              </section>
+            )}
+            {d && (d.artistNotes.length > 0 || d.background) && (
+              <section className="np__sec">
+                <h2 className="eyebrow">About this album</h2>
+                {d.artistNotes.length > 0 && <SongNotes notes={d.artistNotes} trackId={cur.track.id} trackTitle={cur.track.title} />}
+                {d.background && (
+                  <div className="bg">
+                    {d.artistNotes.length > 0 && <h3 className="eyebrow about__sub">Background</h3>}
+                    <Prose text={d.background.value} lines={9} />
+                    <SourceLink source={d.background.source} url={d.background.url} onPreview={() => openPreview(textPreview('Background', cur.album.title, d.background!))} />
+                  </div>
+                )}
+              </section>
+            )}
+            {bio && firstArtist && (
+              <section className="np__sec">
+                <h2 className="eyebrow">About {firstArtist.name}</h2>
+                <div className="bg">
+                  <Prose text={bio.value} lines={6} />
+                  <SourceLink source={bio.source} url={bio.url} onPreview={() => openPreview(textPreview('Biography', firstArtist.name, bio))} />
+                </div>
+              </section>
+            )}
+            <Link className="link np__morelink" to={`/album/${encId(cur.album.id)}`} onClick={() => setOpen(false)}>Open the album page →</Link>
+          </div>
+        )}
       </div>
     </div>
   );

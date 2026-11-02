@@ -241,3 +241,30 @@ export function field(x: number, y: number, aspect: number, t: number): number {
 export function mottle(x: number, y: number, t: number): number {
   return MOTTLE.base + MOTTLE.amp * vnoise(x * MOTTLE.freq + t * MOTTLE.speed, y * MOTTLE.freq);
 }
+
+/**
+ * The dither hue closest to a CSS colour (`rgb(r g b)`, `rgb(r, g, b)` or `hsl(h s% l%)`, as useCoverColor gives),
+ * or null for greys and anything unparsable. Oranges and yellows count as red, teals as blue.
+ */
+export function ditherHueOf(css: string): DitherHue | null {
+  let h: number, s: number;
+  const hsl = /^hsla?\(\s*([\d.]+)[\s,]+([\d.]+)%/i.exec(css);
+  const rgb = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(css);
+  if (hsl) {
+    h = Number(hsl[1]); s = Number(hsl[2]) / 100;
+  } else if (rgb) {
+    const [r, g, b] = [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255];
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    s = max === 0 ? 0 : d / max;
+    if (d === 0) h = 0;
+    else if (max === r) h = 60 * (((g - b) / d) % 6);
+    else if (max === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  } else return null;
+  if (!Number.isFinite(h) || !Number.isFinite(s) || s < 0.18) return null;
+  h = ((h % 360) + 360) % 360;
+  if (h < 70 || h >= 335) return 'red';
+  if (h < 165) return 'green';
+  if (h < 255) return 'blue';
+  return 'purple';
+}

@@ -153,7 +153,16 @@
 .np__topalbum { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .np__topalbum:hover { text-decoration: underline; }
 .np__topright { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
-.np__body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 540px); gap: 64px; align-content: center; align-items: center; padding: 8px 72px 32px; }
+.np__body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* the player fills the first screen; reviews and about sit below it */
+.np__main { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 540px); gap: 64px; align-content: center; align-items: center; padding: 8px 72px 32px; }
+.np__more { width: min(860px, calc(100% - 48px)); margin: 8px auto 48px; padding: 8px 28px 26px; border-radius: 16px; background: rgba(0, 0, 0, 0.62); border: 1px solid color-mix(in srgb, #fff 9%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); display: flex; flex-direction: column; gap: 10px; }
+.np__more .np__sec { margin-top: 18px; gap: 14px; }
+.np__more .prose { color: var(--text); }
+.np__morelink { align-self: flex-start; margin-top: 18px; font-size: 14px; }
+/* Dither backdrop: black under the canvas, a soft scrim so the controls stay readable */
+.np__bg--dither { background: #000; }
+.np__bg--dither .np__bgwash { background: radial-gradient(ellipse at 70% 45%, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.2) 70%); }
 .np__art { justify-self: end; width: min(60vh, 50vw); }
 .np__cover { width: 100%; box-shadow: var(--shadow-hero); border-radius: 10px; }
 .np__panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -183,7 +192,9 @@
 
 @media (max-width: 899px) {
   .np__top { padding-inline: 8px; }
-  .np__body { display: flex; flex-direction: column; gap: 22px; padding: 4px 24px calc(28px + var(--safe-b)); align-items: stretch; justify-content: flex-start; }
+  .np__main { display: flex; flex-direction: column; gap: 22px; padding: 4px 24px 28px; align-items: stretch; justify-content: flex-start; min-height: 0; }
+  .np__more { width: auto; margin: 0 12px calc(24px + var(--safe-b)); padding: 4px 18px 20px; }
+  .np__bg--dither .np__bgwash { background: linear-gradient(180deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.55)); }
   .np__art { width: min(100%, 46dvh); align-self: center; justify-self: auto; margin-top: 8px; }
   .np__title { font-size: 25px; text-align: left; }
   .np__sub { font-size: 15px; }

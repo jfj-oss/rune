@@ -115,3 +115,17 @@ describe('dotSize', () => {
     expect((3840 * 2 / d) * (2160 * 2 / d)).toBeLessThanOrEqual(600_000);
   });
 });
+
+describe('ditherHueOf', () => {
+  it('maps cover colours to the nearest dither hue', async () => {
+    const { ditherHueOf } = await import('./dither');
+    expect(ditherHueOf('rgb(200 60 50)')).toBe('red');
+    expect(ditherHueOf('rgb(220, 160, 40)')).toBe('red');
+    expect(ditherHueOf('rgb(40 160 70)')).toBe('green');
+    expect(ditherHueOf('rgb(40 90 220)')).toBe('blue');
+    expect(ditherHueOf('rgb(140 70 220)')).toBe('purple');
+    expect(ditherHueOf('hsl(210 40% 30%)')).toBe('blue');
+    expect(ditherHueOf('rgb(120 120 125)')).toBeNull();
+    expect(ditherHueOf('nonsense')).toBeNull();
+  });
+});
