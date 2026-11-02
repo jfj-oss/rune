@@ -45,6 +45,8 @@ export interface SpotifyTrack {
   uri: string;
   explicit?: boolean;
   is_local?: boolean;
+  /** Spotify objects include `type`; episodes are skipped by the library sync. */
+  type?: string;
 }
 
 export interface SpotifyPaging<T> {
@@ -68,7 +70,21 @@ export interface SpotifyPlaylist {
   images?: SpotifyImage[];
   owner?: { id: string; display_name?: string | null };
   tracks?: { total: number };
+  snapshot_id?: string;
   uri?: string;
+}
+
+/** One entry of GET /playlists/:id/tracks (a track, an episode, or a local file). */
+export interface SpotifyPlaylistTrack {
+  added_at: string;
+  is_local?: boolean;
+  track: SpotifyTrack | null;
+}
+
+/** One entry of GET /me/tracks ("Liked Songs"). */
+export interface SpotifySavedTrack {
+  added_at: string;
+  track: SpotifyTrack | null;
 }
 
 export interface SpotifyPlayHistory {
@@ -289,6 +305,52 @@ export class SpotifyApi {
       if (!page.next || page.items.length === 0) break;
     }
     return out;
+  }
+
+  /** PUT /me/albums — save albums to the user's library (max 50 ids per call). */
+  saveAlbums(ids: string[]): Promise<void> {
+    return this.request<void>('/me/albums', { method: 'PUT', body: { ids: ids.slice(0, 50) } });
+  }
+
+  /** DELETE /me/albums — remove albums from the user's library (max 50 ids per call). */
+  removeSavedAlbums(ids: string[]): Promise<void> {
+    return this.request<void>('/me/albums', { method: 'DELETE', body: { ids: ids.slice(0, 50) } });
+  }
+
+  /** All liked songs (GET /me/tracks), following pagination. */
+  savedTracks(opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifySavedTrack>> {
+    return this.request<SpotifyPaging<SpotifySavedTrack>>(
+      this.query('/me/tracks', { limit: clamp(opts.limit ?? 50, 1, 50), offset: opts.offset ?? 0 }),
+    );
+  }
+
+  async allSavedTracks(): Promise<SpotifySavedTrack[]> {
+    const out: SpotifySavedTrack[] = [];
+    let offset = 0;
+    for (;;) {
+      const page = await this.savedTracks({ offset });
+      out.push(...page.items);
+      offset += page.items.length;
+      if (!page.next || page.items.length === 0) break;
+    }
+    return out;
+  }
+
+  playlist(id: string): Promise<SpotifyPlaylist> {
+    return this.request<SpotifyPlaylist>(`/playlists/${encodeURIComponent(id)}`);
+  }
+
+  playlistTracks(id: string, opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylistTrack>> {
+    return this.request<SpotifyPaging<SpotifyPlaylistTrack>>(
+      this.query(`/playlists/${encodeURIComponent(id)}/tracks`, {
+        limit: clamp(opts.limit ?? 50, 1, 50),
+        offset: opts.offset ?? 0,
+      }),
+    );
+  }
+
+  async allPlaylistTracks(id: string): Promise<SpotifyPlaylistTrack[]> {
+    return this.pagedAll<SpotifyPlaylistTrack>(`/playlists/${encodeURIComponent(id)}/tracks`);
   }
 
   playlists(opts: { offset?: number; limit?: number } = {}): Promise<SpotifyPaging<SpotifyPlaylist>> {

@@ -171,3 +171,7 @@ export interface ScanProgress {
   currentPath?: string;
   errors: number;
 }
+
+// ---------- Playlists (worker F) ----------
+// Kept in their own file; re-exported only (no existing types changed).
+export type { PlaylistDetail, PlaylistSummary, PlaylistTrack } from './playlists.js';

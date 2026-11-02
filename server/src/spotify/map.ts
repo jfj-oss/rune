@@ -2,6 +2,7 @@
 import type { Album, AlbumSummary, Artist, ArtistRef, Track } from '@liner/shared';
 import { hash16, ids, normalizeName, type Db } from '../db/index.js';
 import type { SpotifyAlbum, SpotifyArtist, SpotifyImage, SpotifySavedAlbum, SpotifyTrack } from './api.js';
+import { ensureSpotifyLibrarySchema } from './library-schema.js';
 import { ensureSpotifySchema } from './schema.js';
 
 // ---------- ids ----------
@@ -237,6 +238,8 @@ export async function syncSavedAlbums(
   opts: { now?: () => number } = {},
 ): Promise<SyncResult> {
   ensureSpotifySchema(db);
+  // The playlist tables are needed for the "still referenced by a playlist?" check.
+  ensureSpotifyLibrarySchema(db);
   const now = opts.now ?? Date.now;
   const saved = await source.allSavedAlbums();
 
@@ -265,8 +268,8 @@ export async function syncSavedAlbums(
     const upsertAlbum = db.prepare(
       `INSERT INTO albums
          (id, source, title, artist_id, year, release_date, label, genres, format,
-          folder_path, cover_path, spotify_id, added_at)
-       VALUES (?, 'spotify', ?, ?, ?, ?, ?, ?, 'Spotify', NULL, ?, ?, ?)
+          folder_path, cover_path, spotify_id, added_at, in_library)
+       VALUES (?, 'spotify', ?, ?, ?, ?, ?, ?, 'Spotify', NULL, ?, ?, ?, 1)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          artist_id = excluded.artist_id,
@@ -276,7 +279,8 @@ export async function syncSavedAlbums(
          genres = excluded.genres,
          format = excluded.format,
          cover_path = excluded.cover_path,
-         spotify_id = excluded.spotify_id`,
+         spotify_id = excluded.spotify_id,
+         in_library = 1`,
     );
     const upsertTrack = db.prepare(
       `INSERT INTO tracks (id, album_id, source, title, disc, number, duration_ms, spotify_uri)
@@ -364,9 +368,21 @@ export async function syncSavedAlbums(
     result.artists = artistIds.size;
 
     // Albums that disappeared from "Saved Albums" (Spotify albums only).
+    // If a playlist (or Liked Songs) still references one, keep it and hide it from
+    // library listings (in_library = 0); otherwise drop it and its tracks.
+    const playlistRef = db.prepare(
+      `SELECT 1 AS present FROM playlist_tracks pt
+       JOIN tracks t ON t.id = pt.track_id
+       WHERE t.album_id = ? LIMIT 1`,
+    );
+    const hideAlbum = db.prepare('UPDATE albums SET in_library = 0 WHERE id = ?');
     const existing = db.prepare(`SELECT id FROM albums WHERE source = 'spotify'`).all() as { id: string }[];
     for (const row of existing) {
       if (savedAlbumIds.has(row.id)) continue;
+      if (playlistRef.get(row.id)) {
+        hideAlbum.run(row.id);
+        continue;
+      }
       for (const old of oldTracks.all(row.id) as { id: string }[]) ftsDelete(db, 'track', old.id);
       ftsDelete(db, 'album', row.id);
       db.prepare('DELETE FROM albums WHERE id = ?').run(row.id); // tracks cascade

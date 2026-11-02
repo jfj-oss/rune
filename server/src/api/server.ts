@@ -12,7 +12,8 @@ import type { PlaybackZone } from '../modules.js';
 import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
 import { createPcZone, registerStreamRoutes } from '../play/index.js';
-import { createSpotify } from '../spotify/index.js';
+import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
+import { mergeSearchResults } from '../spotify/catalog.js';
 import { coverPath, getAlbum, getArtist, listAlbums, listArtists, search, publicTrack, type AlbumListQuery } from './library.js';
 
 export interface AppOptions {
@@ -20,6 +21,10 @@ export interface AppOptions {
   pcZone?: boolean;
   /** Scan + match on startup. */
   scanOnStart?: boolean;
+  /** Injected Spotify options (fake fetch/endpoints for tests and self-checks). */
+  spotifyOptions?: Omit<CreateSpotifyOptions, 'onLogin'>;
+  /** Sync the Spotify library shortly after startup (default true when connected). */
+  spotifySyncOnStart?: boolean;
   webDist?: string;
 }
 
@@ -45,9 +50,47 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- zones
   const pc: PlaybackZone | undefined = opts.pcZone === false ? undefined : await createPcZone(db, cfg);
   pc?.onChange((state) => broadcast({ type: 'player', state: sanitize(state) }));
-  const spotify = cfg.spotifyClientId ? createSpotify(db, cfg) : undefined;
+  const spotify = cfg.spotifyClientId
+    ? createSpotify(db, cfg, {
+        ...opts.spotifyOptions,
+        // Login callback fires this without awaiting: the redirect must not wait
+        // for the Spotify library to download.
+        onLogin: () => {
+          void runSpotifySync();
+        },
+      })
+    : undefined;
   spotify?.registerRoutes(app);
   const spotifyListeners = new Map<Zone, () => void>();
+
+  // One Spotify sync at a time; scan/scheduler/login/manual all share it.
+  let spotifySyncInFlight: Promise<void> | null = null;
+  function runSpotifySync(): Promise<void> {
+    if (!spotify) return Promise.resolve();
+    if (spotifySyncInFlight) return spotifySyncInFlight;
+    spotifySyncInFlight = (async () => {
+      try {
+        const result = await spotify.syncLibrary();
+        app.log.info({ result }, 'spotify library sync complete');
+        broadcast({ type: 'library-changed' });
+      } catch (err) {
+        // 429s are handled/retried inside the API client; anything else is logged
+        // and the next scheduled sync retries.
+        app.log.warn({ err }, 'spotify library sync failed');
+      } finally {
+        spotifySyncInFlight = null;
+      }
+    })();
+    return spotifySyncInFlight;
+  }
+  async function spotifySyncIfConnected(): Promise<void> {
+    if (!spotify) return;
+    try {
+      if ((await spotify.auth.status()).connected) await runSpotifySync();
+    } catch (err) {
+      app.log.warn({ err }, 'spotify sync trigger failed');
+    }
+  }
 
   function zoneFor(id: Zone): PlaybackZone | undefined {
     if (id === 'pc') return pc;
@@ -81,7 +124,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           if (done % 10 === 0 || done === total) broadcast({ type: 'library-changed' });
         });
         if (spotify && (await spotify.auth.status()).connected) {
-          await spotify.syncSavedAlbums().catch((e) => app.log.warn({ err: e }, 'spotify sync failed'));
+          await runSpotifySync();
         }
       } catch (e) {
         app.log.error({ err: e }, 'scan failed');
@@ -122,8 +165,53 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
 
       r.get<{ Params: { id: string } }>('/albums/:id', async (req, reply) => {
-        const a = getAlbum(db, req.params.id);
-        return a ?? reply.code(404).send({ error: 'not found' });
+        let album = getAlbum(db, req.params.id);
+        // Spotify albums referenced by search/playlists may not be stored yet:
+        // fetch on demand (in_library = 0) and return the stored row.
+        if (!album && spotify && req.params.id.startsWith('sp:')) {
+          try {
+            if ((await spotify.auth.status()).connected) {
+              album = await spotify.fetchAlbum(req.params.id);
+            }
+          } catch (err) {
+            app.log.warn({ err, albumId: req.params.id }, 'on-demand spotify album fetch failed');
+          }
+        }
+        return album ?? reply.code(404).send({ error: 'not found' });
+      });
+
+      r.post<{ Params: { id: string } }>('/albums/:id/save', async (req, reply) => {
+        if (!spotify || !(await spotify.auth.status()).connected) {
+          return reply.code(400).send({ error: 'not_connected' });
+        }
+        if (!req.params.id.startsWith('sp:')) {
+          return reply.code(400).send({ error: 'only Spotify albums can be saved' });
+        }
+        try {
+          const album = await spotify.setAlbumSaved(req.params.id, true);
+          if (!album) return reply.code(404).send({ error: 'not found' });
+          broadcast({ type: 'library-changed' });
+          return album;
+        } catch (err) {
+          return reply.code(502).send({ error: (err as Error).message });
+        }
+      });
+
+      r.delete<{ Params: { id: string } }>('/albums/:id/save', async (req, reply) => {
+        if (!spotify || !(await spotify.auth.status()).connected) {
+          return reply.code(400).send({ error: 'not_connected' });
+        }
+        if (!req.params.id.startsWith('sp:')) {
+          return reply.code(400).send({ error: 'only Spotify albums can be saved' });
+        }
+        try {
+          const album = await spotify.setAlbumSaved(req.params.id, false);
+          if (!album) return reply.code(404).send({ error: 'not found' });
+          broadcast({ type: 'library-changed' });
+          return album;
+        } catch (err) {
+          return reply.code(502).send({ error: (err as Error).message });
+        }
       });
 
       r.get<{ Params: { id: string } }>('/albums/:id/candidates', async (req, reply) => {
@@ -149,7 +237,23 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       r.get<{ Querystring: { q?: string } }>('/search', async (req) => {
         const q = (req.query.q ?? '').trim();
         if (!q) return { albums: [], artists: [], tracks: [] };
-        return search(db, q);
+        const local = search(db, q);
+        if (!spotify) return local;
+        try {
+          if (!(await spotify.auth.status()).connected) return local;
+          // Local hits first, then Spotify catalogue hits (60 s cache inside).
+          return mergeSearchResults(local, await spotify.searchCatalog(q));
+        } catch (err) {
+          app.log.warn({ err }, 'spotify catalogue search failed');
+          return local;
+        }
+      });
+
+      r.get('/playlists', async () => (spotify ? spotify.listPlaylists() : []));
+
+      r.get<{ Params: { id: string } }>('/playlists/:id', async (req, reply) => {
+        const playlist = spotify?.getPlaylist(req.params.id);
+        return playlist ?? reply.code(404).send({ error: 'not found' });
       });
 
       r.get<{ Params: { id: string } }>('/tracks/:id', async (req, reply) => {
@@ -203,6 +307,17 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { started: true };
       });
       r.get('/scan', async () => last);
+
+      // Manual Spotify sync: starts in the background, never waits for Spotify.
+      r.post('/spotify/sync', async (_req, reply) => {
+        if (!spotify) return reply.code(404).send({ error: 'spotify not configured' });
+        if (!(await spotify.auth.status()).connected) {
+          return reply.code(400).send({ error: 'not_connected' });
+        }
+        const started = spotifySyncInFlight === null;
+        void runSpotifySync();
+        return { started, running: true };
+      });
     },
     { prefix: '/api' },
   );
@@ -220,9 +335,28 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
   if (opts.scanOnStart !== false) setTimeout(() => void runScan(), 500);
 
+  // Spotify library: once shortly after startup, then every 30 minutes. The
+  // first sync waits for the DB/HTTP server to settle; neither trigger blocks a
+  // request (runSpotifySync is fire-and-forget from routes).
+  let spotifyStartTimer: ReturnType<typeof setTimeout> | null = null;
+  let spotifyInterval: ReturnType<typeof setInterval> | null = null;
+  if (spotify && opts.spotifySyncOnStart !== false) {
+    spotifyStartTimer = setTimeout(() => {
+      void spotifySyncIfConnected();
+    }, 1000);
+    spotifyStartTimer.unref?.();
+    spotifyInterval = setInterval(() => {
+      void spotifySyncIfConnected();
+    }, 30 * 60_000);
+    spotifyInterval.unref?.();
+  }
+
   return {
     app,
     close: async () => {
+      if (spotifyStartTimer) clearTimeout(spotifyStartTimer);
+      if (spotifyInterval) clearInterval(spotifyInterval);
+      if (spotifySyncInFlight) await spotifySyncInFlight.catch(() => undefined);
       for (const off of spotifyListeners.values()) off();
       await spotify?.zones.close();
       await pc?.close();
