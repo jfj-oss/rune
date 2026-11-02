@@ -72,12 +72,22 @@ export class LocalBackend implements Backend {
     if (status !== s.status || Math.abs(pos - livePosition(s)) > 700) this.set({ status, positionMs: pos, updatedAt: Date.now() });
   }
 
+  /** What plays after the current track, in order (repeat-one replays it, so nothing comes next). */
+  private upcomingTracks() {
+    return this.state.repeat === 'one' ? [] : this.state.queue.slice(this.state.index + 1, this.state.index + 21).map((q) => q.track);
+  }
+
+  /** A queue edit changed what is next: let a look-ahead engine release/refresh its buffer. */
+  private refreshUpcoming() {
+    const s = this.state;
+    if (s.status !== 'playing' && s.status !== 'paused') return;
+    this.engine.setUpcoming?.(this.upcomingTracks());
+  }
+
   private startCurrent(positionMs = 0, autoplay = true) {
     const cur = this.state.queue[this.state.index];
     if (!cur) { this.engine.stop(); return; }
-    // what plays after this one, in order (repeat-one replays it, so nothing comes next)
-    const upcoming = this.state.repeat === 'one' ? [] : this.state.queue.slice(this.state.index + 1, this.state.index + 21).map((q) => q.track);
-    this.engine.load(cur.track, positionMs, autoplay, upcoming);
+    this.engine.load(cur.track, positionMs, autoplay, this.upcomingTracks());
     this.set({ status: autoplay ? 'playing' : 'paused', positionMs, updatedAt: Date.now() });
   }
 
@@ -126,6 +136,7 @@ export class LocalBackend implements Backend {
         if (s.queue.length === 0) patch.index = 0;
         this.set(patch);
         if (wasEmpty && s.queue.length === 0) this.startCurrent(0);
+        else this.refreshUpcoming();
         return;
       }
       case 'pause':
@@ -153,8 +164,8 @@ export class LocalBackend implements Backend {
         const i = s.queue.findIndex((q) => q.queueId === cmd.queueId);
         if (i < 0) return;
         const queue = s.queue.filter((_, k) => k !== i);
-        if (i < s.index) this.set({ queue, index: s.index - 1 });
-        else if (i > s.index) this.set({ queue });
+        if (i < s.index) { this.set({ queue, index: s.index - 1 }); this.refreshUpcoming(); }
+        else if (i > s.index) { this.set({ queue }); this.refreshUpcoming(); }
         else if (queue.length === 0) { this.engine.stop(); this.set({ queue, index: -1, status: 'stopped', positionMs: 0, updatedAt: Date.now() }); }
         else { this.set({ queue, index: Math.min(i, queue.length - 1) }); this.startCurrent(0, s.status === 'playing'); }
         return;
@@ -173,6 +184,7 @@ export class LocalBackend implements Backend {
         queue.splice(to, 0, it as QueueItem);
         const cur = s.queue[s.index]?.queueId;
         this.set({ queue, index: cur ? queue.findIndex((q) => q.queueId === cur) : s.index });
+        this.refreshUpcoming();
         return;
       }
       case 'volume':
@@ -189,10 +201,12 @@ export class LocalBackend implements Backend {
           }
           this.set({ shuffle: true, queue: [...head, ...tail] });
         } else this.set({ shuffle: cmd.on });
+        this.refreshUpcoming();
         return;
       }
       case 'repeat':
         this.set({ repeat: cmd.mode });
+        this.refreshUpcoming();
         return;
     }
   }

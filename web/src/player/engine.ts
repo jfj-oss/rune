@@ -5,6 +5,8 @@ import { isLiveTrack } from '../lib/listenTypes';
 export interface Engine {
   /** `upcoming`: the songs after this one in play order (engines that can load ahead use it). */
   load(track: Track, startMs: number, autoplay: boolean, upcoming?: Track[]): void;
+  /** The queue changed without a track change: keep/drop the look-ahead buffer in sync. */
+  setUpcoming?(upcoming: Track[]): void;
   play(): void;
   pause(): void;
   seek(ms: number): void;
@@ -238,6 +240,8 @@ export class AudioEngine implements Engine {
     // Keep one song buffered ahead; release it when the queue now points elsewhere.
     this.setPreload(upcoming[0]);
   }
+
+  setUpcoming(upcoming: Track[]) { this.setPreload(upcoming[0]); }
 
   play() {
     this.resumeContext();

@@ -13,6 +13,7 @@ class Fake implements Engine {
   sync: (p: number, playing: boolean) => void = () => {};
   constructor(public name: string) {}
   load(t: Track, s: number, a: boolean) { this.calls.push(`load:${t.id}@${s}:${a}`); }
+  setUpcoming(tracks: Track[]) { this.calls.push(`upcoming:${tracks.map((t) => t.id).join(',')}`); }
   play() { this.calls.push('play'); }
   pause() { this.calls.push('pause'); }
   seek(ms: number) { this.calls.push(`seek:${ms}`); }
@@ -132,6 +133,24 @@ describe('one queue across both engines (LocalBackend + HybridEngine)', () => {
     expect(local.calls.filter((c) => c === 'pause')).toHaveLength(0);
     await b.send({ type: 'jump', index: 0 });
     expect(local.calls.at(-1)).toBe('load:l:1@0:true');
+    b.dispose();
+  });
+
+  it('refreshes the look-ahead when the queue is edited without changing track', async () => {
+    const L3 = track('l:3', 'local'), L4 = track('l:4', 'local');
+    const local = new Fake('local'), sp = new Fake('spotify');
+    const b = new LocalBackend('browser', new HybridEngine(local, sp));
+
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, [item(L1), item(L2), item(L3)]);
+
+    await b.send({ type: 'enqueue', trackIds: [], next: true }, [item(L4)]);
+    expect(local.calls.at(-1)).toBe('upcoming:l:4,l:2,l:3');
+
+    await b.send({ type: 'repeat', mode: 'one' });
+    expect(local.calls.at(-1)).toBe('upcoming:');
+
+    await b.send({ type: 'repeat', mode: 'off' });
+    expect(local.calls.at(-1)).toBe('upcoming:l:4,l:2,l:3');
     b.dispose();
   });
 

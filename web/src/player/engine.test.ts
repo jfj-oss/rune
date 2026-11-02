@@ -137,6 +137,21 @@ describe('AudioEngine look-ahead', () => {
     expect(spare.src).toBe('');
   });
 
+  it('releases or replaces the preload when the queue changes', () => {
+    const engine = new AudioEngine();
+    const b = local('l:B');
+    const c = local('l:C');
+    engine.load(local('l:A'), 0, true, [b]);
+    const preloaded = elementFor(b.id)!;
+
+    engine.setUpcoming([c]);
+    expect(preloaded.src).toBe(streamSrc(c.id)); // same element now buffers C
+    expect(elementFor(b.id)).toBeUndefined();
+
+    engine.setUpcoming([]);
+    expect(preloaded.src).toBe('');
+  });
+
   it('ignores metadata from a load that has already been superseded', () => {
     const engine = new AudioEngine();
     engine.load(local('l:A'), 5000, true, []);
