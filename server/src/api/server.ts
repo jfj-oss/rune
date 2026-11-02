@@ -36,6 +36,14 @@ export interface AppOptions {
 
 const IMAGE_TYPES: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
 
+/** A real MusicBrainz release id: 5 hyphen-separated hex groups (not just 36 of anything). */
+const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Fastify yields an array for repeated query keys (`?q=a&q=b`); take the first. */
+function queryValue(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<{ app: FastifyInstance; close: () => Promise<void> }> {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   await app.register(websocket);
@@ -194,18 +202,21 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         socket.send(JSON.stringify({ type: 'scan', progress: last } satisfies ServerEvent));
       });
 
-      r.get<{ Querystring: Record<string, string | undefined> }>('/library/albums', async (req) => {
+      r.get<{ Querystring: Record<string, string | string[] | undefined> }>('/library/albums', async (req) => {
         const q = req.query;
+        const offset = queryValue(q.offset);
+        const limit = queryValue(q.limit);
+        const year = queryValue(q.year);
         const query: AlbumListQuery = {
-          q: q.q,
-          source: (q.source as AlbumListQuery['source']) ?? 'all',
-          sort: q.sort as AlbumListQuery['sort'],
-          offset: q.offset ? Number(q.offset) : undefined,
-          limit: q.limit ? Number(q.limit) : undefined,
-          genre: q.genre,
-          label: q.label,
-          year: q.year ? Number(q.year) : undefined,
-          artistId: q.artist,
+          q: queryValue(q.q),
+          source: (queryValue(q.source) as AlbumListQuery['source']) ?? 'all',
+          sort: queryValue(q.sort) as AlbumListQuery['sort'],
+          offset: offset ? Number(offset) : undefined,
+          limit: limit ? Number(limit) : undefined,
+          genre: queryValue(q.genre),
+          label: queryValue(q.label),
+          year: year ? Number(year) : undefined,
+          artistId: queryValue(q.artist),
         };
         return listAlbums(db, query);
       });
@@ -268,7 +279,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
       r.post<{ Params: { id: string }; Body: { musicbrainzReleaseId?: string } }>('/albums/:id/match', async (req, reply) => {
         const mbid = req.body?.musicbrainzReleaseId;
-        if (!mbid || !/^[0-9a-f-]{36}$/i.test(mbid)) return reply.code(400).send({ error: 'musicbrainzReleaseId required' });
+        if (!mbid || !MBID_RE.test(mbid)) return reply.code(400).send({ error: 'musicbrainzReleaseId required' });
+        // Check before matching: matcher.setRelease throws for unknown ids (500) and
+        // would hit MusicBrainz for a release nobody can apply.
+        if (!getAlbum(db, req.params.id)) return reply.code(404).send({ error: 'not found' });
         await matcher.setRelease(req.params.id, mbid);
         meta.invalidate(req.params.id);
         broadcast({ type: 'library-changed' });
@@ -286,10 +300,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const a = getArtist(db, req.params.id);
         return a ?? reply.code(404).send({ error: 'not found' });
       });
-      r.get<{ Querystring: { q?: string } }>('/artists', async (req) => listArtists(db, req.query.q));
+      r.get<{ Querystring: { q?: string | string[] } }>('/artists', async (req) =>
+        listArtists(db, queryValue(req.query.q)),
+      );
 
-      r.get<{ Querystring: { q?: string } }>('/search', async (req) => {
-        const q = (req.query.q ?? '').trim();
+      r.get<{ Querystring: { q?: string | string[] } }>('/search', async (req) => {
+        const q = (queryValue(req.query.q) ?? '').trim();
         if (!q) return { albums: [], artists: [], tracks: [] };
         const local = search(db, q);
         if (!spotify) return local;
