@@ -131,18 +131,25 @@ describe('ditherHueOf', () => {
 });
 
 describe('waveAt', () => {
-  it('swells out, turns at the middle, draws back in, and ends at rest', async () => {
+  it('swells out, rests at the peak, then draws back in faster and faster to rest', async () => {
     const { waveAt, WAVE } = await import('./dither');
     expect(waveAt(-1).amt).toBe(0);
     expect(waveAt(0).amt).toBeCloseTo(0, 5);
-    expect(waveAt(WAVE.length / 2).amt).toBeCloseTo(1, 5);
-    expect(waveAt(WAVE.length * 0.25).dir).toBe(1);
-    expect(waveAt(WAVE.length * 0.75).dir).toBe(-1);
-    expect(waveAt(WAVE.length - 0.02).amt).toBeLessThan(0.01);
+    expect(waveAt(WAVE.rise * 0.5).dir).toBe(1);
+    // resting at the peak
+    expect(waveAt(WAVE.rise + 0.01).amt).toBe(1);
+    expect(waveAt(WAVE.rise + WAVE.hold - 0.01).amt).toBe(1);
+    expect(waveAt(WAVE.rise + WAVE.hold * 0.5).dir).toBe(0);
+    // the way back accelerates: the drop in the first quarter is smaller than in the second
+    const at = (q: number) => waveAt(WAVE.rise + WAVE.hold + q * WAVE.fall).amt;
+    expect(1 - at(0.25)).toBeLessThan(at(0.25) - at(0.5));
+    expect(waveAt(WAVE.rise + WAVE.hold + 0.1).dir).toBe(-1);
+    // and lands softly
+    expect(at(0.99)).toBeLessThan(0.002);
     expect(waveAt(WAVE.length).amt).toBe(0);
   });
 
-  it('lifts the field enough to cover ~60-70% of desktop and phone screens at the peak', async () => {
+  it('lifts the field enough to cover ~80% of desktop and phone screens at the peak', async () => {
     const { field, toneCurve, wavePeakExponent } = await import('./dither');
     for (const aspect of [1.6, 0.46]) {
       const e = wavePeakExponent(aspect);
@@ -154,8 +161,8 @@ describe('waveAt', () => {
           n++;
         }
       }
-      expect(on / n).toBeGreaterThan(0.58);
-      expect(on / n).toBeLessThan(0.72);
+      expect(on / n).toBeGreaterThan(0.79);
+      expect(on / n).toBeLessThan(0.88);
     }
   });
 });

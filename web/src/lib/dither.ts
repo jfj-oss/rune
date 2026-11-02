@@ -270,27 +270,33 @@ export function ditherHueOf(css: string): DitherHue | null {
 }
 
 /**
- * New-song wave: the dot shapes already on screen swell outwards until they cover ~60-70% of the page, then
- * draw back in, once. The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes
- * grow from where they are. `amt` 0..1 (how far out), `dir` +1 while swelling, -1 while drawing back.
+ * New-song wave: the dot shapes already on screen swell outwards until they cover ~80% of the page, rest
+ * there a moment, then draw back in, slowly at first and faster as they shrink, settling softly at rest.
+ * The shader lifts the field (f -> f^e): faint shape edges fill in first, so the shapes grow from where they
+ * are. `amt` 0..1 (how far out), `dir` +1 swelling, 0 holding, -1 drawing back.
  */
-export const WAVE = { length: 3.2, ripple: 0.035 };
+export const WAVE = { rise: 1.3, hold: 0.8, fall: 1.3, ripple: 0.035, get length() { return this.rise + this.hold + this.fall; } };
 
 /**
  * Field exponent at the peak for a screen shape (width / height). Measured with field() over many frames,
- * counting clearly filled dots (tone > 0.4): desktop 16:10 28% at rest -> ~65% at 0.27, phone portrait
- * 39% -> ~65% at 0.4.
+ * counting clearly filled dots (tone > 0.4): desktop 16:10 28% at rest -> ~82% at 0.16 (~80% of the screen in practice), phone portrait
+ * 39% -> ~83% at 0.24.
  */
 export function wavePeakExponent(aspect: number): number {
   const k = Math.min(1, Math.max(0, (aspect - 0.46) / (1.6 - 0.46)));
-  return 0.4 + (0.27 - 0.4) * k;
+  return 0.24 + (0.16 - 0.24) * k;
 }
 
 export function waveAt(dt: number): { amt: number; dir: number; t: number } {
-  if (!(dt >= 0) || dt >= WAVE.length) return { amt: 0, dir: 1, t: 0 };
-  const p = dt / WAVE.length;
-  // out and back in, easing at both ends and at the turn
-  return { amt: 0.5 - 0.5 * Math.cos(2 * Math.PI * p), dir: p < 0.5 ? 1 : -1, t: dt };
+  const { rise, hold, fall, length } = WAVE;
+  if (!(dt >= 0) || dt >= length) return { amt: 0, dir: 1, t: 0 };
+  // out: eases into the peak
+  if (dt < rise) return { amt: Math.sin((Math.PI / 2) * (dt / rise)), dir: 1, t: dt };
+  // a moment at full size
+  if (dt < rise + hold) return { amt: 1, dir: 0, t: dt };
+  // back: starts gently, accelerates, then lands softly at rest
+  const q = (dt - rise - hold) / fall;
+  return { amt: 0.5 + 0.5 * Math.cos(Math.PI * Math.pow(q, 1.4)), dir: -1, t: dt };
 }
 
 /** Parse `rgb(r g b)`, `rgb(r, g, b)` or `hsl(h s% l%)` (as useCoverColor gives) to 0..255 RGB. */
