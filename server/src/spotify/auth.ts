@@ -366,6 +366,8 @@ export class SpotifyAuth {
 export interface SpotifyRouteOptions extends SpotifyAuthOptions {
   /** Override the object used by routes (tests may pre-seed tokens). */
   auth?: SpotifyAuth;
+  /** Fired after a successful login callback; the server starts a library sync. */
+  onLogin?: () => void;
 }
 
 /**
@@ -408,6 +410,9 @@ export function registerSpotifyRoutes(
     }
     try {
       await auth.handleCallback(query.code, query.state);
+      // Do not await the sync: the browser goes straight to the app while the
+      // library fills in behind it.
+      opts.onLogin?.();
       return reply.redirect('/');
     } catch (err) {
       return errorReply(reply, 400, err);

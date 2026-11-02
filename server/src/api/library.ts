@@ -2,6 +2,7 @@
 // album.folderPath (shown in "Copy folder path").
 import type { Album, AlbumSummary, Artist, ArtistRef, Credit, Page, Track } from '@liner/shared';
 import type { Db } from '../db/index.js';
+import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { loadTrack } from '../play/rows.js';
 
 export interface AlbumListQuery {
@@ -14,6 +15,8 @@ export interface AlbumListQuery {
   label?: string;
   year?: number;
   artistId?: string;
+  /** Default true: only albums in the user's library (Spotify in_library = 1). */
+  inLibrary?: boolean;
 }
 
 interface AlbumRow {
@@ -69,8 +72,12 @@ export function ftsQuery(q: string): string | null {
 }
 
 export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
+  ensureSpotifyLibrarySchema(db);
   const where: string[] = [];
   const args: unknown[] = [];
+  // Spotify albums that exist only because a playlist/search referenced them stay
+  // addressable by id (getAlbum) but are not part of the library grid.
+  if (q.inLibrary !== false) where.push('a.in_library = 1');
   if (q.source && q.source !== 'all') {
     where.push('a.source = ?');
     args.push(q.source);
@@ -161,16 +168,17 @@ export function getAlbum(db: Db, id: string): Album | undefined {
 }
 
 export function getArtist(db: Db, id: string): Omit<Artist, 'bio'> | undefined {
+  ensureSpotifyLibrarySchema(db);
   const a = db.prepare('SELECT id, name, mbid, image_path FROM artists WHERE id = ?').get(id) as
     | { id: string; name: string; mbid: string | null; image_path: string | null }
     | undefined;
   if (!a) return undefined;
-  const own = (db.prepare(`${ALBUM_SELECT} WHERE a.artist_id = ? ORDER BY a.year, a.title`).all(id) as AlbumRow[]).map(summary);
+  const own = (db.prepare(`${ALBUM_SELECT} WHERE a.artist_id = ? AND a.in_library = 1 ORDER BY a.year, a.title`).all(id) as AlbumRow[]).map(summary);
   const ownIds = new Set(own.map((x) => x.id));
   const appears = (
     db
       .prepare(
-        `${ALBUM_SELECT} WHERE a.id IN (
+        `${ALBUM_SELECT} WHERE a.in_library = 1 AND a.id IN (
            SELECT t.album_id FROM track_artists ta JOIN tracks t ON t.id = ta.track_id WHERE ta.artist_id = ?
            UNION SELECT album_id FROM credits WHERE artist_id = ?)
          ORDER BY a.year, a.title`,
@@ -185,7 +193,7 @@ export function getArtist(db: Db, id: string): Omit<Artist, 'bio'> | undefined {
       `SELECT DISTINCT ar.id, ar.name FROM credits c1
        JOIN credits c2 ON c2.album_id = c1.album_id AND c2.artist_id != c1.artist_id
        JOIN artists ar ON ar.id = c2.artist_id
-       WHERE c1.artist_id = ? AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = ar.id)
+       WHERE c1.artist_id = ? AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = ar.id AND x.in_library = 1)
        LIMIT 12`,
     )
     .all(id) as ArtistRef[];
@@ -201,12 +209,13 @@ export function getArtist(db: Db, id: string): Omit<Artist, 'bio'> | undefined {
 }
 
 export function listArtists(db: Db, q?: string): { id: string; name: string; albumCount: number; coverAlbumId?: string }[] {
+  ensureSpotifyLibrarySchema(db);
   const like = q ? `%${q}%` : '%';
   return (
     db
       .prepare(
         `SELECT ar.id, ar.name, count(a.id) AS albumCount, max(a.id) AS coverAlbumId
-         FROM artists ar JOIN albums a ON a.artist_id = ar.id
+         FROM artists ar JOIN albums a ON a.artist_id = ar.id AND a.in_library = 1
          WHERE ar.name LIKE ? GROUP BY ar.id ORDER BY coalesce(ar.sort_name, ar.name) COLLATE NOCASE`,
       )
       .all(like) as { id: string; name: string; albumCount: number; coverAlbumId: string }[]
@@ -214,19 +223,27 @@ export function listArtists(db: Db, q?: string): { id: string; name: string; alb
 }
 
 export function search(db: Db, q: string): { albums: AlbumSummary[]; artists: ArtistRef[]; tracks: Track[] } {
+  ensureSpotifyLibrarySchema(db);
   const fts = ftsQuery(q);
   const like = `%${q}%`;
   const albums = listAlbums(db, { q, limit: 12, sort: 'artist' }).items;
   const artists = db
     .prepare(
-      `SELECT id, name FROM artists WHERE name LIKE ?
-       ${fts ? "OR id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'artist')" : ''}
+      `SELECT id, name FROM artists
+       WHERE (name LIKE ? ${fts ? "OR id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'artist')" : ''})
+         AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = artists.id AND x.in_library = 1)
        ORDER BY (EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id)) DESC, length(name) LIMIT 8`,
     )
     .all(...(fts ? [like, fts] : [like])) as ArtistRef[];
   const trackIds = fts
     ? (db
-        .prepare(`SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'track' ORDER BY rank LIMIT 12`)
+        .prepare(
+          `SELECT search_fts.ref_id FROM search_fts
+           JOIN tracks t ON t.id = search_fts.ref_id
+           JOIN albums a ON a.id = t.album_id AND a.in_library = 1
+           WHERE search_fts MATCH ? AND search_fts.kind = 'track'
+           ORDER BY search_fts.rank LIMIT 12`,
+        )
         .all(fts) as { ref_id: string }[])
     : [];
   const tracks = trackIds.map((t) => loadTrack(db, t.ref_id)).filter((t): t is Track => !!t).map(publicTrack);
