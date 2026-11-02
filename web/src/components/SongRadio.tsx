@@ -32,8 +32,8 @@ export function SongRadio() {
   });
 
   const playItems = usePlayer((s) => s.playItems);
-  const state = usePlayer((s) => s.state);
-  const current = state.queue[state.index];
+  const curId = usePlayer((s) => s.state.queue[s.state.index]?.track.id);
+  const status = usePlayer((s) => s.state.status);
 
   useEffect(() => {
     if (!track) return;
@@ -105,8 +105,9 @@ export function SongRadio() {
           <DiscoverRow
             key={item.track.id}
             item={item}
-            playing={current?.track.id === item.track.id}
-            isPlaying={state.status === 'playing'}
+            index={i}
+            playing={curId === item.track.id}
+            isPlaying={status === 'playing'}
             onPlay={() => playAt(i)}
             onDismiss={() => void dismiss(i)}
           />

@@ -7,16 +7,17 @@ import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 
 export function MiniPlayer() {
-  const state = usePlayer((s) => s.state);
+  const cur = usePlayer((s) => currentItem(s.state));
+  const status = usePlayer((s) => s.state.status);
+  const nowPlaying = usePlayer((s) => s.state.nowPlaying);
   const command = usePlayer((s) => s.command);
   const setNp = useUi((s) => s.setNowPlayingOpen);
   const pos = usePosition(500);
-  const cur = currentItem(state);
   if (!cur) return null;
   const live = isLiveTrack(cur.track);
-  const meta = live ? liveMeta(state, cur) : null;
+  const meta = live ? liveMeta({ nowPlaying }, cur) : null;
   const liveSub = meta ? [meta.artist, meta.title !== meta.station ? meta.station : ''].filter(Boolean).join(' · ') : '';
-  const playing = state.status === 'playing' || state.status === 'loading';
+  const playing = status === 'playing' || status === 'loading';
   const pct = cur.track.durationMs ? Math.min(100, (pos / cur.track.durationMs) * 100) : 0;
   return (
     <div className="mini" role="group" aria-label="Mini player">
