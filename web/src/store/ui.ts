@@ -40,6 +40,7 @@ function loadAmbient(): Ambient {
 /** Page colour behind everything; iOS home-screen apps also paint their status/home-bar strips with it. */
 const PAGE_BG: Partial<Record<Ambient, string>> = { off: '#0f1013' };
 function applyAmbient(a: Ambient) {
+  if (typeof document === 'undefined') return; // node (unit tests): nothing to paint
   document.documentElement.dataset.ambient = a;
   const bg = a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#00161c';
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute('content', bg);

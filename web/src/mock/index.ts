@@ -42,6 +42,12 @@ export const mockApi = {
     const off = q.offset ?? 0;
     return wait({ items: list.slice(off, off + (q.limit ?? 60)), total: list.length });
   },
+  async albumSummaries(ids: string[]): Promise<{ items: AlbumSummary[]; total: number }> {
+    const items = ids
+      .map((id) => SUMMARIES.find((a) => a.id === id))
+      .filter((a): a is AlbumSummary => a !== undefined);
+    return wait({ items, total: items.length });
+  },
   async album(id: string): Promise<Album> {
     const a = ALBUMS.find((x) => x.id === id);
     if (!a) throw new Error('not found');

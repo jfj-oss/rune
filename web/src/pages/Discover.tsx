@@ -19,9 +19,10 @@ export default function Discover() {
   const [refreshing, setRefreshing] = useState(false);
   const q = useQuery({ queryKey: KEY, queryFn: () => newSongsApi.feed(100, false), staleTime: 5 * 60_000 });
 
-  const state = usePlayer((s) => s.state);
+  // Only what the rows need: a position tick must not re-render all 100 cards.
+  const curId = usePlayer((s) => currentItem(s.state)?.track.id);
+  const status = usePlayer((s) => s.state.status);
   const playItems = usePlayer((s) => s.playItems);
-  const cur = currentItem(state);
 
   const data = q.data;
   const groups = data?.groups ?? [];
@@ -116,8 +117,9 @@ export default function Discover() {
                 <DiscoverRow
                   key={item.track.id}
                   item={item}
-                  playing={cur?.track.id === item.track.id}
-                  isPlaying={state.status === 'playing'}
+                  index={i}
+                  playing={curId === item.track.id}
+                  isPlaying={status === 'playing'}
                   onPlay={() => playGroup(group.items, i)}
                   onDismiss={() => void dismiss(item)}
                 />

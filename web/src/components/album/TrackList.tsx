@@ -10,9 +10,13 @@ import { Popover } from '../Popover';
 import { TrackMenuItems, trackMenuHandler } from '../TrackMenu';
 
 export function TrackList({ album }: { album: Album }) {
-  const state = usePlayer((s) => s.state);
+  // Position ticks do not touch the queue, so subscribe to the current id/status only.
+  const curId = usePlayer((s) => {
+    const cur = currentItem(s.state);
+    return cur && cur.album.id === album.id ? cur.track.id : undefined;
+  });
+  const status = usePlayer((s) => s.state.status);
   const playItems = usePlayer((s) => s.playItems);
-  const cur = currentItem(state);
   const items = albumItems(album);
   const multi = new Set(album.tracks.map((t) => t.disc)).size > 1;
   let lastDisc = 0;
@@ -21,7 +25,7 @@ export function TrackList({ album }: { album: Album }) {
     <div className="tracks" role="table" aria-label="Tracks">
       {items.map((it, i) => {
         const t = it.track;
-        const playing = cur?.track.id === t.id && cur.album.id === album.id;
+        const playing = curId === t.id;
         const differs = t.artists.length !== 1 || t.artists[0]?.id !== album.artist.id;
         const head = multi && t.disc !== lastDisc;
         lastDisc = t.disc;
@@ -30,7 +34,7 @@ export function TrackList({ album }: { album: Album }) {
             {head && <div className="tracks__disc" role="row">Disc {t.disc}</div>}
             <div id={`trk-${t.id}`} className={`trow${playing ? ' is-playing' : ''}`} role="row" onContextMenu={trackMenuHandler(it)} onClick={(e) => { if ((e.target as HTMLElement).closest('a,button,.pop,[role="menu"]')) return; void playItems(items, i); }}>
               <button className="trow__num" aria-label={`Play ${t.title}`} onClick={() => void playItems(items, i)}>
-                <span className="trow__n">{playing ? <Eq playing={state.status === 'playing'} /> : t.number}</span>
+                <span className="trow__n">{playing ? <Eq playing={status === 'playing'} /> : t.number}</span>
                 <Play size={14} fill="currentColor" className="trow__p" />
               </button>
               <div className="trow__title">

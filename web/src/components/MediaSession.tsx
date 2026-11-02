@@ -5,16 +5,21 @@ import { currentItem, usePlayer } from '../store/player';
 
 /** Lock-screen / hardware-key controls for the browser zone, wired to the player store. */
 export function MediaSessionBridge() {
-  const state = usePlayer((s) => s.state);
+  // Narrow subscriptions: the bridge only needs the track identity, transport status and position.
+  const zone = usePlayer((s) => s.state.zone);
+  const status = usePlayer((s) => s.state.status);
+  const updatedAt = usePlayer((s) => s.state.updatedAt);
+  const positionMs = usePlayer((s) => s.state.positionMs);
+  const curId = usePlayer((s) => s.state.queue[s.state.index]?.track.id);
   const zones = usePlayer((s) => s.zones);
   const command = usePlayer((s) => s.command);
-  const kind = zones.find((z) => z.id === state.zone)?.kind;
-  const cur = currentItem(state);
+  const kind = zones.find((z) => z.id === zone)?.kind;
   const active = kind === 'browser' && 'mediaSession' in navigator;
 
   useEffect(() => {
     if (!active) return;
     const ms = navigator.mediaSession;
+    const cur = currentItem(usePlayer.getState().state);
     if (!cur) { ms.metadata = null; ms.playbackState = 'none'; return; }
     ms.metadata = new MediaMetadata({
       title: cur.track.title,
@@ -22,16 +27,18 @@ export function MediaSessionBridge() {
       album: cur.album.title,
       artwork: [{ src: new URL(coverSrc(cur.album, 600), location.href).href, sizes: '600x600' }],
     });
-  }, [active, cur?.track.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, curId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active) return;
     const ms = navigator.mediaSession;
-    ms.playbackState = state.status === 'playing' ? 'playing' : state.status === 'paused' ? 'paused' : 'none';
+    const state = usePlayer.getState().state;
+    const cur = currentItem(state);
+    ms.playbackState = status === 'playing' ? 'playing' : status === 'paused' ? 'paused' : 'none';
     try {
       if (cur && cur.track.durationMs > 0) ms.setPositionState({ duration: cur.track.durationMs / 1000, position: livePosition(state) / 1000, playbackRate: 1 });
     } catch { /* invalid state while loading */ }
-  }, [active, state.status, state.updatedAt, cur?.track.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, status, updatedAt, positionMs, curId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active) return;

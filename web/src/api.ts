@@ -55,6 +55,11 @@ export const api = {
     if (isMock) return (await mock()).mockApi.albums(q);
     return http(`/library/albums${qs({ ...q, source: q.source === 'all' ? undefined : q.source })}`);
   },
+  /** Summaries for specific ids, returned in the order given; unknown ids are skipped. */
+  async albumSummaries(ids: string[]): Promise<{ items: AlbumSummary[]; total: number }> {
+    if (isMock) return (await mock()).mockApi.albumSummaries(ids);
+    return http(`/library/albums${qs({ ids: ids.join(',') })}`);
+  },
   async album(id: string): Promise<Album> {
     if (isMock) return (await mock()).mockApi.album(id);
     return http(`/albums/${encodeURIComponent(id)}`);

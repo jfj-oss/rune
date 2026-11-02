@@ -7,7 +7,7 @@ import { usePeaks } from '../../hooks/usePeaks';
 import { isLiveTrack } from '../../lib/listenTypes';
 import type { ZoneInfo } from '../../lib/types';
 import { isMixedQueue } from '../../player/pc';
-import { currentItem, usePlayer, useSignalPath } from '../../store/player';
+import { usePlayer, useSignalPath } from '../../store/player';
 import { Popover } from '../Popover';
 import { detectIOS } from '../../lib/volume';
 import { Slider } from './Slider';
@@ -23,13 +23,13 @@ interface SeekBarProps {
 }
 
 export function SeekBar({ showTimes = true, className = '', buckets = 400 }: SeekBarProps) {
-  const state = usePlayer((s) => s.state);
+  const index = usePlayer((s) => s.state.index);
+  const cur = usePlayer((s) => s.state.queue[s.state.index]);
   const command = usePlayer((s) => s.command);
   const pos = usePosition();
   const [drag, setDrag] = useState<number | null>(null);
-  const cur = currentItem(state);
   // a new song never inherits a half-finished drag of the previous one
-  const curKey = cur ? `${state.index}:${cur.track.id}` : '';
+  const curKey = cur ? `${index}:${cur.track.id}` : '';
   useEffect(() => { setDrag(null); }, [curKey]);
   const live = isLiveTrack(cur?.track);
   const dur = cur?.track.durationMs ?? 0;
@@ -94,15 +94,16 @@ export function PlayPause({ size = 40, className = '' }: { size?: number; classN
 }
 
 export function Transport({ big = false, extras = true }: { big?: boolean; extras?: boolean }) {
-  const state = usePlayer((s) => s.state);
+  const hasQueue = usePlayer((s) => s.state.queue.length > 0);
+  const shuffle = usePlayer((s) => s.state.shuffle);
+  const repeat = usePlayer((s) => s.state.repeat);
   const command = usePlayer((s) => s.command);
-  const hasQueue = state.queue.length > 0;
-  const next = state.repeat === 'off' ? 'all' : state.repeat === 'all' ? 'one' : 'off';
+  const next = repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off';
   const px = big ? 26 : 20;
   return (
     <div className={`transport${big ? ' transport--big' : ''}`}>
       {extras && (
-        <button className={`btn-icon${state.shuffle ? ' is-on' : ''}`} aria-label="Shuffle" aria-pressed={state.shuffle} onClick={() => void command({ type: 'shuffle', on: !state.shuffle })}>
+        <button className={`btn-icon${shuffle ? ' is-on' : ''}`} aria-label="Shuffle" aria-pressed={shuffle} onClick={() => void command({ type: 'shuffle', on: !shuffle })}>
           <Shuffle size={px - 4} />
         </button>
       )}
@@ -114,8 +115,8 @@ export function Transport({ big = false, extras = true }: { big?: boolean; extra
         <SkipForward size={px} fill="currentColor" />
       </button>
       {extras && (
-        <button className={`btn-icon${state.repeat !== 'off' ? ' is-on' : ''}`} aria-label={`Repeat: ${state.repeat}`} onClick={() => void command({ type: 'repeat', mode: next })}>
-          {state.repeat === 'one' ? <Repeat1 size={px - 4} /> : <Repeat size={px - 4} />}
+        <button className={`btn-icon${repeat !== 'off' ? ' is-on' : ''}`} aria-label={`Repeat: ${repeat}`} onClick={() => void command({ type: 'repeat', mode: next })}>
+          {repeat === 'one' ? <Repeat1 size={px - 4} /> : <Repeat size={px - 4} />}
         </button>
       )}
     </div>

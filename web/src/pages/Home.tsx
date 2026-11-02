@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Shuffle } from 'lucide-react';
 import { api } from '../api';
 import { browseApi } from '../browseApi';
@@ -19,11 +19,23 @@ export default function Home() {
   // Listening history comes from the server (mock mode serves fixture history through the same calls).
   const recent = useQuery({ queryKey: ['history', 'recent'], queryFn: () => browseApi.historyRecent(12), staleTime: 0, refetchOnMount: 'always' });
   const redis = useQuery({ queryKey: ['history', 'rediscover'], queryFn: () => browseApi.historyRediscover(8, 90), staleTime: 5 * 60_000 });
-  const albumQueries = (ids: string[]) => ids.map((id) => ({ queryKey: ['album', id], queryFn: () => api.album(id), staleTime: 60_000 }));
-  const played = useQueries({ queries: albumQueries((recent.data ?? []).map((r) => r.albumId)) });
-  const rediscoverQs = useQueries({ queries: albumQueries((redis.data ?? []).map((r) => r.albumId)) });
-  const recentlyPlayed = played.flatMap((q) => (q.data ? [q.data] : []));
-  const rediscover = rediscoverQs.flatMap((q) => (q.data ? [q.data] : []));
+  // One request per row instead of a full album (tracks, credits, …) per card.
+  const recentIds = (recent.data ?? []).map((r) => r.albumId);
+  const redisIds = (redis.data ?? []).map((r) => r.albumId);
+  const played = useQuery({
+    queryKey: ['album-summaries', 'recent', recentIds],
+    queryFn: () => api.albumSummaries(recentIds),
+    enabled: recentIds.length > 0,
+    staleTime: 60_000,
+  });
+  const rediscoverQs = useQuery({
+    queryKey: ['album-summaries', 'rediscover', redisIds],
+    queryFn: () => api.albumSummaries(redisIds),
+    enabled: redisIds.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  const recentlyPlayed = played.data?.items ?? [];
+  const rediscover = rediscoverQs.data?.items ?? [];
 
   const total = added.data?.total;
 
@@ -55,10 +67,10 @@ export default function Home() {
         </section>
       )}
 
-      {(redis.isLoading || rediscover.length > 0) && <section className="section">
+      {(redis.isLoading || rediscoverQs.isLoading || rediscover.length > 0) && <section className="section">
         <SectionHead title="Rediscover" action={<Link to="/albums?sort=title" className="sechead__link"><Shuffle size={13} /> Not played in 90 days</Link>} />
         <div className="grid grid--home">
-          {rediscover.length ? rediscover.map((a) => <AlbumCard key={a.id} album={a} />) : redis.isLoading ? Array.from({ length: 8 }, (_, i) => <CardSkeleton key={i} />) : null}
+          {rediscover.length ? rediscover.map((a) => <AlbumCard key={a.id} album={a} />) : redis.isLoading || rediscoverQs.isLoading ? Array.from({ length: 8 }, (_, i) => <CardSkeleton key={i} />) : null}
         </div>
       </section>}
     </div>

@@ -278,15 +278,16 @@ export const currentItem = (s: PlayerState): QueueItem | undefined => s.queue[s.
 
 /** Signal path to show for the active zone (mock mode derives one for the PC zone). */
 export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' } {
-  const state = usePlayer((s) => s.state);
+  const zone = usePlayer((s) => s.state.zone);
+  const signalPath = usePlayer((s) => s.state.signalPath);
+  const cur = usePlayer((s) => s.state.queue[s.state.index]?.track);
   const zones = usePlayer((s) => s.zones);
-  const kind = zones.find((z) => z.id === state.zone)?.kind ?? 'pc';
-  const cur = state.queue[state.index]?.track;
+  const kind = zones.find((z) => z.id === zone)?.kind ?? 'pc';
   if (kind === 'spotify') {
-    return { steps: ['Spotify', 'Spotify Connect', zones.find((z) => z.id === state.zone)?.name ?? 'Device'], tone: 'off' };
+    return { steps: ['Spotify', 'Spotify Connect', zones.find((z) => z.id === zone)?.name ?? 'Device'], tone: 'off' };
   }
   if (cur?.source === 'spotify') {
-    return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === state.zone)?.name ?? 'This browser'], tone: 'off' };
+    return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === zone)?.name ?? 'This browser'], tone: 'off' };
   }
   if (isLiveTrack(cur)) {
     const fmt = [cur!.format && cur!.format !== 'other' ? cur!.format.toUpperCase() : 'Stream', cur!.bitrateKbps ? `${cur!.bitrateKbps} kbps` : ''].filter(Boolean).join(' ');
@@ -295,7 +296,7 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
       : [fmt, 'Browser audio', 'live stream'];
     return { steps: liveSteps, tone: 'warn' };
   }
-  let steps = state.signalPath;
+  let steps = signalPath;
   if (!steps && cur) {
     if (kind === 'pc') {
       const fmt = cur.format === 'mp3' ? `MP3 ${cur.bitrateKbps ?? 320}` : `FLAC ${cur.bitDepth ?? 16}/${(cur.sampleRate ?? 44100) / 1000}`;

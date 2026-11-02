@@ -1,4 +1,5 @@
 import { ListMusic, ListPlus, MoreHorizontal, Play, X } from 'lucide-react';
+import { memo } from 'react';
 import { usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
 import { discoverPlayItem, type DiscoverItem } from '../lib/newSongs';
@@ -12,7 +13,7 @@ import { TrackMenuItems, trackMenuHandler } from './TrackMenu';
  * A Discover/radio row: play, queue, add to playlist, dismiss — plus the shared
  * ⋯ menu (with Song radio) and the same menu on right-click.
  */
-export function DiscoverRow({
+function DiscoverRowBase({
   item,
   playing = false,
   isPlaying = false,
@@ -20,6 +21,7 @@ export function DiscoverRow({
   onDismiss,
 }: {
   item: DiscoverItem;
+  index: number;
   playing?: boolean;
   isPlaying?: boolean;
   onPlay(): void;
@@ -67,3 +69,11 @@ export function DiscoverRow({
     </li>
   );
 }
+
+/**
+ * Rows are memoized: the callbacks only close over the stable item/index, so a parent re-render
+ * (playing/id-only changes, a refresh) leaves untouched rows alone.
+ */
+export const DiscoverRow = memo(DiscoverRowBase, (prev, next) =>
+  prev.item === next.item && prev.index === next.index && prev.playing === next.playing && prev.isPlaying === next.isPlaying,
+);

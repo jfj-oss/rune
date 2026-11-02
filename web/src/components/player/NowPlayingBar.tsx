@@ -9,13 +9,13 @@ import { Cover } from '../Cover';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
 
 export function NowPlayingBar() {
-  const state = usePlayer((s) => s.state);
-  const cur = currentItem(state);
+  const cur = usePlayer((s) => currentItem(s.state));
+  const nowPlaying = usePlayer((s) => s.state.nowPlaying);
   const setNp = useUi((s) => s.setNowPlayingOpen);
   const queueOpen = useUi((s) => s.queueOpen);
   const setQueue = useUi((s) => s.setQueueOpen);
   const live = isLiveTrack(cur?.track);
-  const meta = cur && live ? liveMeta(state, cur) : null;
+  const meta = cur && live ? liveMeta({ nowPlaying }, cur) : null;
   const liveSub = meta ? [meta.artist, meta.title !== meta.station ? meta.station : ''].filter(Boolean).join(' · ') : '';
   return (
     <footer className="npbar">

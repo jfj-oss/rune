@@ -159,8 +159,8 @@ function VirtualTracks({ items, total, desktop, onNeedMore }: { items: BrowseTra
 
   const playItems = usePlayer((s) => s.playItems);
   const play = useCallback((i: number) => { void playItems(items.slice(i, i + QUEUE_AHEAD).map(toItem), 0); }, [items, playItems]);
-  const state = usePlayer((s) => s.state);
-  const cur = currentItem(state);
+  const curId = usePlayer((s) => currentItem(s.state)?.track.id);
+  const status = usePlayer((s) => s.state.status);
 
   return (
     <div ref={wrap} className="tracklist" role="table" aria-label="Tracks" aria-rowcount={total} style={{ height: v.getTotalSize() }}>
@@ -168,7 +168,7 @@ function VirtualTracks({ items, total, desktop, onNeedMore }: { items: BrowseTra
         const t = items[row.index];
         return (
           <div key={row.key} className="tklayer" style={{ height: row.size, transform: `translateY(${row.start - v.options.scrollMargin}px)` }}>
-            {t ? <TrackRow t={t} playing={cur?.track.id === t.id} isPlaying={state.status === 'playing'} desktop={desktop} onPlay={() => play(row.index)} /> : <div className="tk tk--skel"><div className="skel shimmer" style={{ width: 40, height: 40, borderRadius: 4 }} /><div className="skel skel--line shimmer" /></div>}
+            {t ? <TrackRow t={t} playing={curId === t.id} isPlaying={status === 'playing'} desktop={desktop} onPlay={() => play(row.index)} /> : <div className="tk tk--skel"><div className="skel shimmer" style={{ width: 40, height: 40, borderRadius: 4 }} /><div className="skel skel--line shimmer" /></div>}
           </div>
         );
       })}

@@ -12,7 +12,7 @@ import { encId, formatDuration } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
 import { liveMeta } from '../../lib/live';
 import { textPreview } from '../../lib/previews';
-import { currentItem, usePlayer, useSignalPath } from '../../store/player';
+import { usePlayer, useSignalPath } from '../../store/player';
 import { usePlaylistUi } from '../../store/playlistUi';
 import { usePreview } from '../../store/preview';
 import { useRadio } from '../../store/radio';
@@ -57,16 +57,18 @@ export function NowPlaying() {
   const open = useUi((s) => s.nowPlayingOpen);
   const setOpen = useUi((s) => s.setNowPlayingOpen);
   const setQueue = useUi((s) => s.setQueueOpen);
-  const state = usePlayer((s) => s.state);
+  const queue = usePlayer((s) => s.state.queue);
+  const index = usePlayer((s) => s.state.index);
+  const nowPlaying = usePlayer((s) => s.state.nowPlaying);
   const command = usePlayer((s) => s.command);
-  const cur = currentItem(state);
+  const cur = queue[index];
   const desktop = useIsDesktop();
   const tint = useCoverColor(cur?.album);
   const ambient = useUi((s) => s.ambient);
   const openPreview = usePreview((s) => s.open);
   const { steps, tone } = useSignalPath();
   const live = isLiveTrack(cur?.track);
-  const meta = cur && live ? liveMeta(state, cur) : null;
+  const meta = cur && live ? liveMeta({ nowPlaying }, cur) : null;
   const reason = useRadio((s) => (cur ? s.reasons[cur.track.id] : undefined));
   const liveSub = meta ? [meta.artist, meta.title !== meta.station ? meta.station : ''].filter(Boolean).join(' · ') : '';
   const artSrc = live ? cur?.album.coverUrl ?? null : undefined;
@@ -120,7 +122,7 @@ export function NowPlaying() {
   const d = details.data;
   const hasReview = !!d && (!!d.reception || d.scores.length > 0 || d.quotes.length > 0);
   const bio = artistInfo.data?.bio;
-  const upNext = state.queue.slice(state.index + 1, state.index + 4);
+  const upNext = queue.slice(index + 1, index + 4);
   const title = meta?.title ?? cur?.track.title ?? 'Nothing playing';
 
   return (
@@ -203,7 +205,7 @@ export function NowPlaying() {
                   const qLive = isLiveTrack(q.track);
                   return (
                     <li key={q.queueId}>
-                      <button onClick={() => void command({ type: 'jump', index: state.index + 1 + i })}>
+                      <button onClick={() => void command({ type: 'jump', index: index + 1 + i })}>
                         <Cover album={q.album} sizes="40px" src={qLive ? q.album.coverUrl ?? null : undefined} />
                         <span className="np__nexttxt"><b>{q.track.title}</b><span>{qLive ? 'Internet radio · live' : q.track.artists.map((a) => a.name).join(', ')}</span></span>
                         <span className="np__nextdur">{qLive ? <span className="livepill livepill--sm"><i />LIVE</span> : formatDuration(q.track.durationMs)}</span>

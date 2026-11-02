@@ -177,9 +177,9 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
   const wrap = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState(0);
   const actions = usePlaylistActions();
-  const state = usePlayer((s) => s.state);
+  const curId = usePlayer((s) => currentItem(s.state)?.track.id);
+  const status = usePlayer((s) => s.state.status);
   const playItems = usePlayer((s) => s.playItems);
-  const cur = currentItem(state);
   const ctx = playlistUri(d.id);
   const n = d.tracks.length;
 
@@ -319,7 +319,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
         {v.getVirtualItems().map((row) => {
           const i = row.index;
           const t = d.tracks[i]!;
-          const playing = cur?.track.id === t.id && state.queue[state.index]?.track.id === t.id;
+          const playing = curId === t.id;
           const item = playlistItem(t);
           const go = () => void playItems(items, i, { context: ctx });
           const mine = rowEditable(d, t); // rune playlists: every row; Spotify playlists: only rune's local rows
@@ -359,7 +359,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
                 </button>
               ) : (
                 <button className="trow__num prow__num" aria-label={`Play ${t.title}`} onClick={go}>
-                  <span className="trow__n">{playing ? <Eq playing={state.status === 'playing'} /> : i + 1}</span>
+                  <span className="trow__n">{playing ? <Eq playing={status === 'playing'} /> : i + 1}</span>
                   <Play size={14} fill="currentColor" className="trow__p" />
                 </button>
               )}

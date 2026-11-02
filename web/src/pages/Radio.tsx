@@ -81,10 +81,11 @@ export default function RadioPage() {
   const [q, setQ] = useState('');
   const [tag, setTag] = useState<string | undefined>(undefined);
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const state = usePlayer((s) => s.state);
+  const playingId = usePlayer((s) => {
+    const cur = currentItem(s.state);
+    return cur && isLiveTrack(cur.track) ? cur.track.id : undefined;
+  });
   const zoneName = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.name ?? 'this zone');
-  const cur = currentItem(state);
-  const playingId = isLiveTrack(cur?.track) ? cur?.track.id : undefined;
 
   useEffect(() => {
     const t = setTimeout(() => setQ(text.trim()), 250);
