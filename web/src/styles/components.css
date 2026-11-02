@@ -139,8 +139,6 @@ button.note__track:hover { text-decoration: underline; text-underline-offset: 3p
 /* ---------- prose ---------- */
 .prose { font-family: var(--serif); font-size: 17px; line-height: 1.7; color: #dcdce3; max-width: 70ch; }
 .prose p + p { margin-top: 1em; }
-.prose--clamp { max-height: calc(var(--lines, 10) * 1.7em); overflow: hidden; }
-.prose--fade { -webkit-mask-image: linear-gradient(#000 calc(100% - 3.4em), transparent); mask-image: linear-gradient(#000 calc(100% - 3.4em), transparent); }
 .readmore { margin-top: 6px; font-size: 13.5px; font-weight: 600; color: var(--accent-2); padding: 4px 0; }
 .readmore:hover { text-decoration: underline; text-underline-offset: 3px; }
 @media (max-width: 899px) { .prose { font-size: 16.5px; } }

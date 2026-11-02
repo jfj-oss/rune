@@ -1,15 +1,11 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Shuffle } from 'lucide-react';
-import { useMemo } from 'react';
 import { api } from '../api';
+import { browseApi } from '../browseApi';
 import { AlbumCard, CardSkeleton } from '../components/AlbumCard';
 import { HScroll, SectionHead } from '../components/Rows';
-import { usePlayer } from '../store/player';
-import { loadLocal } from '../store/ui';
 import { plural } from '../lib/format';
 import { Link } from 'react-router-dom';
-
-const DAY = 86_400_000;
 
 function greeting() {
   const h = new Date().getHours();
@@ -19,25 +15,15 @@ function greeting() {
 export default function Home() {
   const added = useQuery({ queryKey: ['albums', 'home-added'], queryFn: () => api.albums({ sort: 'added', limit: 16 }) });
   const spotify = useQuery({ queryKey: ['albums', 'home-spotify'], queryFn: () => api.albums({ sort: 'added', source: 'spotify', limit: 16 }) });
-  const pool = useQuery({ queryKey: ['albums', 'home-pool'], queryFn: () => api.albums({ sort: 'title', source: 'local', limit: 200 }) });
 
-  const ready = usePlayer((s) => s.ready);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const history = useMemo(() => loadLocal<{ id: string; at: number }[]>('rune.played', []), [ready]);
-  const recentIds = history.slice(0, 12).map((h) => h.id);
-  const played = useQueries({ queries: recentIds.map((id) => ({ queryKey: ['album', id], queryFn: () => api.album(id), staleTime: 60_000 })) });
+  // Listening history comes from the server (mock mode serves fixture history through the same calls).
+  const recent = useQuery({ queryKey: ['history', 'recent'], queryFn: () => browseApi.historyRecent(12), staleTime: 0, refetchOnMount: 'always' });
+  const redis = useQuery({ queryKey: ['history', 'rediscover'], queryFn: () => browseApi.historyRediscover(8, 90), staleTime: 5 * 60_000 });
+  const albumQueries = (ids: string[]) => ids.map((id) => ({ queryKey: ['album', id], queryFn: () => api.album(id), staleTime: 60_000 }));
+  const played = useQueries({ queries: albumQueries((recent.data ?? []).map((r) => r.albumId)) });
+  const rediscoverQs = useQueries({ queries: albumQueries((redis.data ?? []).map((r) => r.albumId)) });
   const recentlyPlayed = played.flatMap((q) => (q.data ? [q.data] : []));
-
-  const rediscover = useMemo(() => {
-    const recent = new Set(history.filter((h) => Date.now() - h.at < 90 * DAY).map((h) => h.id));
-    const items = (pool.data?.items ?? []).filter((a) => !recent.has(a.id));
-    const a = items.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j]!, a[i]!];
-    }
-    return a.slice(0, 8);
-  }, [pool.data, history]);
+  const rediscover = rediscoverQs.flatMap((q) => (q.data ? [q.data] : []));
 
   const total = added.data?.total;
 
@@ -69,12 +55,12 @@ export default function Home() {
         </section>
       )}
 
-      <section className="section">
+      {(redis.isLoading || rediscover.length > 0) && <section className="section">
         <SectionHead title="Rediscover" action={<Link to="/albums?sort=title" className="sechead__link"><Shuffle size={13} /> Not played in 90 days</Link>} />
         <div className="grid grid--home">
-          {rediscover.length ? rediscover.map((a) => <AlbumCard key={a.id} album={a} />) : Array.from({ length: 8 }, (_, i) => <CardSkeleton key={i} />)}
+          {rediscover.length ? rediscover.map((a) => <AlbumCard key={a.id} album={a} />) : redis.isLoading ? Array.from({ length: 8 }, (_, i) => <CardSkeleton key={i} />) : null}
         </div>
-      </section>
+      </section>}
     </div>
   );
 }

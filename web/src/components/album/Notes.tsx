@@ -1,10 +1,13 @@
 import type { Album, AlbumDetails } from '@liner/shared';
 import { BadgeCheck } from 'lucide-react';
+import { textPreview } from '../../lib/previews';
+import { usePreview } from '../../store/preview';
 import { SourceLink } from '../Rows';
 import { Prose } from './Reception';
 import { jumpToTrack } from './TrackList';
 
 export function ArtistNotes({ notes, album }: { notes: AlbumDetails['artistNotes']; album: Album }) {
+  const open = usePreview((p) => p.open);
   return (
     <div className="notes">
       {notes.map((n, i) => {
@@ -16,7 +19,7 @@ export function ArtistNotes({ notes, album }: { notes: AlbumDetails['artistNotes
               {n.verifiedArtist && <span className="pill pill--verified"><BadgeCheck size={13} /> Verified artist</span>}
             </header>
             <Prose text={n.value} lines={8} />
-            <SourceLink source={n.source} url={n.url} />
+            <SourceLink source={n.source} url={n.url} onPreview={() => open(textPreview(n.verifiedArtist ? 'In the artist’s words' : 'Artist notes', track?.title ?? 'About the album', n))} />
           </article>
         );
       })}

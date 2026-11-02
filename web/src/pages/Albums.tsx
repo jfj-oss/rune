@@ -1,12 +1,14 @@
 import type { AlbumSummary } from '@liner/shared';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { LayoutGrid, List, X } from 'lucide-react';
+import { ChevronDown, LayoutGrid, List, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
+import { browseApi } from '../browseApi';
 import { AlbumCard, CardSkeleton, FormatBadge } from '../components/AlbumCard';
 import { Cover } from '../components/Cover';
+import { Popover } from '../components/Popover';
 import { Empty } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
@@ -21,12 +23,78 @@ const SORTS: { id: NonNullable<AlbumQuery['sort']>; label: string }[] = [
   { id: 'added', label: 'Date added' }, { id: 'artist', label: 'Artist' }, { id: 'title', label: 'Title' }, { id: 'year', label: 'Year' },
 ];
 
-export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'playlists' }) {
+export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'tracks' | 'genres' | 'playlists' }) {
+  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['playlists', 'Playlists']] as const;
   return (
     <div className="seg seg--tabs" role="tablist">
-      <Link role="tab" aria-selected={active === 'albums'} className={active === 'albums' ? 'is-active' : ''} to="/albums">Albums</Link>
-      <Link role="tab" aria-selected={active === 'artists'} className={active === 'artists' ? 'is-active' : ''} to="/artists">Artists</Link>
-      <Link role="tab" aria-selected={active === 'playlists'} className={active === 'playlists' ? 'is-active' : ''} to="/playlists">Playlists</Link>
+      {tabs.map(([id, label]) => (
+        <Link key={id} role="tab" aria-selected={active === id} className={active === id ? 'is-active' : ''} to={`/${id}`}>{label}</Link>
+      ))}
+    </div>
+  );
+}
+
+/** Label / year pickers: small popovers with a scrollable list, fed by GET /labels and /years. */
+function FacetFilters({ label, year, onPick }: { label?: string; year?: number; onPick(k: 'label' | 'year', v?: string): void }) {
+  return (
+    <>
+      <Popover
+        placement="bottom-start"
+        trigger={({ toggle, open }) => <button className={`chip chip--btn${label ? ' is-set' : ''}`} onClick={toggle} aria-expanded={open}>Label <ChevronDown size={13} /></button>}
+        panelClassName="facet"
+      >
+        {(close) => <LabelList current={label} onPick={(v) => { close(); onPick('label', v); }} />}
+      </Popover>
+      <Popover
+        placement="bottom-start"
+        trigger={({ toggle, open }) => <button className={`chip chip--btn${year ? ' is-set' : ''}`} onClick={toggle} aria-expanded={open}>Year <ChevronDown size={13} /></button>}
+        panelClassName="facet"
+      >
+        {(close) => <YearList current={year} onPick={(v) => { close(); onPick('year', v); }} />}
+      </Popover>
+    </>
+  );
+}
+
+function LabelList({ current, onPick }: { current?: string; onPick(v?: string): void }) {
+  const q = useQuery({ queryKey: ['labels'], queryFn: () => browseApi.labels(), staleTime: 60_000 });
+  const [text, setText] = useState('');
+  const s = text.trim().toLowerCase();
+  const list = (q.data ?? []).filter((l) => !s || l.label.toLowerCase().includes(s));
+  return (
+    <div className="facet__in">
+      <input className="facet__q" value={text} onChange={(e) => setText(e.target.value)} placeholder="Find a label" aria-label="Find a label" autoFocus />
+      <div className="facet__list" role="listbox" aria-label="Labels">
+        {q.isLoading && <p className="muted facet__msg">Loading…</p>}
+        {!q.isLoading && list.length === 0 && <p className="muted facet__msg">No labels found</p>}
+        {list.map((l) => (
+          <button key={l.label} role="option" aria-selected={current === l.label} className={`facet__row${current === l.label ? ' is-current' : ''}`} onClick={() => onPick(current === l.label ? undefined : l.label)}>
+            <span>{l.label}</span><small>{l.albumCount}</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function YearList({ current, onPick }: { current?: number; onPick(v?: string): void }) {
+  const q = useQuery({ queryKey: ['years'], queryFn: () => browseApi.years(), staleTime: 60_000 });
+  const decades = [...new Set((q.data ?? []).map((y) => y.decade))].sort((a, b) => b - a);
+  return (
+    <div className="facet__in">
+      <div className="facet__list facet__list--years">
+        {q.isLoading && <p className="muted facet__msg">Loading…</p>}
+        {decades.map((d) => (
+          <div key={d} className="facet__dec">
+            <h4 className="eyebrow">{d}s</h4>
+            <div className="facet__years">
+              {(q.data ?? []).filter((y) => y.decade === d).map((y) => (
+                <button key={y.year} className={`chip chip--btn${current === y.year ? ' is-set' : ''}`} title={plural(y.albumCount, 'album')} onClick={() => onPick(current === y.year ? undefined : String(y.year))}>{y.year}</button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -79,6 +147,7 @@ export default function Albums() {
             </button>
           ))}
         </div>
+        <FacetFilters label={label} year={year} onPick={set} />
         {chips.map(([k, v]) => (
           <button key={k} className="chip chip--removable" onClick={() => set(k)} aria-label={`Remove ${k} filter`}>{k}: {v}<X size={12} /></button>
         ))}
@@ -112,7 +181,7 @@ export default function Albums() {
   );
 }
 
-function VirtualAlbums({ items, total, view, onNeedMore }: { items: AlbumSummary[]; total: number; view: 'grid' | 'list'; onNeedMore(): void }) {
+export function VirtualAlbums({ items, total, view, onNeedMore }: { items: AlbumSummary[]; total: number; view: 'grid' | 'list'; onNeedMore(): void }) {
   const root = useScrollRoot();
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);

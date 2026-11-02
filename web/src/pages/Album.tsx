@@ -18,6 +18,8 @@ import { Empty, HScroll, SectionHead, SourceLink } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
+import { textPreview } from '../lib/previews';
+import { usePreview } from '../store/preview';
 import { useUi } from '../store/ui';
 
 type SectionId = 'tracks' | 'review' | 'about' | 'credits';
@@ -51,6 +53,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
   const root = useScrollRoot();
   const { playAlbum, enqueueAlbum } = usePlay();
   const toast = useUi((s) => s.toast);
+  const openPreview = usePreview((s) => s.open);
   const [fixing, setFixing] = useState(false);
   const d = details.data;
   const loadingDetails = details.isLoading;
@@ -123,7 +126,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
             </p>
             <div className="ahero__tags">
               <FormatBadge format={album.format} source={album.source} />
-              {album.genres.map((g) => <Link key={g} to={`/albums?genre=${encodeURIComponent(g)}`} className="chip">{g}</Link>)}
+              {album.genres.map((g) => <Link key={g} to={`/genres/${encodeURIComponent(g)}`} className="chip">{g}</Link>)}
             </div>
             <div className="ahero__actions">
               <button className="btn btn--primary" onClick={() => void playAlbum(album.id)}><Play size={18} fill="currentColor" /> Play</button>
@@ -146,7 +149,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
               </Popover>
             </div>
             {d && d.scores.length > 0 && (
-              <div className="ahero__scores" aria-label="Critic scores">{d.scores.map((s) => <ScoreChip key={s.outlet} s={s} />)}</div>
+              <div className="ahero__scores" aria-label="Critic scores">{d.scores.map((s) => <ScoreChip key={s.outlet} s={s} details={d} />)}</div>
             )}
           </div>
         </div>
@@ -199,7 +202,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
             <SectionHead title="Background" />
             <div className="bg">
               <Prose text={d.background.value} lines={9} />
-              <SourceLink source={d.background.source} url={d.background.url} />
+              <SourceLink source={d.background.source} url={d.background.url} onPreview={() => openPreview(textPreview('Background', 'Background', d.background!))} />
             </div>
           </section>
         )}

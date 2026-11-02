@@ -7,11 +7,15 @@ import AlbumPage from './pages/Album';
 import Albums from './pages/Albums';
 import ArtistPage from './pages/Artist';
 import Artists from './pages/Artists';
+import Genres, { GenrePage } from './pages/Genres';
 import Home from './pages/Home';
 import Placeholder from './pages/Placeholder';
 import PlaylistPage from './pages/Playlist';
 import Playlists from './pages/Playlists';
 import SearchPage from './pages/Search';
+import Tracks from './pages/Tracks';
+import { ReviewPreviewHost } from './components/ReviewPreview';
+import { startHistoryReporter } from './lib/historyReporter';
 import { usePlayer } from './store/player';
 
 const client = new QueryClient({
@@ -20,6 +24,7 @@ const client = new QueryClient({
 
 export default function App() {
   useEffect(() => { void usePlayer.getState().init(); }, []);
+  useEffect(() => startHistoryReporter(), []);
   return (
     <QueryClientProvider client={client}>
       <Ambient />
@@ -32,13 +37,15 @@ export default function App() {
             <Route path="/artists" element={<Artists />} />
             <Route path="/artist/:id" element={<ArtistPage />} />
             <Route path="/search" element={<SearchPage />} />
-            <Route path="/tracks" element={<Placeholder title="Tracks" />} />
-            <Route path="/genres" element={<Placeholder title="Genres" />} />
+            <Route path="/tracks" element={<Tracks />} />
+            <Route path="/genres" element={<Genres />} />
+            <Route path="/genres/:genre" element={<GenrePage />} />
             <Route path="/playlists" element={<Playlists />} />
             <Route path="/playlist/:id" element={<PlaylistPage />} />
             <Route path="*" element={<Placeholder title="Not found" />} />
           </Routes>
         </Shell>
+        <ReviewPreviewHost />
       </BrowserRouter>
     </QueryClientProvider>
   );
