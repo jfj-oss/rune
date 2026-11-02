@@ -1,0 +1,1234 @@
+[
+  {
+    "slug": "daft-punk-homework-25",
+    "albumId": "la:bbb5ea4f4b87f823",
+    "title": "Homework (25th Anniversary Edition) (1)",
+    "artist": "Daft Punk",
+    "year": 2022,
+    "format": "FLAC 16/44.1",
+    "label": "ADA France",
+    "folderPath": "/music/Daft Punk - Homework (2022 25th Anniversary Edition) [FLAC] 88",
+    "targetReleaseId": "1ca31e9e-67a3-4028-98de-deaed8f13779",
+    "targetReleaseGroupId": "00054665-89fa-33d5-a8f0-1728ea8c32c3",
+    "targetTitle": "Homework",
+    "targetArtist": "Daft Punk",
+    "targetDate": "2022-02-22",
+    "targetTrackCount": 31,
+    "confidence": 1,
+    "tracks": [
+      {
+        "id": "l:64836ae92cd29780",
+        "title": "Daftendirekt",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 164560,
+        "index": 0
+      },
+      {
+        "id": "l:54467711d6f2ed2c",
+        "title": "WDPK 83.7 FM",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 28333,
+        "index": 1
+      },
+      {
+        "id": "l:938ac48436b50b67",
+        "title": "Revolution 909",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 335027,
+        "index": 2
+      },
+      {
+        "id": "l:17ad5d6cf290c01f",
+        "title": "Da Funk",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 328680,
+        "index": 3
+      },
+      {
+        "id": "l:448e50953bfae657",
+        "title": "Phoenix",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 297107,
+        "index": 4
+      },
+      {
+        "id": "l:acf088d4c8f2293e",
+        "title": "Fresh",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 244400,
+        "index": 5
+      },
+      {
+        "id": "l:43099abc6b0deb52",
+        "title": "Around The World",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 429533,
+        "index": 6
+      },
+      {
+        "id": "l:4a98684d5803c222",
+        "title": "Rollin' & Scratchin'",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 448627,
+        "index": 7
+      },
+      {
+        "id": "l:b157936968381906",
+        "title": "Teachers",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 173493,
+        "index": 8
+      },
+      {
+        "id": "l:5a5af2c8a4619b96",
+        "title": "High Fidelity",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 362467,
+        "index": 9
+      },
+      {
+        "id": "l:a2c9fc09ae301ec1",
+        "title": "Rock'n Roll",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 453867,
+        "index": 10
+      },
+      {
+        "id": "l:af716ab8e12650c7",
+        "title": "Oh Yeah",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 121200,
+        "index": 11
+      },
+      {
+        "id": "l:58af784784a0107c",
+        "title": "Burnin'",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 414173,
+        "index": 12
+      },
+      {
+        "id": "l:feed33e90eac250b",
+        "title": "Indo Silver Club",
+        "disc": 1,
+        "number": 14,
+        "durationMs": 274733,
+        "index": 13
+      },
+      {
+        "id": "l:3f209d5fa2ea6f64",
+        "title": "Alive",
+        "disc": 1,
+        "number": 15,
+        "durationMs": 316253,
+        "index": 14
+      },
+      {
+        "id": "l:f74ed300935e4921",
+        "title": "Funk Ad",
+        "disc": 1,
+        "number": 16,
+        "durationMs": 51400,
+        "index": 15
+      },
+      {
+        "id": "l:2d0943c46a9363bd",
+        "title": "Around The World (I Cube Remix)",
+        "disc": 2,
+        "number": 1,
+        "durationMs": 378787,
+        "index": 16
+      },
+      {
+        "id": "l:e242357bd8ce9876",
+        "title": "Revolution 909 (Roger Sanchez & Junior Sanchez Remix)",
+        "disc": 2,
+        "number": 2,
+        "durationMs": 536093,
+        "index": 17
+      },
+      {
+        "id": "l:4f964724e9471c35",
+        "title": "Around The World (Tee's Frozen Sun Mix)",
+        "disc": 2,
+        "number": 3,
+        "durationMs": 477067,
+        "index": 18
+      },
+      {
+        "id": "l:69f55dd38632beb3",
+        "title": "Around The World (Mellow Mix)",
+        "disc": 2,
+        "number": 4,
+        "durationMs": 471453,
+        "index": 19
+      },
+      {
+        "id": "l:f9a0f3109d4ac56b",
+        "title": "Burnin' (DJ Sneak Main Mix)",
+        "disc": 2,
+        "number": 5,
+        "durationMs": 550667,
+        "index": 20
+      },
+      {
+        "id": "l:3bd23ff579eaaa75",
+        "title": "Around The World (Kenlou Mix)",
+        "disc": 2,
+        "number": 6,
+        "durationMs": 470987,
+        "index": 21
+      },
+      {
+        "id": "l:f2396af8e5646b2e",
+        "title": "Burnin' (Ian Pooley Cut Up Mix)",
+        "disc": 2,
+        "number": 7,
+        "durationMs": 320800,
+        "index": 22
+      },
+      {
+        "id": "l:cc05c6023c303f2b",
+        "title": "Around The World (Motorbass Vice Mix)",
+        "disc": 2,
+        "number": 8,
+        "durationMs": 397373,
+        "index": 23
+      },
+      {
+        "id": "l:72c5a37d5c9ea6b9",
+        "title": "Around The World (M.A.W Remix)",
+        "disc": 2,
+        "number": 9,
+        "durationMs": 563773,
+        "index": 24
+      },
+      {
+        "id": "l:b85f24252580e051",
+        "title": "Burnin' (Slam Mix)",
+        "disc": 2,
+        "number": 10,
+        "durationMs": 407133,
+        "index": 25
+      },
+      {
+        "id": "l:3ea4cfafff058376",
+        "title": "Around The World (Original Lead On Mix)",
+        "disc": 2,
+        "number": 11,
+        "durationMs": 450320,
+        "index": 26
+      },
+      {
+        "id": "l:affbd16b8fb50309",
+        "title": "Burnin' (DJ Sneak Mongowarrier Mix)",
+        "disc": 2,
+        "number": 12,
+        "durationMs": 623800,
+        "index": 27
+      },
+      {
+        "id": "l:a305f445f4b52557",
+        "title": "Around The World (RAW Dub)",
+        "disc": 2,
+        "number": 13,
+        "durationMs": 414560,
+        "index": 28
+      },
+      {
+        "id": "l:1061c6fb21ee10d7",
+        "title": "Teachers (Extended Mix)",
+        "disc": 2,
+        "number": 14,
+        "durationMs": 353960,
+        "index": 29
+      },
+      {
+        "id": "l:e2b127f6433f7315",
+        "title": "Revolution 909 (Revolution Accapella)",
+        "disc": 2,
+        "number": 15,
+        "durationMs": 64573,
+        "index": 30
+      }
+    ]
+  },
+  {
+    "slug": "beatles-hard-days-night",
+    "albumId": "la:d75f5ea90eb9882a",
+    "title": "A Hard Day´s Night",
+    "artist": "The Beatles",
+    "year": 1964,
+    "format": "FLAC 16/44.1",
+    "label": null,
+    "folderPath": "/music/The Beatles - discography (2009 Remastered)/The Beatles - A Hard Day´s Night (1964)",
+    "targetReleaseId": "6dec6309-19cb-4a84-8aa2-f693268dcada",
+    "targetReleaseGroupId": "06281c4d-112d-33b0-a25b-df63b420eae7",
+    "targetTitle": "A Hard Day’s Night",
+    "targetArtist": "The Beatles",
+    "targetDate": "2015-12-24",
+    "targetTrackCount": 13,
+    "confidence": 0.93,
+    "tracks": [
+      {
+        "id": "l:b3a27efcf61512ec",
+        "title": "A Hard Day's Night",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 154200,
+        "index": 0
+      },
+      {
+        "id": "l:67cbcf3f2f9d59bc",
+        "title": "I Should Have Known Better",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 163080,
+        "index": 1
+      },
+      {
+        "id": "l:873e0cd4ab3b223d",
+        "title": "If I Fell",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 139467,
+        "index": 2
+      },
+      {
+        "id": "l:47e410fe7820cccb",
+        "title": "I'm Happy Just To Dance With You",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 116373,
+        "index": 3
+      },
+      {
+        "id": "l:a00bf983f2706a9f",
+        "title": "And I Love Her",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 149693,
+        "index": 4
+      },
+      {
+        "id": "l:0257d0a72dbe2bb4",
+        "title": "Tell Me Why",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 128693,
+        "index": 5
+      },
+      {
+        "id": "l:d9cabdfb42e0c3ec",
+        "title": "Can't Buy Me Love",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 131867,
+        "index": 6
+      },
+      {
+        "id": "l:ec01bc9c59127ecf",
+        "title": "Any Time At All",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 131280,
+        "index": 7
+      },
+      {
+        "id": "l:78845b09778f6b2e",
+        "title": "I'll Cry Instead",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 105987,
+        "index": 8
+      },
+      {
+        "id": "l:a8cbd564b149b39a",
+        "title": "Things We Said Today",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 155333,
+        "index": 9
+      },
+      {
+        "id": "l:0325b5c511e27cf9",
+        "title": "When I Get Home",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 136640,
+        "index": 10
+      },
+      {
+        "id": "l:375e31c713682da2",
+        "title": "You Can't Do That",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 154893,
+        "index": 11
+      },
+      {
+        "id": "l:e355a1619f929671",
+        "title": "I'll Be Back",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 144187,
+        "index": 12
+      }
+    ]
+  },
+  {
+    "slug": "abba-voulez-vous",
+    "albumId": "la:63f808941668606e",
+    "title": "Volez Vous",
+    "artist": "ABBA",
+    "year": 1979,
+    "format": "FLAC 24/96",
+    "label": null,
+    "folderPath": "/music/ABBA - 24Bit Vinyl Pack/ABBA - Voulez Vous (1979)",
+    "targetReleaseId": "4138236f-05c6-3494-b6d8-5d460024ed21",
+    "targetReleaseGroupId": "7401fb97-46e6-32cd-bd59-6c49debaa3ae",
+    "targetTitle": "Voulez‐vous",
+    "targetArtist": "ABBA",
+    "targetDate": "1979",
+    "targetTrackCount": 10,
+    "confidence": 0.878,
+    "tracks": [
+      {
+        "id": "l:14ae4b2d741fb9c0",
+        "title": "As Good As New",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 206120,
+        "index": 0
+      },
+      {
+        "id": "l:4f904e28b3d31950",
+        "title": "Voulez Vous",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 311907,
+        "index": 1
+      },
+      {
+        "id": "l:a50cc2d152578595",
+        "title": "I Have A Dream",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 287160,
+        "index": 2
+      },
+      {
+        "id": "l:4d3e860e588093c2",
+        "title": "Angeleyes",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 264853,
+        "index": 3
+      },
+      {
+        "id": "l:d532356524f7a596",
+        "title": "The King Has Lost His Crown",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 217766,
+        "index": 4
+      },
+      {
+        "id": "l:41c36bb7ef7074ce",
+        "title": "Does Your Mother Know",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 195120,
+        "index": 5
+      },
+      {
+        "id": "l:4a1fdf2c157145de",
+        "title": "If It Wasn't For The Nights",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 312000,
+        "index": 6
+      },
+      {
+        "id": "l:e9e2f935f94d4622",
+        "title": "Chiquitita",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 327067,
+        "index": 7
+      },
+      {
+        "id": "l:0553559c8b7477dc",
+        "title": "Lovers (Live A Little Longer)",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 212907,
+        "index": 8
+      },
+      {
+        "id": "l:2a671ad166597a2e",
+        "title": "Kisses Of Fire",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 199190,
+        "index": 9
+      }
+    ]
+  },
+  {
+    "slug": "gerry-rafferty-city-to-city",
+    "albumId": "la:2f7772f39e0ff797",
+    "title": "City To City ( GZS-1075 )",
+    "artist": "Gerry Rafferty",
+    "year": 1977,
+    "format": "FLAC 16/44.1",
+    "label": null,
+    "folderPath": "/music/1075 1977 - Gerry Rafferty - City To City (DCC GZS-1075)",
+    "targetReleaseId": "fd29b2ea-072a-4caa-90ac-bd5ead46ccd3",
+    "targetReleaseGroupId": "238c3fb4-5792-342b-b217-02f66298b424",
+    "targetTitle": "City to City",
+    "targetArtist": "Gerry Rafferty",
+    "targetDate": "1984",
+    "targetTrackCount": 10,
+    "confidence": 0.8815,
+    "tracks": [
+      {
+        "id": "l:042486ae85c48c53",
+        "title": "The Ark",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 342867,
+        "index": 0
+      },
+      {
+        "id": "l:b1de6c8913ada487",
+        "title": "Baker Street",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 370067,
+        "index": 1
+      },
+      {
+        "id": "l:5657b9393c74a8d3",
+        "title": "Right Down The Line",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 271067,
+        "index": 2
+      },
+      {
+        "id": "l:d2bea71068d2f9e5",
+        "title": "City To City",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 307000,
+        "index": 3
+      },
+      {
+        "id": "l:32b444f2c22eb05e",
+        "title": "Stealin' Time",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 359040,
+        "index": 4
+      },
+      {
+        "id": "l:73a35373e586b37b",
+        "title": "Mattie's Rag",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 212827,
+        "index": 5
+      },
+      {
+        "id": "l:8c81d494b361f542",
+        "title": "Whatever's Written In Your Heart",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 399933,
+        "index": 6
+      },
+      {
+        "id": "l:ce9d4a8b19d14b95",
+        "title": "Home And Dry",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 299240,
+        "index": 7
+      },
+      {
+        "id": "l:e906375e3061f059",
+        "title": "Island",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 318333,
+        "index": 8
+      },
+      {
+        "id": "l:d00dd066845b50d8",
+        "title": "Waiting For The Day",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 344760,
+        "index": 9
+      }
+    ]
+  },
+  {
+    "slug": "sting-ten-summoners-tales",
+    "albumId": "la:d6baa7c2eb9de117",
+    "title": "Ten Summoner's Tales (PBTHAL 24-96)",
+    "artist": "Sting",
+    "year": 1993,
+    "format": "FLAC 24/96",
+    "label": null,
+    "folderPath": "/music/Sting - Ten Summoner's Tales (1993) (PBTHAL LP 24-96) FLAC 88",
+    "targetReleaseId": "336ab17b-1909-4286-b852-941eeac1b821",
+    "targetReleaseGroupId": "57389a2d-1570-364f-a83c-a382d0f5aafc",
+    "targetTitle": "Ten Summoner's Tales",
+    "targetArtist": "Sting",
+    "targetDate": "1993",
+    "targetTrackCount": 11,
+    "confidence": 0.9305,
+    "tracks": [
+      {
+        "id": "l:c8ecaa960133e2f1",
+        "title": "Prolouge (If I Ever Lose My Faith In You)",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 269787,
+        "index": 0
+      },
+      {
+        "id": "l:fd78a72dd88c3dc9",
+        "title": "Love Is Stronger Than Justice (The Munificent Seven)",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 310361,
+        "index": 1
+      },
+      {
+        "id": "l:bc8694c4f1d273e5",
+        "title": "Fields Of Gold",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 221941,
+        "index": 2
+      },
+      {
+        "id": "l:4d51e63dd761d4fc",
+        "title": "Heavy Cloud No Rain",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 228559,
+        "index": 3
+      },
+      {
+        "id": "l:12dd13701898a736",
+        "title": "She's Too Good For Me",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 150336,
+        "index": 4
+      },
+      {
+        "id": "l:e373048dd58829eb",
+        "title": "Seven Days",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 280164,
+        "index": 5
+      },
+      {
+        "id": "l:6be78ebc4ebedadc",
+        "title": "Saint Augustine In Hell",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 317789,
+        "index": 6
+      },
+      {
+        "id": "l:a18d2749671570c0",
+        "title": "It's Probably Me",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 309008,
+        "index": 7
+      },
+      {
+        "id": "l:dd3d0b48700eb7ab",
+        "title": "Shape Of My Heart",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 278767,
+        "index": 8
+      },
+      {
+        "id": "l:4133c11ba5050270",
+        "title": "Something The Boy Said",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 329326,
+        "index": 9
+      },
+      {
+        "id": "l:f3ffb4f0e59dcbb6",
+        "title": "Epilogue (Nothing 'Bout Me)",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 219674,
+        "index": 10
+      }
+    ]
+  },
+  {
+    "slug": "chemical-brothers-born-in-the-echoes",
+    "albumId": "la:3091d130a240348c",
+    "title": "Born in the Echoes [Deluxe Edition]",
+    "artist": "Chemical Brothers",
+    "year": 2015,
+    "format": "FLAC 16/44.1",
+    "label": null,
+    "folderPath": "/music/Chemical Brothers - Born in The Echoes [Deluxe] 2015 [EAC-FLAC] (oan)",
+    "targetReleaseId": "6321f5d3-72f5-44c8-b8fd-c27c3af0c107",
+    "targetReleaseGroupId": "c151db01-86d7-4190-8ee0-709dbc7d2f51",
+    "targetTitle": "Born in the Echoes",
+    "targetArtist": "The Chemical Brothers",
+    "targetDate": "2015-07-24",
+    "targetTrackCount": 15,
+    "confidence": 1,
+    "tracks": [
+      {
+        "id": "l:f401af2427e23276",
+        "title": "Sometimes I Feel So Deserted",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 312200,
+        "index": 0
+      },
+      {
+        "id": "l:2f605cb76d0614fa",
+        "title": "Go",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 260720,
+        "index": 1
+      },
+      {
+        "id": "l:3d3c2a6b592d4d43",
+        "title": "Under Neon Lights",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 266360,
+        "index": 2
+      },
+      {
+        "id": "l:f1d7b054b1f55813",
+        "title": "EML Ritual",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 320667,
+        "index": 3
+      },
+      {
+        "id": "l:1542d1f4994acde3",
+        "title": "I'll See You There",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 259960,
+        "index": 4
+      },
+      {
+        "id": "l:ddd46ccf84fd1fc3",
+        "title": "Just Bang",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 321213,
+        "index": 5
+      },
+      {
+        "id": "l:e6c5209053096c69",
+        "title": "Reflexion",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 389227,
+        "index": 6
+      },
+      {
+        "id": "l:d74550955a1b36eb",
+        "title": "Taste Of Honey",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 179853,
+        "index": 7
+      },
+      {
+        "id": "l:10bb5279abc72908",
+        "title": "Born In The Echoes",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 206587,
+        "index": 8
+      },
+      {
+        "id": "l:f63e9b2ae7198e0b",
+        "title": "Radiate",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 279680,
+        "index": 9
+      },
+      {
+        "id": "l:c1581d266e91b018",
+        "title": "Wide Open",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 354627,
+        "index": 10
+      },
+      {
+        "id": "l:5d151a443dca0b5d",
+        "title": "Let Us Build A City [Bonus Tracks]",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 274573,
+        "index": 11
+      },
+      {
+        "id": "l:3e83a68151e9a9fe",
+        "title": "Wo Ha [Bonus Tracks]",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 270027,
+        "index": 12
+      },
+      {
+        "id": "l:24df2c13fb5ac0a3",
+        "title": "Go [Extended Mix] [Bonus Tracks]",
+        "disc": 1,
+        "number": 14,
+        "durationMs": 354107,
+        "index": 13
+      },
+      {
+        "id": "l:e586f51fcef60c96",
+        "title": "Reflexion [Extended Mix] [Bonus Tracks]",
+        "disc": 1,
+        "number": 15,
+        "durationMs": 440133,
+        "index": 14
+      }
+    ]
+  },
+  {
+    "slug": "sakamoto-love-is-the-devil",
+    "albumId": "la:4efd2edd7e4277a1",
+    "title": "Love Is The Devil Original Soundtrack",
+    "artist": "坂本龍一",
+    "year": 1998,
+    "format": "FLAC 16/44.1",
+    "label": null,
+    "folderPath": "/music/RYUICHI SAKAMOTO -Masterpiece Trilogy-/(1998) Ryuichi Sakamoto -LOVE IS THE DEVIL-",
+    "targetReleaseId": "896682cb-7c6f-4ce8-a264-2b1db2acc8e8",
+    "targetReleaseGroupId": "2a204e9d-46ff-3cca-ab36-a3d1170d7558",
+    "targetTitle": "Love Is the Devil",
+    "targetArtist": "Ryuichi Sakamoto",
+    "targetDate": "",
+    "targetTrackCount": 28,
+    "confidence": 0.89,
+    "tracks": [
+      {
+        "id": "l:1d21347f925de7ad",
+        "title": "Lock",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 141400,
+        "index": 0
+      },
+      {
+        "id": "l:a8cb567cf16bf344",
+        "title": "Fall",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 83800,
+        "index": 1
+      },
+      {
+        "id": "l:fe76e088eda2404b",
+        "title": "Walk",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 67907,
+        "index": 2
+      },
+      {
+        "id": "l:7d0f3e42bd2e332a",
+        "title": "Sex",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 20733,
+        "index": 3
+      },
+      {
+        "id": "l:be140c5f1adadf9e",
+        "title": "Museum",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 51867,
+        "index": 4
+      },
+      {
+        "id": "l:53a14ee3d10132e2",
+        "title": "Bathroom",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 296933,
+        "index": 5
+      },
+      {
+        "id": "l:c801f724b170a7e0",
+        "title": "Boxing",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 63827,
+        "index": 6
+      },
+      {
+        "id": "l:10a4186c60819edb",
+        "title": "Museum 2",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 45200,
+        "index": 7
+      },
+      {
+        "id": "l:823c36736d29c8e4",
+        "title": "Atelier",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 68707,
+        "index": 8
+      },
+      {
+        "id": "l:c920d954eca650bf",
+        "title": "Bed-Museum",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 68067,
+        "index": 9
+      },
+      {
+        "id": "l:f9b1876a173a0d1e",
+        "title": "Nightmares",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 74693,
+        "index": 10
+      },
+      {
+        "id": "l:ef49f4d10048c98d",
+        "title": "Switch",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 139733,
+        "index": 11
+      },
+      {
+        "id": "l:3152be84c4a6fceb",
+        "title": "Sex (2)",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 68267,
+        "index": 12
+      },
+      {
+        "id": "l:c04c948a9b47658c",
+        "title": "Redman 1",
+        "disc": 1,
+        "number": 14,
+        "durationMs": 36600,
+        "index": 13
+      },
+      {
+        "id": "l:729543bfa3404aa5",
+        "title": "George In Rain",
+        "disc": 1,
+        "number": 15,
+        "durationMs": 81040,
+        "index": 14
+      },
+      {
+        "id": "l:c3c2d45825dc9e32",
+        "title": "Redman 2",
+        "disc": 1,
+        "number": 16,
+        "durationMs": 29493,
+        "index": 15
+      },
+      {
+        "id": "l:6e49e09ae4d60a9f",
+        "title": "Toilet",
+        "disc": 1,
+        "number": 17,
+        "durationMs": 114440,
+        "index": 16
+      },
+      {
+        "id": "l:df0e57d7f00a1535",
+        "title": "Redman 3",
+        "disc": 1,
+        "number": 18,
+        "durationMs": 75360,
+        "index": 17
+      },
+      {
+        "id": "l:b8d7afb7685e3d04",
+        "title": "Own",
+        "disc": 1,
+        "number": 19,
+        "durationMs": 139973,
+        "index": 18
+      },
+      {
+        "id": "l:d8b994573c366867",
+        "title": "Couch, Set Up, Canvas",
+        "disc": 1,
+        "number": 20,
+        "durationMs": 82533,
+        "index": 19
+      },
+      {
+        "id": "l:2943764254b8a810",
+        "title": "Bed",
+        "disc": 1,
+        "number": 21,
+        "durationMs": 22627,
+        "index": 20
+      },
+      {
+        "id": "l:0d13c8029902ffc6",
+        "title": "NY",
+        "disc": 1,
+        "number": 22,
+        "durationMs": 70000,
+        "index": 21
+      },
+      {
+        "id": "l:7b69e9436867c66e",
+        "title": "Water drop",
+        "disc": 1,
+        "number": 23,
+        "durationMs": 66933,
+        "index": 22
+      },
+      {
+        "id": "l:61308da469962c02",
+        "title": "Paint It Blue",
+        "disc": 1,
+        "number": 24,
+        "durationMs": 85067,
+        "index": 23
+      },
+      {
+        "id": "l:969c05e376ae1e46",
+        "title": "Car Crash",
+        "disc": 1,
+        "number": 25,
+        "durationMs": 78240,
+        "index": 24
+      },
+      {
+        "id": "l:9ff45ffa9a454009",
+        "title": "Suicide",
+        "disc": 1,
+        "number": 26,
+        "durationMs": 130293,
+        "index": 25
+      },
+      {
+        "id": "l:da6edaa19ead8547",
+        "title": "Monologue",
+        "disc": 1,
+        "number": 27,
+        "durationMs": 142107,
+        "index": 26
+      },
+      {
+        "id": "l:0a279bfc9e80bdbc",
+        "title": "Love Is The Devil",
+        "disc": 1,
+        "number": 28,
+        "durationMs": 329360,
+        "index": 27
+      }
+    ]
+  },
+  {
+    "slug": "beatles-white-album-cd1",
+    "albumId": "la:4b22e72d09897455",
+    "title": "The Beatles [White Album] CD1",
+    "artist": "The Beatles",
+    "year": 1968,
+    "format": "FLAC 16/44.1",
+    "label": null,
+    "folderPath": "/music/The Beatles - discography (2009 Remastered)/The Beatles - The Beatles [White Album] CD1 (1968)",
+    "targetReleaseId": "74fd3224-105a-4f78-a55f-a156956739fe",
+    "targetReleaseGroupId": "055be730-dcad-31bf-b550-45ba9c202aa3",
+    "targetTitle": "The Beatles (White Album)",
+    "targetArtist": "The Beatles",
+    "targetDate": "2009-09-09",
+    "targetTrackCount": 30,
+    "confidence": 0.912,
+    "tracks": [
+      {
+        "id": "l:3773c9ab9fbe10b6",
+        "title": "Back In The U.S.S.R.",
+        "disc": 1,
+        "number": 1,
+        "durationMs": 163453,
+        "index": 0
+      },
+      {
+        "id": "l:a697501aa77136e5",
+        "title": "Dear Prudence",
+        "disc": 1,
+        "number": 2,
+        "durationMs": 235773,
+        "index": 1
+      },
+      {
+        "id": "l:3d1ef5179d244ed3",
+        "title": "Glass Onion",
+        "disc": 1,
+        "number": 3,
+        "durationMs": 137840,
+        "index": 2
+      },
+      {
+        "id": "l:558b954854edaac9",
+        "title": "Ob-La-Di, Ob-La-Da",
+        "disc": 1,
+        "number": 4,
+        "durationMs": 188960,
+        "index": 3
+      },
+      {
+        "id": "l:fb9b287577334d96",
+        "title": "Wild Honey Pie",
+        "disc": 1,
+        "number": 5,
+        "durationMs": 52973,
+        "index": 4
+      },
+      {
+        "id": "l:e0669d2f98736cb1",
+        "title": "The Continuing Story Of Bungalow Bill",
+        "disc": 1,
+        "number": 6,
+        "durationMs": 194160,
+        "index": 5
+      },
+      {
+        "id": "l:7b6f2720fc1caecc",
+        "title": "While My Guitar Gently Weeps",
+        "disc": 1,
+        "number": 7,
+        "durationMs": 285000,
+        "index": 6
+      },
+      {
+        "id": "l:e77ab92c6fb042e6",
+        "title": "Happiness Is A Warm Gun",
+        "disc": 1,
+        "number": 8,
+        "durationMs": 164547,
+        "index": 7
+      },
+      {
+        "id": "l:3cb512b36e219644",
+        "title": "Martha My Dear",
+        "disc": 1,
+        "number": 9,
+        "durationMs": 148573,
+        "index": 8
+      },
+      {
+        "id": "l:fe106df63549ccf4",
+        "title": "I'm So Tired",
+        "disc": 1,
+        "number": 10,
+        "durationMs": 123493,
+        "index": 9
+      },
+      {
+        "id": "l:268b74d55bb9456f",
+        "title": "Blackbird",
+        "disc": 1,
+        "number": 11,
+        "durationMs": 138387,
+        "index": 10
+      },
+      {
+        "id": "l:475a99048be39aaf",
+        "title": "Piggies",
+        "disc": 1,
+        "number": 12,
+        "durationMs": 124267,
+        "index": 11
+      },
+      {
+        "id": "l:544d2a8a096d0265",
+        "title": "Rocky Raccoon",
+        "disc": 1,
+        "number": 13,
+        "durationMs": 213107,
+        "index": 12
+      },
+      {
+        "id": "l:cb41c5b064f80702",
+        "title": "Don't Pass Me By",
+        "disc": 1,
+        "number": 14,
+        "durationMs": 230453,
+        "index": 13
+      },
+      {
+        "id": "l:06b98715d48f53fd",
+        "title": "Why Don't We Do It In The Road?",
+        "disc": 1,
+        "number": 15,
+        "durationMs": 101160,
+        "index": 14
+      },
+      {
+        "id": "l:bab53176407836f3",
+        "title": "I Will",
+        "disc": 1,
+        "number": 16,
+        "durationMs": 105933,
+        "index": 15
+      },
+      {
+        "id": "l:4ecbc38c236f2048",
+        "title": "Julia",
+        "disc": 1,
+        "number": 17,
+        "durationMs": 176667,
+        "index": 16
+      }
+    ]
+  }
+]

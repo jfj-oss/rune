@@ -1,0 +1,367 @@
+{
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Homework+%5C%2825th+Anniversary+Edition%5C%29+%5C%281%5C%29%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "7c244ccf0bef0d0be3e24b14f31bd0f9bb269800.json",
+    "status": 200,
+    "fetchedAt": 1793594894934
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22homework%22+AND+artist%3A%22Daft+Punk%22&fmt=json&limit=15": {
+    "file": "9207c358f53c0c9100e57827626093e7092be25d.json",
+    "status": 200,
+    "fetchedAt": 1793594895480
+  },
+  "https://musicbrainz.org/ws/2/release/1ca31e9e-67a3-4028-98de-deaed8f13779?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "c5e82ff7ef8d017bec858e2324f59c1a8deff0ec.json",
+    "status": 200,
+    "fetchedAt": 1793594896694
+  },
+  "https://musicbrainz.org/ws/2/release/c128183d-d999-46f6-8593-7ef60a7fe354?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "c6424d04dec1a391b2e4ed14e084f2e1ccd9b144.json",
+    "status": 200,
+    "fetchedAt": 1793594897573
+  },
+  "https://musicbrainz.org/ws/2/release/2fdcc2d7-50b9-4b27-8262-8cf9e31aaa4d?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "2815128ca233e9a71164b88536e9f33307aaa677.json",
+    "status": 200,
+    "fetchedAt": 1793594898203
+  },
+  "https://musicbrainz.org/ws/2/release/647d7016-2683-42c6-b027-83114a7c3eec?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "53cfd2efbdde8ff214f1d10f1e036fee57709eed.json",
+    "status": 200,
+    "fetchedAt": 1793594899199
+  },
+  "https://musicbrainz.org/ws/2/release/7b89638d-c2e9-40de-bdaa-a8492d1563db?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "8ea5ed5bca4ac683d131037487397125da68830e.json",
+    "status": 200,
+    "fetchedAt": 1793594900069
+  },
+  "https://musicbrainz.org/ws/2/release/770b9b80-10e1-4297-b1fd-46ad0dbb0305?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "2f45b47cfcf0fc469fc4f14c824bf73b3bb85108.json",
+    "status": 200,
+    "fetchedAt": 1793594901589
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Volez+Vous%22+AND+artist%3A%22ABBA%22&fmt=json&limit=15": {
+    "file": "e94c058e8100ece4df7eaaa59ae5fceeb2b9d401.json",
+    "status": 200,
+    "fetchedAt": 1793594902091
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Voulez+Vous%22+AND+artist%3A%22ABBA%22&fmt=json&limit=15": {
+    "file": "c5527b390d3769beeb800a6fbfdeb1fb90b42b33.json",
+    "status": 200,
+    "fetchedAt": 1793594903121
+  },
+  "https://musicbrainz.org/ws/2/release/4138236f-05c6-3494-b6d8-5d460024ed21?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b3c099cada4b01e836d90e5d43699ca861471065.json",
+    "status": 200,
+    "fetchedAt": 1793594904592
+  },
+  "https://musicbrainz.org/ws/2/release/15024342-4d6f-4df4-a2cb-581b25ef4eef?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "5a2d451f6adefb6ee7a1847a87407237a1bef1c6.json",
+    "status": 200,
+    "fetchedAt": 1793594905477
+  },
+  "https://musicbrainz.org/ws/2/release/ab5e6291-5365-4fa9-9d28-acc0b48eafd0?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "1bfad81e6c71619fe4d075377f34590a5f8d644d.json",
+    "status": 200,
+    "fetchedAt": 1793594906554
+  },
+  "https://musicbrainz.org/ws/2/release/60843f73-f2b7-3dc7-92ee-8931d7085238?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "5886a288780045ebb06ec228aa2de6841ceef6ed.json",
+    "status": 200,
+    "fetchedAt": 1793594907583
+  },
+  "https://musicbrainz.org/ws/2/release/e9aebab5-e314-4dbc-a9d3-24d3e7fe97e7?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "d4d85cd04f485c0348c21f79d44c30ab0c7b3b46.json",
+    "status": 200,
+    "fetchedAt": 1793594908712
+  },
+  "https://musicbrainz.org/ws/2/release/e13d754b-fdde-414d-922a-35e4ff169e3a?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "c2beab32452842b89a6595d241f3d941cee62b61.json",
+    "status": 200,
+    "fetchedAt": 1793594909517
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22A+Hard+Day%C2%B4s+Night%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "2e9e043d49e18eecbd97de79a30eb91c4977e322.json",
+    "status": 200,
+    "fetchedAt": 1793594910115
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22A+Hard+Day%27s+Night%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "47bbb6310408afe834c86fff4724537e0871edf7.json",
+    "status": 200,
+    "fetchedAt": 1793594911110
+  },
+  "https://musicbrainz.org/ws/2/release/547e6cf5-d546-4c78-9600-9d289aa3d933?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "42492ab7e940f633bf74f3d419b0f0961c94bcde.json",
+    "status": 200,
+    "fetchedAt": 1793594912643
+  },
+  "https://musicbrainz.org/ws/2/release/b2127892-1dec-4cbc-baca-336cea98bf06?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "c980085dca670618e76f437fb00d6c62ac769325.json",
+    "status": 200,
+    "fetchedAt": 1793594913568
+  },
+  "https://musicbrainz.org/ws/2/release/fe6fb4b1-a286-4a47-bf0b-3384a177571b?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "dbf4dad6f49c24f8a152cf160a3d416a0c1c29ea.json",
+    "status": 200,
+    "fetchedAt": 1793594914636
+  },
+  "https://musicbrainz.org/ws/2/release/6dec6309-19cb-4a84-8aa2-f693268dcada?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "4d96d016f90022195160039ecbf759644565d53a.json",
+    "status": 200,
+    "fetchedAt": 1793594915683
+  },
+  "https://musicbrainz.org/ws/2/release/a19c1515-566b-4b42-a0b3-c9515c7ca411?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "7cd0b97a6176c8935d7e797add69d39e0e070eec.json",
+    "status": 200,
+    "fetchedAt": 1793594916541
+  },
+  "https://musicbrainz.org/ws/2/release/3fd94aeb-bebd-3918-bf11-1cba750f213f?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "fdc4453c57dcbb5ef94a270bd03eb0884f2a2877.json",
+    "status": 200,
+    "fetchedAt": 1793594917695
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22City+To+City+%5C%28+GZS%5C-1075+%5C%29%22+AND+artist%3A%22Gerry+Rafferty%22&fmt=json&limit=15": {
+    "file": "fc3d2cdccbf39294b7cb049d30fe9a57b4e2f2c2.json",
+    "status": 200,
+    "fetchedAt": 1793594918121
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22city+to+city+gzs+1075%22+AND+artist%3A%22Gerry+Rafferty%22&fmt=json&limit=15": {
+    "file": "ad8366567663c0246d6754c6717489a2955018e2.json",
+    "status": 200,
+    "fetchedAt": 1793594919388
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22City+To+City%22+AND+artist%3A%22Gerry+Rafferty%22&fmt=json&limit=15": {
+    "file": "d53fd01e8c9d8e26e974f1b1e9a4eb16541a1e54.json",
+    "status": 200,
+    "fetchedAt": 1793594920954
+  },
+  "https://musicbrainz.org/ws/2/release/bc5ab3ea-d4d8-49ae-ba97-e7eee6aec751?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "8627489d640fd683c59e6f5bdac6e542559e8218.json",
+    "status": 200,
+    "fetchedAt": 1793594921266
+  },
+  "https://musicbrainz.org/ws/2/release/71f016ef-6c2e-4368-a324-552b4e1c483f?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "27fc499ff029c8fd9d5b536a734f34e10b4fccc5.json",
+    "status": 200,
+    "fetchedAt": 1793594922252
+  },
+  "https://musicbrainz.org/ws/2/release/1d1deffa-87e5-4f50-9e93-a5db31939b23?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "3658371d54cf94bbb82d418af1e8ef8de6b23f25.json",
+    "status": 200,
+    "fetchedAt": 1793594923231
+  },
+  "https://musicbrainz.org/ws/2/release/d0a0148e-3472-4b8d-b0fa-1d948a9e7633?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "899a31bbf5a431d8b6063c94376f6a378f5b31c5.json",
+    "status": 200,
+    "fetchedAt": 1793594924266
+  },
+  "https://musicbrainz.org/ws/2/release/fd29b2ea-072a-4caa-90ac-bd5ead46ccd3?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "9790c0a1989bb8418503b7ddc395d8a5eff45280.json",
+    "status": 200,
+    "fetchedAt": 1793594925251
+  },
+  "https://musicbrainz.org/ws/2/release/691c9524-cae2-4fe2-b020-6ebacbda7d51?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "1620a03080d14dc5e3642da8ea8994cbb89c4615.json",
+    "status": 200,
+    "fetchedAt": 1793594926230
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Ten+Summoner%27s+Tales+%5C%28PBTHAL+24%5C-96%5C%29%22+AND+artist%3A%22Sting%22&fmt=json&limit=15": {
+    "file": "4a495e66e0971c8c9251a19d54a99e21c09abc39.json",
+    "status": 200,
+    "fetchedAt": 1793594927131
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22ten+summoner+s+tales+pbthal+24+96%22+AND+artist%3A%22Sting%22&fmt=json&limit=15": {
+    "file": "6d03732713b11960a8cf77866345e9f31bbebaad.json",
+    "status": 200,
+    "fetchedAt": 1793594928283
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Ten+Summoner%27s+Tales%22+AND+artist%3A%22Sting%22&fmt=json&limit=15": {
+    "file": "d9d5b50d4c7bc7de937b3dfde2a7c6c225517a92.json",
+    "status": 200,
+    "fetchedAt": 1793594929286
+  },
+  "https://musicbrainz.org/ws/2/release/336ab17b-1909-4286-b852-941eeac1b821?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "7c3e276c4fc369592ad2b4263b2c35f3470f08bf.json",
+    "status": 200,
+    "fetchedAt": 1793594930111
+  },
+  "https://musicbrainz.org/ws/2/release/733922e4-78f8-47dd-9709-229576022ce0?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "8f184d8b55c445d3b0a601e5369c1d7ddb9bbabd.json",
+    "status": 200,
+    "fetchedAt": 1793594931244
+  },
+  "https://musicbrainz.org/ws/2/release/a3a49c83-4c76-4b4f-a8cd-cdeb62579ee5?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "e25eef9fc3e2bcf7030afd63bf67723c2002d08f.json",
+    "status": 200,
+    "fetchedAt": 1793594932248
+  },
+  "https://musicbrainz.org/ws/2/release/a5d00a31-92aa-31bb-8521-30dd3bdd9bc1?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "fb6f6a152aa4cabacae3b84e7eeabdf8d9eadea9.json",
+    "status": 200,
+    "fetchedAt": 1793594933123
+  },
+  "https://musicbrainz.org/ws/2/release/4300f61b-c857-4be7-a36e-ea28e4699e00?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "ebc384bf8cd262a09fa4cd137daaec9955007881.json",
+    "status": 200,
+    "fetchedAt": 1793594934286
+  },
+  "https://musicbrainz.org/ws/2/release/723fe106-828b-47e8-b343-3c4c90c76050?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "5126530c3587ee6ce090d181606472b3a8e73959.json",
+    "status": 200,
+    "fetchedAt": 1793594935602
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Born+in+the+Echoes+%5C%5BDeluxe+Edition%5C%5D%22+AND+artist%3A%22Chemical+Brothers%22&fmt=json&limit=15": {
+    "file": "05d5f07e4e2253174893069d339710b0df2edb84.json",
+    "status": 200,
+    "fetchedAt": 1793594938585
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22born+in+the+echoes%22+AND+artist%3A%22Chemical+Brothers%22&fmt=json&limit=15": {
+    "file": "95d7e0e017381cb6e99bc9a287562097b884932d.json",
+    "status": 200,
+    "fetchedAt": 1793594939137
+  },
+  "https://musicbrainz.org/ws/2/release/6321f5d3-72f5-44c8-b8fd-c27c3af0c107?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "e498bcc701aeed8913969635b5a10f0a389a3832.json",
+    "status": 200,
+    "fetchedAt": 1793594939720
+  },
+  "https://musicbrainz.org/ws/2/release/32b02735-9d72-4bd0-9858-4a3a568537b4?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b6cd7f13ce4bad56d889a4f62185a98b2e4f841e.json",
+    "status": 200,
+    "fetchedAt": 1793594940716
+  },
+  "https://musicbrainz.org/ws/2/release/92e38185-e301-46f6-9265-379862de5cb0?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "0fdd25ad2df44cb31fb6d8b4b57cdda80b96e936.json",
+    "status": 200,
+    "fetchedAt": 1793594942268
+  },
+  "https://musicbrainz.org/ws/2/release/2a13e03f-1ddd-4d21-b574-329e92bb7ad8?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "82ac92158fe2119e58f760ed865b1304c0db2474.json",
+    "status": 200,
+    "fetchedAt": 1793594942836
+  },
+  "https://musicbrainz.org/ws/2/release/ee326f64-1535-49d6-a657-26dea9f149d4?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "474786c2c91d3fb26d2f3705433857c5625c848d.json",
+    "status": 200,
+    "fetchedAt": 1793594944315
+  },
+  "https://musicbrainz.org/ws/2/release/035f5aef-58c3-48e9-8bfd-221b1341d892?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b197e7f88bd3e4632da9b5be17bd7b5da72978b2.json",
+    "status": 200,
+    "fetchedAt": 1793594944718
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22Love+Is+The+Devil+Original+Soundtrack%22&fmt=json&limit=15": {
+    "file": "af17b70896a35ce4fa2b6146a86356a421c43bec.json",
+    "status": 200,
+    "fetchedAt": 1793594945741
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22love+is+the+devil%22&fmt=json&limit=15": {
+    "file": "b86aaaf2c8c0fd563d3f0a548606b6130a75f468.json",
+    "status": 200,
+    "fetchedAt": 1793594946892
+  },
+  "https://musicbrainz.org/ws/2/release/3cfb7f58-31af-4c9f-aaec-b05216b93205?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "19988b85cffa8d7a8bf154bf8ee70293ba6f3754.json",
+    "status": 200,
+    "fetchedAt": 1793594947946
+  },
+  "https://musicbrainz.org/ws/2/release/bfb418ee-9749-4ebe-84a4-7562e8ca560c?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "eba256911fe34ca8ea32f5a0175c009cb38e0445.json",
+    "status": 200,
+    "fetchedAt": 1793594950042
+  },
+  "https://musicbrainz.org/ws/2/release/896682cb-7c6f-4ce8-a264-2b1db2acc8e8?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "7b752e8b94060d0c40ad7e4d3ef9d8b2b96b015a.json",
+    "status": 200,
+    "fetchedAt": 1793594951277
+  },
+  "https://musicbrainz.org/ws/2/release/a269defa-f505-4226-873e-311a93bb97a6?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "1cafd57be44fa421a63c81d72e96a128d83b3951.json",
+    "status": 200,
+    "fetchedAt": 1793594951606
+  },
+  "https://musicbrainz.org/ws/2/release/6028a570-8c26-4f7d-8515-467cfda77f54?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "44b0894537dbc3e71eb9317693f6ea7c844a0124.json",
+    "status": 200,
+    "fetchedAt": 1793594953133
+  },
+  "https://musicbrainz.org/ws/2/release/df4e16f9-82ff-4d69-aa2d-fd4e87ff921e?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "1477485c3665b2cb3ceb26802cfaa3f60396b0e7.json",
+    "status": 200,
+    "fetchedAt": 1793594954761
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22The+Beatles+%5C%5BWhite+Album%5C%5D+CD1%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "954df03d2c24ae69b49926a25f559d27db861ca6.json",
+    "status": 200,
+    "fetchedAt": 1793594954921
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22the+beatles+white+album%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "e7876c816153b3caa35d7b332a5617ff5e1396ec.json",
+    "status": 200,
+    "fetchedAt": 1793594956446
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22The+Beatles+CD1%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "f23b21ecb6784e2175851ec5e8e6af9f316b3ebc.json",
+    "status": 200,
+    "fetchedAt": 1793594957883
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22the+beatles%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "44c7d44e88623d18c2ceb6b3e632189d532a6250.json",
+    "status": 200,
+    "fetchedAt": 1793594958542
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22%5C%5BWhite+Album%5C%5D+CD1%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "458d3dbba4affb555b575a60681388117a9a627d.json",
+    "status": 200,
+    "fetchedAt": 1793594959064
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22white+album%22+AND+artist%3A%22The+Beatles%22&fmt=json&limit=15": {
+    "file": "2a12451435e7dfa47d9f49a3fc8dc58d9e652ba0.json",
+    "status": 200,
+    "fetchedAt": 1793594963346
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22the+beatles+white+album%22+AND+artist%3A%22The+Beatles%22+AND+tracks%3A17&fmt=json&limit=10": {
+    "file": "ae8b0aa806e0da0fecd3886bd5633f693ca20956.json",
+    "status": 200,
+    "fetchedAt": 1793594964313
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22the+beatles+white+album%22+AND+tracks%3A17&fmt=json&limit=10": {
+    "file": "58635193868f9fcec91f25da8000720f7acbb507.json",
+    "status": 200,
+    "fetchedAt": 1793594965313
+  },
+  "https://musicbrainz.org/ws/2/release/?query=release%3A%22the+beatles%22+AND+artist%3A%22The+Beatles%22+AND+tracks%3A17&fmt=json&limit=10": {
+    "file": "0ec7598c06ce3d21fd1028be272bddcb9a5b6403.json",
+    "status": 200,
+    "fetchedAt": 1793594966597
+  },
+  "https://musicbrainz.org/ws/2/release/74fd3224-105a-4f78-a55f-a156956739fe?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "e15fe2acfccb7dc10f3e092a7804ad60a6dfb8ab.json",
+    "status": 200,
+    "fetchedAt": 1793594967721
+  },
+  "https://musicbrainz.org/ws/2/release/682cdf23-c89d-4594-94df-b01874be1682?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "519524472cde93ce7606736ebe0fe9b33a0e9d72.json",
+    "status": 200,
+    "fetchedAt": 1793594969248
+  },
+  "https://musicbrainz.org/ws/2/release/6e4daf66-5daf-4e42-830b-259a0e5d1e52?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "419d96706bccef791a871b76fa855aab2b60d55d.json",
+    "status": 200,
+    "fetchedAt": 1793594970009
+  },
+  "https://musicbrainz.org/ws/2/release/2edf2174-2e70-430e-8da2-dd63be654a78?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "b2d92339c413d716f9044ba0e55069608f87ff07.json",
+    "status": 200,
+    "fetchedAt": 1793594970857
+  },
+  "https://musicbrainz.org/ws/2/release/3fca59cc-a22f-4a57-8d69-05bf33595ca6?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "decd3db93ca93004c4c71f39b2d90aaa2cab088b.json",
+    "status": 200,
+    "fetchedAt": 1793594972441
+  },
+  "https://musicbrainz.org/ws/2/release/6b671787-b00e-3439-a7ea-e72be3387039?inc=recordings+artist-credits+labels+release-groups+genres+tags+artist-rels+recording-rels+work-rels+recording-level-rels+work-level-rels&fmt=json": {
+    "file": "18fbf44d6c94283647d3ea55474627bfa350f938.json",
+    "status": 200,
+    "fetchedAt": 1793594973008
+  }
+}

@@ -140,6 +140,22 @@ export interface MbSearchResponse {
   releases?: MbSearchRelease[];
 }
 
+export interface MbSearchReleaseGroup {
+  id: string;
+  score?: number;
+  title: string;
+  'first-release-date'?: string;
+  'primary-type'?: string | null;
+  'secondary-types'?: string[];
+  'artist-credit'?: MbArtistCredit[];
+}
+
+export interface MbReleaseGroupSearchResponse {
+  count?: number;
+  offset?: number;
+  'release-groups'?: MbSearchReleaseGroup[];
+}
+
 /** A release as embedded in a recording-search result. */
 export interface MbRecordingSearchRelease {
   id: string;
@@ -353,13 +369,48 @@ export class MbClient {
     return body.releases ?? [];
   }
 
-  /** Release search by album title + artist name. */
-  async searchRelease(title: string, artist: string, limit = 15): Promise<MbSearchRelease[]> {
+  /** Release search by album title + artist name (+ optional exact track count). */
+  async searchRelease(title: string, artist: string, limit = 15, trackCount?: number): Promise<MbSearchRelease[]> {
     const clauses: string[] = [];
     if (title.trim()) clauses.push(`release:"${escapeLucene(title)}"`);
     if (artist.trim()) clauses.push(`artist:"${escapeLucene(artist)}"`);
+    if (trackCount != null && trackCount > 0) clauses.push(`tracks:${Math.trunc(trackCount)}`);
     if (clauses.length === 0) return [];
     return this.searchReleasesQuery(clauses.join(' AND '), limit);
+  }
+
+  /** Release-group search (the group survives edition differences). */
+  async searchReleaseGroups(query: string, limit = 10, artist?: string): Promise<MbSearchReleaseGroup[]> {
+    const clauses: string[] = [];
+    if (query.trim()) clauses.push(`releasegroup:"${escapeLucene(query)}"`);
+    if (artist?.trim()) clauses.push(`artist:"${escapeLucene(artist)}"`);
+    if (clauses.length === 0) return [];
+    const params = new URLSearchParams({ query: clauses.join(' AND '), fmt: 'json', limit: String(limit) });
+    const url = `${BASE_URL}/release-group/?${params.toString()}`;
+    const body = await this.getJson<MbReleaseGroupSearchResponse>(url);
+    return body['release-groups'] ?? [];
+  }
+
+  /**
+   * Releases belonging to a release group, including their media/track counts.
+   * Used to pick the edition (deluxe, one disc of a box, bonus tracks) that
+   * matches the local album, then only that release is fetched in full.
+   */
+  async browseReleaseGroup(groupId: string, limit = 100): Promise<MbSearchRelease[]> {
+    const params = new URLSearchParams({
+      'release-group': groupId,
+      inc: 'media+artist-credits+labels',
+      fmt: 'json',
+      limit: String(limit),
+    });
+    const url = `${BASE_URL}/release/?${params.toString()}`;
+    const body = await this.getJson<MbSearchResponse>(url);
+    return (body.releases ?? []).map((release) => ({
+      ...release,
+      'track-count':
+        release['track-count'] ??
+        (release.media ?? []).reduce((sum, medium) => sum + (medium['track-count'] ?? 0), 0),
+    }));
   }
 
   /**

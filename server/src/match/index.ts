@@ -18,11 +18,15 @@ import {
 } from './mb.js';
 import {
   isPlaceholderTitle,
+  isSoundtrackAlbum,
+  normalizeTitle,
   preliminaryScore,
   scoreRelease,
+  trackCountCompatible,
   type LocalAlbumForMatch,
   type LocalTrackForMatch,
 } from './scoring.js';
+import { countQueries, releaseQueries, titleVariants, type ReleaseQuery } from './query.js';
 import {
   applyRelease,
   getAlbumRow,
@@ -41,11 +45,32 @@ export {
   scoreRelease,
   preliminaryScore,
   titleCase,
+  isGenericArtist,
+  isSoundtrackTitle,
 } from './scoring.js';
+export { releaseQueries, titleVariants, artistVariants, querySafe } from './query.js';
 export { applyRelease } from './apply.js';
 
 /** Below this best-candidate score the album is left unmatched (manual fix offered). */
 export const MIN_APPLY_CONFIDENCE = 0.6;
+
+export interface RematchOptions {
+  /** Stop after this many albums (useful for long, resumable self-checks). */
+  limit?: number;
+  /** Stop after this much wall-clock time; unprocessed albums stay queued. */
+  maxMs?: number;
+  onProgress?: (done: number, total: number) => void;
+}
+
+export interface RematchStats {
+  attempted: number;
+  /** Previously unmatched albums that are now matched. */
+  matched: number;
+  /** Previously weak matches whose confidence improved. */
+  improved: number;
+  /** Queued albums not attempted because `limit`/`maxMs` stopped the pass. */
+  remaining: number;
+}
 
 export interface MatchOptions {
   /** Injectable fetch for fully offline tests / fixture replay. */
@@ -70,6 +95,7 @@ function toLocalForMatch(album: LocalAlbumRow, tracks: LocalTrackRow[]): LocalAl
     artist: album.artist_name ?? '',
     year: album.year,
     format: album.format,
+    folderPath: album.folder_path,
     tracks: tracks.map(
       (t): LocalTrackForMatch => ({
         id: t.id,
@@ -131,26 +157,88 @@ export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): 
   async function searchCandidates(local: LocalAlbumForMatch): Promise<MbSearchRelease[]> {
     const merged = new Map<string, MbSearchRelease>();
 
-    // Primary: release title + album artist (Lucene-escaped).
-    try {
-      const primary = await client.searchRelease(local.title, local.artist, 15);
-      for (const item of primary) if (!merged.has(item.id)) merged.set(item.id, item);
-    } catch {
-      // Offline replay may not have this URL; treat as no results.
+    const absorb = (items: MbSearchRelease[]): void => {
+      for (const item of items) if (!merged.has(item.id)) merged.set(item.id, item);
+    };
+
+    /**
+     * A search hit that already looks right: no need to try more variants.
+     * Requires the exact track count (not merely a bonus-track subset): a
+     * deluxe local rip should still trigger the `tracks:N` query that finds
+     * the matching deluxe edition instead of settling for the standard one.
+     */
+    const localCount = local.tracks.length;
+    const hasStrongCandidate = (): boolean => {
+      for (const item of merged.values()) {
+        const mbCount = searchItemTrackCount(item);
+        const exactCount = localCount <= 0 || mbCount <= 0 || mbCount === localCount;
+        if (!exactCount) continue;
+        if (!trackCountCompatible(localCount, mbCount)) continue;
+        if (preliminaryScore(local, item) >= 0.82) return true;
+      }
+      return false;
+    };
+
+    const runQuery = async (query: ReleaseQuery, limit: number): Promise<void> => {
+      try {
+        absorb(
+          await client.searchRelease(query.title, query.artist ?? '', limit, query.trackCount),
+        );
+      } catch {
+        // Offline replay may not have this URL; treat as no results.
+      }
+    };
+
+    // Primary query is byte-identical to the old matcher (raw tags), then the
+    // progressively cleaner variants (edition suffixes, disc prefixes, folder
+    // name, punctuation folds, title repeated with the artist).
+    for (const query of releaseQueries(local)) {
+      if (hasStrongCandidate()) break;
+      await runQuery(query, 15);
+    }
+
+    // No edition of the right size yet: ask MusicBrainz to filter by track
+    // count (finds a deluxe/anniversary edition outside the top relevance hits).
+    if (!hasStrongCandidate()) {
+      for (const query of countQueries(local)) {
+        if (hasStrongCandidate()) break;
+        await runQuery(query, 10);
+      }
     }
 
     // Weak tags: also search by the first few local track titles.
-    if (tagsAreWeak(local) && local.tracks.length > 0) {
+    if (!hasStrongCandidate() && tagsAreWeak(local) && local.tracks.length > 0) {
       try {
         const titles = local.tracks.slice(0, 3).map((t) => t.title);
-        const fallback = await client.searchReleaseByTracks(titles, {
-          artist: local.artist.trim() || undefined,
-          releaseTitle: usableTitle(local),
-          limit: 15,
-        });
-        for (const item of fallback) if (!merged.has(item.id)) merged.set(item.id, item);
+        absorb(
+          await client.searchReleaseByTracks(titles, {
+            artist: local.artist.trim() || undefined,
+            releaseTitle: usableTitle(local),
+            limit: 15,
+          }),
+        );
       } catch {
         // ignore
+      }
+    }
+
+    // Last resort: search the release *group* (survives edition differences),
+    // then browse its releases and rank them by track count/durations.
+    if (!hasStrongCandidate()) {
+      const groupTitle = normalizeTitle(titleVariants(local)[0] ?? local.title) || local.title;
+      const groupArtist = isSoundtrackAlbum(local) ? undefined : local.artist.trim() || undefined;
+      try {
+        const groups = await client.searchReleaseGroups(groupTitle, 5, groupArtist);
+        for (const group of groups.slice(0, 3)) {
+          try {
+            absorb(await client.browseReleaseGroup(group.id, 100));
+          } catch {
+            // ignore individual group failures
+          }
+          if (hasStrongCandidate()) break;
+        }
+      } catch {
+        // no group search available offline
       }
     }
 
@@ -164,7 +252,10 @@ export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): 
   }
 
   async function findBest(local: LocalAlbumForMatch): Promise<{ release: MbRelease; confidence: number } | null> {
-    const ranked = rank(await searchCandidates(local), local).slice(0, 3);
+    // Fetch a few more full releases than before: edition variants (deluxe,
+    // bonus-track, box-set disc) often sit just below the top relevance hits,
+    // and the full score is what chooses between them.
+    const ranked = rank(await searchCandidates(local), local).slice(0, 6);
     let best: { release: MbRelease; confidence: number } | null = null;
     for (const candidate of ranked) {
       let release: MbRelease;
@@ -223,22 +314,31 @@ export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): 
     return null;
   }
 
-  async function matchAlbum(albumId: string): Promise<boolean> {
+  /**
+   * Match one album. `force` re-runs an album that already has a (weak) match;
+   * the new match is only applied when it scores better. Locked albums are
+   * never touched, forced or not.
+   */
+  async function matchAlbum(albumId: string, opts: { force?: boolean } = {}): Promise<boolean> {
     const album = getAlbumRow(db, albumId);
     if (!album) return false;
     if (album.source !== 'local') return false;
     if (album.match_locked === 1) return false;
-    if (album.mb_release_id) return false;
+    if (album.mb_release_id && !opts.force) return false;
 
     const local = toLocalForMatch(album, getAlbumTracks(db, albumId));
     const best = await findBest(local);
     if (!best || best.confidence < MIN_APPLY_CONFIDENCE) return false;
+
+    // Re-matching must never make a stored match worse.
+    if (album.mb_release_id && best.confidence <= (album.match_confidence ?? 0) + 0.005) return false;
 
     const confidence = roundScore(best.confidence);
     applyRelease(db, albumId, best.release, confidence);
     await maybeDownloadCover(albumId, best.release);
     return true;
   }
+
 
   return {
     async matchPending(onProgress?: (done: number, total: number) => void): Promise<void> {
@@ -262,6 +362,47 @@ export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): 
         done++;
         onProgress?.(done, total);
       }
+    },
+
+    /**
+     * Retry albums that matched below `threshold` (or did not match at all).
+     * Uses the normal HTTP cache, so repeated runs are cheap; locked albums are
+     * never touched. Each album is only re-applied when the new score improves.
+     */
+    async rematchWeak(threshold = 0.8, options: RematchOptions = {}): Promise<RematchStats> {
+      const rows = db
+        .prepare(
+          `SELECT id, mb_release_id, match_confidence FROM albums
+            WHERE source = 'local' AND match_locked = 0
+              AND (mb_release_id IS NULL OR match_confidence IS NULL OR match_confidence < ?)
+            ORDER BY CASE WHEN mb_release_id IS NULL THEN 0 ELSE 1 END,
+                     match_confidence, added_at, id`,
+        )
+        .all(threshold) as { id: string; mb_release_id: string | null; match_confidence: number | null }[];
+
+      const started = Date.now();
+      const total = rows.length;
+      let attempted = 0;
+      let matched = 0;
+      let improved = 0;
+      options.onProgress?.(0, total);
+
+      for (const row of rows) {
+        if (options.limit != null && attempted >= options.limit) break;
+        if (options.maxMs != null && Date.now() - started >= options.maxMs) break;
+        try {
+          if (await matchAlbum(row.id, { force: true })) {
+            if (row.mb_release_id) improved++;
+            else matched++;
+          }
+        } catch {
+          // One bad album must not stop the batch.
+        }
+        attempted++;
+        options.onProgress?.(attempted, total);
+      }
+
+      return { attempted, matched, improved, remaining: Math.max(0, total - attempted) };
     },
 
     async setRelease(albumId: string, mbReleaseId: string): Promise<void> {
