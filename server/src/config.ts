@@ -2,6 +2,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 
+/** ReplayGain-style loudness normalisation for local playback. */
+export type NormalizeMode = 'off' | 'track' | 'album';
+
 export interface Config {
   libraryRoots: string[];
   dataDir: string;
@@ -9,6 +12,8 @@ export interface Config {
   /** mpv audio device for the PC zone, e.g. "pipewire" or "alsa/hw:1,0" */
   audioDevice: string;
   userAgent: string; // MusicBrainz requires an identifying UA
+  /** Loudness normalisation mode (default 'album'; the DB setting can override it). */
+  normalize?: NormalizeMode;
   /** HTTPS address other devices use (Tailscale serve), e.g. https://horse.example.ts.net:8445 */
   publicUrl?: string;
   /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
@@ -24,6 +29,7 @@ export function loadConfig(): Config {
     port: 4545,
     audioDevice: 'pipewire',
     userAgent: 'Liner/0.1 ( personal music player, self-hosted )',
+    normalize: 'album',
     ...user,
   };
   // Overrides for running a second, silent instance (tests / smoke checks).

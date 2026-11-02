@@ -17,6 +17,7 @@ import { ids, normalizeName } from '../db/index.js';
 import type { CreateScanner, Scanner } from '../modules.js';
 import { decodeCue, parseCue, type CueSheet } from './cue.js';
 import { cleanFolderName, cleanTrackTitle, formatDisplay } from './names.js';
+import { beginScan, endScan } from './state.js';
 
 const AUDIO_EXTENSIONS = new Set(['.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aiff', '.aif']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
@@ -1512,8 +1513,7 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
     return removedTracks;
   });
 
-  return {
-    async scan(onProgress?: (p: ScanProgress) => void): Promise<ScanStats> {
+  const runScan = async (onProgress?: (p: ScanProgress) => void): Promise<ScanStats> => {
       const startedAt = Date.now();
       mkdirSync(coversDir, { recursive: true });
 
@@ -1793,6 +1793,17 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       };
       progress(stats);
       return stats;
+  };
+
+  return {
+    async scan(onProgress?: (p: ScanProgress) => void): Promise<ScanStats> {
+      // Background workers (loudness analysis) pause while this is set.
+      beginScan();
+      try {
+        return await runScan(onProgress);
+      } finally {
+        endScan();
+      }
     },
   };
 }
