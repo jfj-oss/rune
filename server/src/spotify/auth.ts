@@ -150,7 +150,7 @@ export class SpotifyAuth {
   }
 
   /** Authorization URL with a fresh verifier/state. Redirect the PC browser here. */
-  loginUrl(): string {
+  loginUrl(redirectOverride?: string): string {
     const clientId = this.clientId;
     if (!clientId) {
       throw new SpotifyAuthError('Spotify is not configured: set spotifyClientId in server/config.json (or config).');
@@ -158,7 +158,7 @@ export class SpotifyAuth {
     this.prunePending();
     const verifier = createPkceVerifier();
     const state = randomBytes(16).toString('base64url');
-    const redirectUri = this.redirectUri();
+    const redirectUri = redirectOverride ?? this.redirectUri();
     this.pending.set(state, { verifier, redirectUri, createdAt: this.now() });
 
     const params = new URLSearchParams({
@@ -383,9 +383,16 @@ export function registerSpotifyRoutes(
   ensureSpotifySchema(db);
   const auth = opts.auth ?? new SpotifyAuth(db, cfg, opts);
 
-  app.get('/api/spotify/login', async (_req, reply) => {
+  app.get('/api/spotify/login', async (req, reply) => {
     try {
-      return reply.redirect(auth.loginUrl());
+      // Spotify allows http only for loopback; from other devices (the Mac, the iPhone)
+      // log in through the HTTPS Tailscale address instead — it must also be registered
+      // as a redirect URI in the Spotify dashboard.
+      const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '');
+      const loopback = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
+      const publicUrl = cfg.publicUrl?.replace(/\/$/, '');
+      const redirect = !loopback && publicUrl ? `${publicUrl}/api/spotify/callback` : undefined;
+      return reply.redirect(auth.loginUrl(redirect));
     } catch (err) {
       return errorReply(reply, 500, err);
     }
