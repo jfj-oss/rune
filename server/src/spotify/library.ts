@@ -221,6 +221,8 @@ export interface PlaylistSyncSource {
 
 export interface PlaylistSyncOptions {
   now?: () => number;
+  /** Leave Liked Songs as stored (e.g. while Spotify rate-limits /me/tracks). */
+  skipLiked?: boolean;
 }
 
 export interface PlaylistSyncResult {
@@ -232,6 +234,8 @@ export interface PlaylistSyncResult {
   liked: number;
   /** Playlists removed because Spotify no longer returns them. */
   removed: number;
+  /** Set when Spotify rate-limited Liked Songs (playlists still synced). */
+  likedRetryAfterMs?: number;
 }
 
 function addedAtMs(value: string): number | null {
@@ -257,7 +261,19 @@ export async function syncPlaylists(
   const now = opts.now ?? Date.now;
 
   // Network first: better-sqlite3 transactions must be synchronous.
-  const [playlists, liked] = await Promise.all([source.allPlaylists(), source.allSavedTracks()]);
+  // Liked Songs is the heavy part (~100 requests for ~4,600 songs) and is what Spotify
+  // rate-limits first; it must never block the user's playlists from syncing.
+  let likedRetryAfterMs: number | undefined;
+  const likedPromise: Promise<SpotifySavedTrack[] | null> = opts.skipLiked
+    ? Promise.resolve(null)
+    : source.allSavedTracks().catch((err: { status?: number; retryAfterMs?: number }) => {
+        if (err?.status === 429) {
+          likedRetryAfterMs = err.retryAfterMs ?? 60 * 60_000;
+          return null;
+        }
+        throw err;
+      });
+  const [playlists, liked] = await Promise.all([source.allPlaylists(), likedPromise]);
 
   const previous = new Map<string, { snapshot_id: string | null }>();
   for (const row of db
@@ -286,8 +302,8 @@ export async function syncPlaylists(
     }
   }
 
-  const result: PlaylistSyncResult = { playlists: 0, tracks: 0, liked: 0, removed: 0 };
-  const likedImage = liked
+  const result: PlaylistSyncResult = { playlists: 0, tracks: 0, liked: 0, removed: 0, likedRetryAfterMs };
+  const likedImage = (liked ?? [])
     .map((item) => item.track)
     .filter((t): t is SpotifyTrack => isPlayablePlaylistTrack(t))
     .map((t) => largestImage(t.album?.images))
@@ -322,6 +338,7 @@ export async function syncPlaylists(
 
     // ---- Liked Songs (always refetched; Spotify has no snapshot for it) ----
     keep.add(LIKED_SONGS_PLAYLIST_ID);
+    if (liked !== null) {
     deleteEntries.run(LIKED_SONGS_PLAYLIST_ID);
     upsertPlaylist.run(
       LIKED_SONGS_PLAYLIST_ID,
@@ -346,6 +363,7 @@ export async function syncPlaylists(
     setTrackCount.run(likedCount, LIKED_SONGS_PLAYLIST_ID);
     result.liked = likedCount;
     result.tracks += likedCount;
+    } // liked === null: skipped or rate limited — keep the stored Liked Songs as they are
 
     // ---- User playlists ----
     playlists.forEach((p, index) => {

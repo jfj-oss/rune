@@ -45,7 +45,7 @@ export interface SpotifyModule {
   /** Pull the user's saved albums into the local DB. */
   syncSavedAlbums(): Promise<SyncResult>;
   /** Pull playlists + Liked Songs, then saved albums (keeps in_library correct). */
-  syncLibrary(): Promise<SpotifyLibrarySyncResult>;
+  syncLibrary(opts?: { skipLiked?: boolean }): Promise<SpotifyLibrarySyncResult>;
   /** Spotify catalogue search, cached for identical queries. */
   searchCatalog(q: string): Promise<SearchResults>;
   /** GET /api/albums/sp:<id> for an album not yet in the DB (in_library = 0). */
@@ -74,9 +74,9 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     api,
     zones,
     syncSavedAlbums: () => syncSavedAlbums(api, db, { now }),
-    syncLibrary: async () => {
+    syncLibrary: async (syncOpts = {}) => {
       // Playlists first: saved-album cleanup must see the current playlist refs.
-      const playlists = await syncPlaylists(api, db, { now });
+      const playlists = await syncPlaylists(api, db, { now, skipLiked: syncOpts.skipLiked });
       const saved = await syncSavedAlbums(api, db, { now });
       return { playlists, saved };
     },
