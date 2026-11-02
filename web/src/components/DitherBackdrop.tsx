@@ -76,7 +76,8 @@ void main() {
   // first) and draw back in. A gentle ripple rides the growing edge; its phase follows the swell itself
   // (out while growing, back while shrinking), so it never jumps or flickers.
   if (u_wave > 0.0) {
-    float grown = pow(max(f, 0.0), 1.0 - (1.0 - u_wexp) * u_wave);
+    // e = peak^amt: the covered area grows evenly with the swell
+    float grown = pow(max(f, 0.0), pow(u_wexp, u_wave));
     float edge = smoothstep(0.05, 0.3, grown) * (1.0 - smoothstep(0.6, 0.95, grown));
     f = grown + u_wave * ${g(WAVE.ripple)} * edge * sin(grown * 9.0 - u_wave * 6.0);
   }

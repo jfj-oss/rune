@@ -136,7 +136,7 @@ describe('waveAt', () => {
     expect(waveAt(-1).amt).toBe(0);
     expect(waveAt(0).amt).toBeCloseTo(0, 5);
     expect(waveAt(WAVE.rise * 0.5).dir).toBe(1);
-    expect(WAVE.length).toBeCloseTo(6.8, 5);
+    expect(WAVE.length).toBeCloseTo(8.4, 5);
     // the way out starts gently too: the first quarter grows less than the second
     const out = (q: number) => waveAt(q * WAVE.rise).amt;
     expect(out(0.25)).toBeLessThan(out(0.5) - out(0.25));
@@ -144,13 +144,31 @@ describe('waveAt', () => {
     expect(waveAt(WAVE.rise + 0.01).amt).toBe(1);
     expect(waveAt(WAVE.rise + WAVE.hold - 0.01).amt).toBe(1);
     expect(waveAt(WAVE.rise + WAVE.hold * 0.5).dir).toBe(0);
-    // the way back accelerates: the drop in the first quarter is smaller than in the second
+    // the way back starts gently too: the drop in the first quarter is smaller than in the second
     const at = (q: number) => waveAt(WAVE.rise + WAVE.hold + q * WAVE.fall).amt;
     expect(1 - at(0.25)).toBeLessThan(at(0.25) - at(0.5));
     expect(waveAt(WAVE.rise + WAVE.hold + 0.1).dir).toBe(-1);
     // and lands softly
     expect(at(0.99)).toBeLessThan(0.002);
     expect(waveAt(WAVE.length).amt).toBe(0);
+  });
+
+  it('grows the covered area evenly with the swell (no rush at the end)', async () => {
+    const { field, toneCurve, wavePeakExponent } = await import('./dither');
+    const aspect = 1.6, ep = wavePeakExponent(aspect);
+    const cov = (amt: number) => {
+      let on = 0, n = 0;
+      for (const t of [5, 40, 77]) for (let y = 0; y < 24; y++) for (let x = 0; x < 40; x++) {
+        const f = Math.max(0, field(((x + 0.5) / 40) * aspect, (y + 0.5) / 24, aspect, t));
+        if (toneCurve(Math.pow(f, Math.pow(ep, amt))) > 0.4) on++;
+        n++;
+      }
+      return on / n;
+    };
+    const steps = [0, 0.25, 0.5, 0.75, 1].map(cov);
+    const gains = steps.slice(1).map((v, i) => v - steps[i]!);
+    // no quarter of the swell does more than twice the growth of another
+    expect(Math.max(...gains) / Math.min(...gains)).toBeLessThan(2);
   });
 
   it('lifts the field enough to cover ~80% of desktop and phone screens at the peak', async () => {
