@@ -9,6 +9,7 @@ import {
   MbClient,
   artistCreditName,
   searchItemTrackCount,
+  sharedMbClient,
   yearFromDate,
   type FetchLike,
   type NowFn,
@@ -103,7 +104,7 @@ interface RankedCandidate {
 
 export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): Matcher {
   const fetchImpl: FetchLike = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const client = new MbClient({
+  const clientOpts = {
     userAgent: cfg.userAgent,
     db,
     fetch: fetchImpl,
@@ -113,7 +114,18 @@ export function createMatcher(db: Db, cfg: Config, options: MatchOptions = {}): 
     cacheTtlMs: options.cacheTtlMs,
     maxRetries: options.maxRetries,
     limiter: options.limiter,
-  });
+  };
+  // Production shares one client/limiter with artist meta and album meta. Any
+  // injected behaviour (fixtures, fake clock) gets its own client.
+  const custom =
+    options.fetch != null ||
+    options.sleep != null ||
+    options.now != null ||
+    options.limiter != null ||
+    options.rateLimitMs != null ||
+    options.cacheTtlMs != null ||
+    options.maxRetries != null;
+  const client = custom ? new MbClient(clientOpts) : sharedMbClient(db, clientOpts);
   const downloadCovers = options.downloadCovers ?? true;
 
   async function searchCandidates(local: LocalAlbumForMatch): Promise<MbSearchRelease[]> {
