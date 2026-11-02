@@ -18,6 +18,17 @@ import { publicTrack } from '../api/library.js';
 import { loadTrack } from '../play/rows.js';
 import { buildM3u8, m3u8Filename, parseM3u8, resolveImportEntry } from './m3u.js';
 import {
+  addOverlayTracks,
+  deleteOverlayEntries,
+  ensureOverlaySchema,
+  mergedEntries,
+  moveOverlayEntry,
+  overlayCount,
+  OverlayConflictError,
+  OverlayInputError,
+  type MergedEntry,
+} from './overlay.js';
+import {
   evaluateSmartSpec,
   parseLimit,
   parseSort,
@@ -199,10 +210,14 @@ function specFromRow(row: PlaylistRow): SmartSpec {
   };
 }
 
-/** Ordered track ids for any playlist row (smart rows are evaluated live). */
+/**
+ * Ordered track ids for any playlist row (smart rows are evaluated live; synced
+ * Spotify rows include the user's local overlay entries at their resolved spots).
+ */
 function orderedTrackIds(db: Db, row: PlaylistRow): string[] {
   if (isSmart(row)) return evaluateSmartSpec(db, specFromRow(row));
-  return readEntries(db, row.id).map((e) => e.trackId);
+  if (isRune(row)) return readEntries(db, row.id).map((e) => e.trackId);
+  return mergedEntries(db, row.id).map((e) => e.trackId);
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -245,7 +260,7 @@ function summaryFor(
     name: row.name,
     ...(row.owner ? { owner: row.owner } : {}),
     ...(row.image_url ? { imageUrl: row.image_url } : {}),
-    trackCount: rune ? (trackIds?.length ?? 0) : row.track_count,
+    trackCount: rune ? (trackIds?.length ?? 0) : row.track_count + overlayCount(db, row.id),
     source: rune ? 'local' : 'spotify',
   };
   if (rune) {
@@ -255,11 +270,12 @@ function summaryFor(
   return summary;
 }
 
-function toPlaylistTracks(db: Db, trackIds: string[]): PlaylistTrack[] {
+function toPlaylistTracks(db: Db, entries: (string | MergedEntry)[]): PlaylistTrack[] {
   const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
   const tracks: PlaylistTrack[] = [];
-  for (const id of trackIds) {
-    const track = loadTrack(db, id);
+  for (const entry of entries) {
+    const item = typeof entry === 'string' ? { trackId: entry } : entry;
+    const track = loadTrack(db, item.trackId);
     if (!track) continue; // dangling entry (track/album removed) — skip it
     const album = albumStmt.get(track.albumId) as
       | { title: string | null; cover_path: string | null }
@@ -267,16 +283,26 @@ function toPlaylistTracks(db: Db, trackIds: string[]): PlaylistTrack[] {
     const coverUrl = album?.cover_path
       ? `/api/cover/${encodeURIComponent(track.albumId)}?size=200`
       : undefined;
-    tracks.push({
+    const playlistTrack: PlaylistTrack = {
       ...(publicTrack(track) as Track),
       album: {
         id: track.albumId,
         title: album?.title ?? '',
         ...(coverUrl ? { coverUrl } : {}),
       },
-    });
+    };
+    if (typeof entry !== 'string') {
+      playlistTrack.entrySource = entry.entrySource;
+      playlistTrack.entryId = entry.entryId;
+    }
+    tracks.push(playlistTrack);
   }
   return tracks;
+}
+
+/** Merged entries for a synced Spotify playlist (overlay entries included). */
+function spotifyMergedEntries(db: Db, playlistId: string): MergedEntry[] {
+  return mergedEntries(db, playlistId);
 }
 
 // ---------------------------------------------------------------- reads
@@ -304,8 +330,16 @@ export function getPlaylistDetail(db: Db, id: string): RunePlaylistDetail | unde
   ensureMyPlaylistSchema(db);
   const row = getRow(db, id);
   if (!row) return undefined;
+  if (!isRune(row)) {
+    // Synced Spotify playlist: merge the user's local overlay entries in place.
+    return {
+      ...summaryFor(db, row, undefined),
+      ...(row.description ? { description: row.description } : {}),
+      tracks: toPlaylistTracks(db, spotifyMergedEntries(db, row.id)),
+    };
+  }
   const trackIds = orderedTrackIds(db, row);
-  const summary = summaryFor(db, row, isRune(row) ? trackIds : undefined);
+  const summary = summaryFor(db, row, trackIds);
   return {
     ...summary,
     ...(row.description ? { description: row.description } : {}),
@@ -435,6 +469,13 @@ function requireExistingTracks(db: Db, trackIds: string[]): void {
   }
 }
 
+/** Map overlay-module errors onto the route error classes. */
+function rethrowOverlay(err: unknown): never {
+  if (err instanceof OverlayInputError) throw new PlaylistInputError(err.message);
+  if (err instanceof OverlayConflictError) throw new PlaylistConflictError(err.message);
+  throw err;
+}
+
 export interface AddTracksBody {
   trackIds?: unknown;
   position?: unknown;
@@ -446,25 +487,67 @@ export function addPlaylistTracks(
   body: AddTracksBody,
 ): RunePlaylistDetail {
   ensureMyPlaylistSchema(db);
-  const row = requireRune(db, id);
-  assertStatic(row);
+  const row = getRow(db, id);
+  if (!row) throw new PlaylistNotFoundError('playlist not found');
   const trackIds = parseTrackIds(body?.trackIds);
   const position = parsePosition(body?.position);
-  requireExistingTracks(db, trackIds);
 
-  const tx = db.transaction(() => {
-    const entries = readEntries(db, id);
-    const at = position === undefined ? entries.length : Math.min(position, entries.length);
-    const added: Entry[] = trackIds.map((trackId) => ({ trackId, addedAt: Date.now() }));
-    entries.splice(at, 0, ...added);
-    writeEntries(db, id, entries, Date.now());
-  });
-  tx();
+  if (isRune(row)) {
+    assertStatic(row);
+    requireExistingTracks(db, trackIds);
+
+    const tx = db.transaction(() => {
+      const entries = readEntries(db, id);
+      const at = position === undefined ? entries.length : Math.min(position, entries.length);
+      const added: Entry[] = trackIds.map((trackId) => ({ trackId, addedAt: Date.now() }));
+      entries.splice(at, 0, ...added);
+      writeEntries(db, id, entries, Date.now());
+    });
+    tx();
+  } else {
+    // Synced Spotify playlist: keep local files in rune's overlay. Spotify tracks
+    // would need Spotify write access (the API cannot add arbitrary songs anyway).
+    if (trackIds.some((trackId) => trackId.startsWith('sp:'))) {
+      throw new PlaylistConflictError(
+        'adding Spotify songs to a Spotify playlist needs Spotify write access — coming later',
+      );
+    }
+    requireExistingTracks(db, trackIds);
+    try {
+      addOverlayTracks(db, id, trackIds, position);
+    } catch (err) {
+      rethrowOverlay(err);
+    }
+  }
   return getPlaylistDetail(db, id) as RunePlaylistDetail;
 }
 
 export interface RemoveTracksBody {
   positions?: unknown;
+  /** Overlay entries of a synced Spotify playlist are removed by stable entry id. */
+  entryIds?: unknown;
+}
+
+function parseEntryIds(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new PlaylistInputError('entryIds must be an array');
+  return value.map((id, i) => {
+    if (typeof id !== 'string' || id.trim() === '') {
+      throw new PlaylistInputError(`entryIds[${i}] must be an entry id`);
+    }
+    return id.trim();
+  });
+}
+
+function parsePositions(value: unknown): number[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new PlaylistInputError('positions must be an array');
+  return value.map((p, i) => {
+    if (typeof p !== 'number' || !Number.isInteger(p) || p < 0) {
+      throw new PlaylistInputError(`positions[${i}] must be a non-negative integer`);
+    }
+    return p;
+  });
 }
 
 export function removePlaylistTracks(
@@ -473,24 +556,49 @@ export function removePlaylistTracks(
   body: RemoveTracksBody,
 ): RunePlaylistDetail {
   ensureMyPlaylistSchema(db);
-  const row = requireRune(db, id);
-  assertStatic(row);
-  if (!Array.isArray(body?.positions) || body.positions.length === 0) {
-    throw new PlaylistInputError('positions must be a non-empty array');
-  }
-  const positions: number[] = body.positions.map((p, i) => {
-    if (typeof p !== 'number' || !Number.isInteger(p) || p < 0) {
-      throw new PlaylistInputError(`positions[${i}] must be a non-negative integer`);
+  const row = getRow(db, id);
+  if (!row) throw new PlaylistNotFoundError('playlist not found');
+
+  if (isRune(row)) {
+    assertStatic(row);
+    if (!Array.isArray(body?.positions) || body.positions.length === 0) {
+      throw new PlaylistInputError('positions must be a non-empty array');
     }
-    return p;
-  });
-  const tx = db.transaction(() => {
-    const entries = readEntries(db, id);
-    const drop = new Set(positions.filter((p) => p < entries.length));
-    const kept = entries.filter((_, index) => !drop.has(index));
-    writeEntries(db, id, kept, Date.now());
-  });
-  tx();
+    const positions = parsePositions(body.positions);
+    const tx = db.transaction(() => {
+      const entries = readEntries(db, id);
+      const drop = new Set(positions.filter((p) => p < entries.length));
+      const kept = entries.filter((_, index) => !drop.has(index));
+      writeEntries(db, id, kept, Date.now());
+    });
+    tx();
+    return getPlaylistDetail(db, id) as RunePlaylistDetail;
+  }
+
+  // Synced Spotify playlist: only rune's overlay entries may be removed.
+  const entries = spotifyMergedEntries(db, id);
+  const entryIds = parseEntryIds(body?.entryIds);
+  const positions = parsePositions(body?.positions);
+  if (entryIds.length === 0 && positions.length === 0) {
+    throw new PlaylistInputError('positions or entryIds must be a non-empty array');
+  }
+  const spotifyMessage =
+    'Spotify tracks can only be removed in the Spotify app; remove local entries with entryId';
+  const drop = new Set<string>();
+  for (const position of positions) {
+    if (position >= entries.length) continue;
+    const entry = entries[position];
+    if (!entry) continue;
+    if (entry.entrySource !== 'rune-overlay') throw new PlaylistConflictError(spotifyMessage);
+    drop.add(entry.entryId);
+  }
+  for (const entryId of entryIds) {
+    const entry = entries.find((e) => e.entryId === entryId);
+    if (!entry) throw new PlaylistInputError(`unknown entry id: ${entryId}`);
+    if (entry.entrySource !== 'rune-overlay') throw new PlaylistConflictError(spotifyMessage);
+    drop.add(entry.entryId);
+  }
+  deleteOverlayEntries(db, id, [...drop]);
   return getPlaylistDetail(db, id) as RunePlaylistDetail;
 }
 
@@ -505,21 +613,32 @@ export function movePlaylistTrack(
   body: MoveTrackBody,
 ): RunePlaylistDetail {
   ensureMyPlaylistSchema(db);
-  const row = requireRune(db, id);
-  assertStatic(row);
+  const row = getRow(db, id);
+  if (!row) throw new PlaylistNotFoundError('playlist not found');
   const from = parseIndex(body?.from, 'from');
   const to = parseIndex(body?.to, 'to');
-  const tx = db.transaction(() => {
-    const entries = readEntries(db, id);
-    if (from >= entries.length || to >= entries.length) {
-      throw new PlaylistInputError('from/to out of range');
+
+  if (isRune(row)) {
+    assertStatic(row);
+    const tx = db.transaction(() => {
+      const entries = readEntries(db, id);
+      if (from >= entries.length || to >= entries.length) {
+        throw new PlaylistInputError('from/to out of range');
+      }
+      const [moved] = entries.splice(from, 1);
+      if (!moved) throw new PlaylistInputError('from/to out of range');
+      entries.splice(to, 0, moved);
+      writeEntries(db, id, entries, Date.now());
+    });
+    tx();
+  } else {
+    // Overlay entries only: Spotify-owned rows cannot be reordered (409).
+    try {
+      moveOverlayEntry(db, id, from, to);
+    } catch (err) {
+      rethrowOverlay(err);
     }
-    const [moved] = entries.splice(from, 1);
-    if (!moved) throw new PlaylistInputError('from/to out of range');
-    entries.splice(to, 0, moved);
-    writeEntries(db, id, entries, Date.now());
-  });
-  tx();
+  }
   return getPlaylistDetail(db, id) as RunePlaylistDetail;
 }
 
@@ -538,9 +657,11 @@ export function duplicatePlaylist(db: Db, id: string): RunePlaylistDetail {
       ...(isSmart(row) ? { spec: specFromRow(row) } : {}),
     });
     if (!isSmart(row)) {
-      const entries = readEntries(db, id).map((e) => ({
-        trackId: e.trackId,
-        addedAt: e.addedAt ?? Date.now(),
+      // For a synced Spotify playlist this is the merged order, so the user's
+      // local overlay entries are copied in place too.
+      const entries = orderedTrackIds(db, row).map((trackId) => ({
+        trackId,
+        addedAt: Date.now(),
       }));
       writeEntries(db, newId, entries, Date.now());
     }

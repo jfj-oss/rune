@@ -19,6 +19,14 @@ export interface PlaylistTrack extends Track {
     title: string;
     coverUrl?: string;
   };
+  /**
+   * Which side of a merged playlist this row came from (Spotify playlists can carry
+   * rune-local overlay entries). Note: `Track.source` already means local/Spotify,
+   * so this is a separate field rather than overloading `source`.
+   */
+  entrySource?: 'spotify-playlist' | 'rune-overlay';
+  /** Stable id for entry operations (rune overlay entries use this with DELETE/move). */
+  entryId?: string;
 }
 
 /** GET /api/playlists/:id — playlist metadata plus its ordered tracks. */

@@ -15,6 +15,7 @@ import type {
   SpotifyTrack,
 } from './api.js';
 import { ensureSpotifyLibrarySchema } from './library-schema.js';
+import { ensureOverlaySchema, mergedEntries, overlayCount } from '../myplaylists/overlay.js';
 import {
   ArtistResolver,
   largestImage,
@@ -449,26 +450,31 @@ function summary(r: PlaylistRow): PlaylistSummary {
 /** GET /api/playlists: Liked Songs first (position 0), then the user's order. */
 export function listPlaylists(db: Db): PlaylistSummary[] {
   ensureSpotifyLibrarySchema(db);
+  ensureOverlaySchema(db);
   const rows = db
     .prepare(`${PLAYLIST_SELECT} ORDER BY position, name COLLATE NOCASE`)
     .all() as PlaylistRow[];
-  return rows.map(summary);
+  // trackCount includes the user's local overlay entries for Spotify playlists.
+  return rows.map((row) => ({
+    ...summary(row),
+    trackCount: row.track_count + overlayCount(db, row.id),
+  }));
 }
 
 /** GET /api/playlists/:id: metadata + ordered tracks with album info. */
 export function getPlaylist(db: Db, id: string): PlaylistDetail | undefined {
   ensureSpotifyLibrarySchema(db);
+  ensureOverlaySchema(db);
   const row = db.prepare(`${PLAYLIST_SELECT} WHERE id = ?`).get(id) as PlaylistRow | undefined;
   if (!row) return undefined;
 
-  const entries = db
-    .prepare('SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position')
-    .all(id) as { track_id: string }[];
+  // Synced entries + local overlay entries, resolved after any Spotify resync.
+  const entries = mergedEntries(db, id);
   const albumStmt = db.prepare('SELECT title, cover_path FROM albums WHERE id = ?');
 
   const tracks: PlaylistTrack[] = [];
   for (const entry of entries) {
-    const track = loadTrack(db, entry.track_id);
+    const track = loadTrack(db, entry.trackId);
     if (!track) continue; // dangling entry (album/track removed) — just skip it
     const album = albumStmt.get(track.albumId) as
       | { title: string | null; cover_path: string | null }
@@ -484,11 +490,14 @@ export function getPlaylist(db: Db, id: string): PlaylistDetail | undefined {
         title: album?.title ?? '',
         ...(coverUrl ? { coverUrl } : {}),
       },
+      entrySource: entry.entrySource,
+      entryId: entry.entryId,
     });
   }
 
   return {
     ...summary(row),
+    trackCount: row.track_count + overlayCount(db, id),
     ...(row.description ? { description: row.description } : {}),
     tracks,
   };
