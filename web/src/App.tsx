@@ -1,30 +1,35 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Ambient } from './components/Ambient';
+import { PageSkeleton } from './components/PageSkeleton';
 import { Shell } from './components/Shell';
-import AlbumPage from './pages/Album';
-import Albums from './pages/Albums';
-import ArtistPage from './pages/Artist';
-import Artists from './pages/Artists';
-import Duplicates from './pages/Duplicates';
-import Discover from './pages/Discover';
-import Genres, { GenrePage } from './pages/Genres';
-import Home from './pages/Home';
-import People from './pages/People';
-import PersonPage from './pages/Person';
-import Placeholder from './pages/Placeholder';
-import PlaylistPage from './pages/Playlist';
-import Playlists from './pages/Playlists';
-import RadioPage from './pages/Radio';
-import SearchPage from './pages/Search';
-import Settings from './pages/Settings';
-import Stats from './pages/Stats';
-import Tracks from './pages/Tracks';
 import { ReviewPreviewHost } from './components/ReviewPreview';
 import { startHistoryReporter } from './lib/historyReporter';
 import { usePlayer } from './store/player';
 import { useRadio } from './store/radio';
+
+/* Pages are route-split: the shell, sidebar, player bar, mini player and Now Playing stay in the
+   main chunk; every page is fetched on first visit (iPhone over Tailscale has a slow link). */
+const Home = lazy(() => import('./pages/Home'));
+const Albums = lazy(() => import('./pages/Albums'));
+const AlbumPage = lazy(() => import('./pages/Album'));
+const Artists = lazy(() => import('./pages/Artists'));
+const ArtistPage = lazy(() => import('./pages/Artist'));
+const People = lazy(() => import('./pages/People'));
+const PersonPage = lazy(() => import('./pages/Person'));
+const Stats = lazy(() => import('./pages/Stats'));
+const Duplicates = lazy(() => import('./pages/Duplicates'));
+const Settings = lazy(() => import('./pages/Settings'));
+const SearchPage = lazy(() => import('./pages/Search'));
+const Tracks = lazy(() => import('./pages/Tracks'));
+const Genres = lazy(() => import('./pages/Genres'));
+const GenrePage = lazy(() => import('./pages/Genres').then((m) => ({ default: m.GenrePage })));
+const RadioPage = lazy(() => import('./pages/Radio'));
+const Discover = lazy(() => import('./pages/Discover'));
+const Playlists = lazy(() => import('./pages/Playlists'));
+const PlaylistPage = lazy(() => import('./pages/Playlist'));
+const Placeholder = lazy(() => import('./pages/Placeholder'));
 
 const client = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 } },
@@ -39,27 +44,29 @@ export default function App() {
       <Ambient />
       <BrowserRouter>
         <Shell>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/albums" element={<Albums />} />
-            <Route path="/album/:id" element={<AlbumPage />} />
-            <Route path="/artists" element={<Artists />} />
-            <Route path="/artist/:id" element={<ArtistPage />} />
-            <Route path="/people" element={<People />} />
-            <Route path="/person/:id" element={<PersonPage />} />
-            <Route path="/stats" element={<Stats />} />
-            <Route path="/duplicates" element={<Duplicates />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/tracks" element={<Tracks />} />
-            <Route path="/genres" element={<Genres />} />
-            <Route path="/genres/:genre" element={<GenrePage />} />
-            <Route path="/radio" element={<RadioPage />} />
-            <Route path="/discover" element={<Discover />} />
-            <Route path="/playlists" element={<Playlists />} />
-            <Route path="/playlist/:id" element={<PlaylistPage />} />
-            <Route path="*" element={<Placeholder title="Not found" />} />
-          </Routes>
+          <Suspense fallback={<PageSkeleton />}>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/albums" element={<Albums />} />
+              <Route path="/album/:id" element={<AlbumPage />} />
+              <Route path="/artists" element={<Artists />} />
+              <Route path="/artist/:id" element={<ArtistPage />} />
+              <Route path="/people" element={<People />} />
+              <Route path="/person/:id" element={<PersonPage />} />
+              <Route path="/stats" element={<Stats />} />
+              <Route path="/duplicates" element={<Duplicates />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/tracks" element={<Tracks />} />
+              <Route path="/genres" element={<Genres />} />
+              <Route path="/genres/:genre" element={<GenrePage />} />
+              <Route path="/radio" element={<RadioPage />} />
+              <Route path="/discover" element={<Discover />} />
+              <Route path="/playlists" element={<Playlists />} />
+              <Route path="/playlist/:id" element={<PlaylistPage />} />
+              <Route path="*" element={<Placeholder title="Not found" />} />
+            </Routes>
+          </Suspense>
         </Shell>
         <ReviewPreviewHost />
       </BrowserRouter>
