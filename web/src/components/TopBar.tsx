@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Check, Radio, RefreshCw, Search, Settings, Volume2, X } from 'lucide-react';
+import { Activity, Check, ChevronLeft, ChevronRight, Copy, Radio, RefreshCw, Search, Settings, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
@@ -91,6 +91,8 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
             </button>
             <div className="popover__title">Volume levelling</div>
             <VolumeLevel />
+            <MenuItem icon={<Copy size={16} />} onClick={() => { close(); nav('/duplicates'); }}>Duplicates…</MenuItem>
+            <MenuItem icon={<Activity size={16} />} onClick={() => { close(); nav('/settings'); }}>Server status…</MenuItem>
             <div className="popover__title">Ambient colours</div>
             {[...AMBIENTS, ...DITHER_AMBIENTS].map((a) => (
               <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>

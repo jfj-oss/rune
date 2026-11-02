@@ -1,14 +1,14 @@
 import type { AlbumSummary } from '@liner/shared';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ChevronDown, LayoutGrid, List, X } from 'lucide-react';
+import { Activity, ChevronDown, Copy, LayoutGrid, List, MoreHorizontal, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { browseApi } from '../browseApi';
 import { AlbumCard, CardSkeleton, FormatBadge } from '../components/AlbumCard';
 import { Cover } from '../components/Cover';
-import { Popover } from '../components/Popover';
+import { MenuItem, Popover } from '../components/Popover';
 import { Empty } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
@@ -23,8 +23,8 @@ const SORTS: { id: NonNullable<AlbumQuery['sort']>; label: string }[] = [
   { id: 'added', label: 'Date added' }, { id: 'artist', label: 'Artist' }, { id: 'title', label: 'Title' }, { id: 'year', label: 'Year' },
 ];
 
-export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'tracks' | 'genres' | 'radio' | 'playlists' }) {
-  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['radio', 'Radio'], ['playlists', 'Playlists']] as const;
+export function LibraryTabs({ active }: { active: 'albums' | 'artists' | 'people' | 'tracks' | 'genres' | 'radio' | 'playlists' | 'stats' }) {
+  const tabs = [['albums', 'Albums'], ['artists', 'Artists'], ['people', 'People'], ['tracks', 'Tracks'], ['genres', 'Genres'], ['radio', 'Radio'], ['playlists', 'Playlists'], ['stats', 'Stats']] as const;
   return (
     <div className="seg seg--tabs" role="tablist">
       {tabs.map(([id, label]) => (
@@ -162,6 +162,17 @@ export default function Albums() {
           <button className={view === 'grid' ? 'is-active' : ''} aria-label="Grid view" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid size={16} /></button>
           <button className={view === 'list' ? 'is-active' : ''} aria-label="List view" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={16} /></button>
         </div>
+        <Popover
+          placement="bottom-end"
+          trigger={({ toggle }) => <button className="btn btn--icon" aria-label="More library actions" onClick={toggle}><MoreHorizontal size={20} /></button>}
+        >
+          {(close) => (
+            <div role="menu" className="menu">
+              <MenuItem icon={<Copy size={16} />} onClick={() => { close(); nav('/duplicates'); }}>Find duplicates…</MenuItem>
+              <MenuItem icon={<Activity size={16} />} onClick={() => { close(); nav('/settings'); }}>Server status…</MenuItem>
+            </div>
+          )}
+        </Popover>
       </div>
 
       {q.isError ? (

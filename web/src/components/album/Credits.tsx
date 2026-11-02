@@ -29,9 +29,9 @@ export function Credits({ album }: { album: Album }) {
           <ul className="credits__grid">
             {g.people.map((p) => (
               <li key={p.artist.id} className="person">
-                <Link to={`/artist/${encId(p.artist.id)}`} className="person__avatar" tabIndex={-1}><Avatar name={p.artist.name} id={p.artist.id} /></Link>
+                <Link to={`/person/${encId(p.artist.id)}`} className="person__avatar" tabIndex={-1}><Avatar name={p.artist.name} id={p.artist.id} /></Link>
                 <div className="person__txt">
-                  <Link to={`/artist/${encId(p.artist.id)}`} className="person__name">{p.artist.name}</Link>
+                  <Link to={`/person/${encId(p.artist.id)}`} className="person__name">{p.artist.name}</Link>
                   <span className="person__roles">
                     {p.roles.map((r, i) => (
                       <span key={r.role}>
