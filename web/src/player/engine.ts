@@ -3,7 +3,8 @@ import { isLiveTrack } from '../lib/listenTypes';
 
 /** What actually makes sound (or pretends to) for a local (browser/mock) zone. */
 export interface Engine {
-  load(track: Track, startMs: number, autoplay: boolean): void;
+  /** `upcoming`: the songs after this one in play order (engines that can load ahead use it). */
+  load(track: Track, startMs: number, autoplay: boolean, upcoming?: Track[]): void;
   play(): void;
   pause(): void;
   seek(ms: number): void;

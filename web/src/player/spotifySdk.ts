@@ -10,7 +10,9 @@ interface SdkState {
   position: number;
   duration: number;
   loading?: boolean;
-  track_window: { current_track: SdkTrack; previous_tracks: SdkTrack[] };
+  shuffle?: boolean;
+  repeat_mode?: number;
+  track_window: { current_track: SdkTrack; previous_tracks: SdkTrack[]; next_tracks?: SdkTrack[] };
 }
 interface SdkPlayer {
   connect(): Promise<boolean>;
@@ -20,6 +22,7 @@ interface SdkPlayer {
   pause(): Promise<void>;
   resume(): Promise<void>;
   seek(ms: number): Promise<void>;
+  nextTrack?(): Promise<void>;
   setVolume(v: number): Promise<void>;
   activateElement?(): Promise<void>;
 }
@@ -62,6 +65,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** After load(): how long SDK positions are checked against where the new track can be. */
 const STALE_WINDOW_MS = 8000;
 const STALE_SLACK_MS = 3000;
+/** Spotify songs sent along with the playing one, so Spotify loads ahead and Next is near-instant. */
+const LOOKAHEAD = 20;
+
+const sdkIds = (t: SdkTrack | undefined): string[] => (t ? [t.id, t.linked_from?.id].filter((x): x is string => !!x) : []);
+const isTrack = (t: SdkTrack | undefined, id: string) => sdkIds(t).includes(id);
 
 /** Spotify playback inside this browser tab, driven through the Web Playback SDK. */
 export class SpotifySdkEngine implements Engine {
@@ -85,6 +93,14 @@ export class SpotifySdkEngine implements Engine {
   private loadAt = 0;
   private loadStartMs = 0;
   private stateLogs = 0;
+  /** Spotify ids of the list last sent to Spotify (playing song first, then the look-ahead). */
+  private window: string[] = [];
+  /** Latest state from the SDK, whatever song it describes, and when it came. */
+  private last: { s: SdkState; at: number } | null = null;
+  /** The song whose end was already reported because Spotify moved on by itself. */
+  private advancedFrom: string | null = null;
+  /** Spotify's own shuffle/repeat would reorder or repeat the list we send: switched off once per session. */
+  private modesChecked = false;
 
   constructor(readonly deviceName: string) {}
 
@@ -167,9 +183,21 @@ export class SpotifySdkEngine implements Engine {
       if (this.pos.playing) { this.pos = { ms: this.position() ?? this.pos.ms, at: Date.now(), playing: false }; this.syncFn(this.pos.ms, false); }
       return;
     }
+    this.last = { s, at: Date.now() };
     const t = s.track_window.current_track;
     const want = spotifyIdOf(cur.track.id);
-    if (t.id !== want && t.linked_from?.id !== want) return; // an older track's event: ignore
+    if (t.id !== want && t.linked_from?.id !== want) {
+      // Spotify moved on to the next song of the list we sent (this one ended): report the end once;
+      // the queue then asks for that next song, which load() picks up without a new request.
+      const at = this.window.indexOf(want);
+      const movedOn = at >= 0 && sdkIds(t).includes(this.window[at + 1] ?? '') && s.track_window.previous_tracks.some((p) => isTrack(p, want));
+      if (movedOn && this.advancedFrom !== want && this.pos.playing) {
+        this.advancedFrom = want;
+        this.snap = null;
+        this.endedFn();
+      }
+      return; // otherwise an older track's event: ignore
+    }
     // Right after a track change the SDK can still report the PREVIOUS song's position under the
     // new song: ignore positions far from where the new song can be, or the bar jumps back.
     const sinceLoad = Date.now() - this.loadAt;
@@ -206,9 +234,11 @@ export class SpotifySdkEngine implements Engine {
   }
 
   // ---------- Engine ----------
-  load(track: Track, startMs: number, autoplay: boolean) {
+  load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
+    if (autoplay && startMs === 0 && this.fastSwitch(track)) return;
     const seq = ++this.seq;
     this.cur = { track, startMs };
+    this.advancedFrom = null;
     this.snap = null;
     this.pos = { ms: startMs, at: Date.now(), playing: false };
     this.awaitUntil = autoplay ? Date.now() + 6000 : 0;
@@ -217,17 +247,56 @@ export class SpotifySdkEngine implements Engine {
     this.stateLogs = 0;
     // Safari/Chrome autoplay rules: this runs inside the user's click, before any await.
     void this.player?.activateElement?.().catch(() => undefined);
-    void this.start(track, startMs, autoplay, seq);
+    void this.start(track, startMs, autoplay, seq, upcoming.filter((t) => t.source === 'spotify').slice(0, LOOKAHEAD));
   }
 
-  private async start(track: Track, startMs: number, autoplay: boolean, seq: number) {
+  /**
+   * Switch without a new play request when Spotify already has the song: it moved there by itself
+   * (end of the previous song) or it is next in the list we sent (Next button) — both near-instant,
+   * because Spotify loaded it ahead. False = do a normal load.
+   */
+  private fastSwitch(track: Track): boolean {
+    const id = spotifyIdOf(track.id);
+    const last = this.last;
+    if (!this.player || !last || Date.now() - last.at > 15_000 || !this.window.includes(id)) return false;
+    const tw = last.s.track_window;
+    // following only applies to a song Spotify moved to by itself (not a restart of the same song)
+    const adopt = isTrack(tw.current_track, id) && !!this.cur && spotifyIdOf(this.cur.track.id) !== id;
+    const skip = !adopt && isTrack(tw.next_tracks?.[0], id) && !!this.player.nextTrack;
+    if (!adopt && !skip) return false;
+    this.seq++;
+    this.cur = { track, startMs: 0 };
+    this.snap = null;
+    this.advancedFrom = null;
+    this.stateLogs = 0;
+    if (adopt) {
+      // Spotify is already playing it: just follow along from where it is
+      this.pos = { ms: last.s.paused ? last.s.position : last.s.position + (Date.now() - last.at), at: Date.now(), playing: !last.s.paused };
+      this.awaitUntil = 0;
+      this.loadAt = 0;
+      if (last.s.paused) void this.player.resume().catch(() => undefined);
+    } else {
+      this.pos = { ms: 0, at: Date.now(), playing: false };
+      this.awaitUntil = Date.now() + 6000;
+      this.loadAt = Date.now();
+      this.loadStartMs = 0;
+      void this.player.nextTrack!().catch(() => undefined);
+    }
+    clientLog('info', `spotify sdk: ${adopt ? 'followed' : 'skipped'} to the next song`, { track: id });
+    return true;
+  }
+
+  private async start(track: Track, startMs: number, autoplay: boolean, seq: number, upcoming: Track[] = []) {
     try {
-      clientLog('info', 'spotify sdk: load', { track: track.id, startMs, autoplay, phase: this.status.phase });
+      clientLog('info', 'spotify sdk: load', { track: track.id, startMs, autoplay, phase: this.status.phase, ahead: upcoming.length });
       const deviceId = await this.ensureReady();
       if (seq !== this.seq) return;
-      const uri = track.spotifyUri ?? `spotify:track:${spotifyIdOf(track.id)}`;
-      await this.playOnDevice(deviceId, uri, startMs, () => seq !== this.seq);
+      const uriOf = (t: Track) => t.spotifyUri ?? `spotify:track:${spotifyIdOf(t.id)}`;
+      const list = [track, ...upcoming];
+      this.window = list.map((t) => spotifyIdOf(t.id));
+      await this.playOnDevice(deviceId, list.map(uriOf), startMs, () => seq !== this.seq);
       if (seq !== this.seq) return;
+      if (list.length > 1) void this.ensurePlainOrder(deviceId);
       if (!autoplay) await this.player?.pause().catch(() => undefined);
     } catch (e) {
       clientLog('error', `spotify sdk: load failed — ${(e as Error).message}`);
@@ -236,14 +305,28 @@ export class SpotifySdkEngine implements Engine {
   }
 
   /** Start one track on this tab's device via the Web API (the SDK has no "play this" call). */
-  private async playOnDevice(deviceId: string, uri: string, startMs: number, stale: () => boolean) {
+  /** Turn off Spotify's own shuffle / repeat on this device: rune already sends songs in play order. */
+  private async ensurePlainOrder(deviceId: string) {
+    const s = this.last?.s;
+    if (this.modesChecked && !s?.shuffle && !s?.repeat_mode) return;
+    this.modesChecked = true;
+    try {
+      const token = await spotifyToken();
+      const h = { Authorization: `Bearer ${token}` };
+      const dev = `device_id=${encodeURIComponent(deviceId)}`;
+      await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=false&${dev}`, { method: 'PUT', headers: h });
+      await fetch(`https://api.spotify.com/v1/me/player/repeat?state=off&${dev}`, { method: 'PUT', headers: h });
+    } catch { /* best effort: rune still corrects the song at each change */ }
+  }
+
+  private async playOnDevice(deviceId: string, uris: string[], startMs: number, stale: () => boolean) {
     for (let attempt = 0; attempt < 4; attempt++) {
       if (stale()) return;
       const token = await spotifyToken(attempt > 0 && this.lastStatus === 401);
       const res = await fetch(`https://api.spotify.com/v1/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ uris: [uri], position_ms: Math.max(0, Math.round(startMs)) }),
+        body: JSON.stringify({ uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(startMs)) }),
       });
       this.lastStatus = res.status;
       clientLog(res.ok ? 'info' : 'warn', `spotify sdk: PUT /me/player/play → ${res.status}`, { attempt, deviceId, volume: this.volume });

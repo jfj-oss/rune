@@ -44,6 +44,8 @@ const CLAIM_MS = 5000;
 const SETTLE_TRIES = 4;
 /** How long a just-set volume wins over /me/player still reporting the old one. */
 const VOLUME_HOLD_MS = 4000;
+/** How long a just-skipped-to song is shown while Spotify still reports the previous one. */
+const TRACK_HOLD_MS = 4000;
 const SETTLE_GAP_MS = 350;
 
 const EMPTY_ALBUM = { id: 'sp:unknown', title: '', coverUrl: undefined } as const;
@@ -208,6 +210,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   /** Same for shuffle / repeat right after they were switched. */
   private toggleHold: { shuffle?: boolean; repeat?: PlayerState['repeat']; until: number } | null = null;
   private lastActiveDevice: string | null = null;
+  /** The song just skipped/jumped to: shown at once and kept while Spotify still reports the old one. */
+  private trackHold: { id: string; until: number } | null = null;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
     this.api = api;
@@ -265,6 +269,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         this.claim();
         return this.settle();
       case 'next':
+        this.expectSong(this.snapshot.index + 1);
         await this.api.next(device);
         return this.refresh();
       case 'prev':
@@ -282,6 +287,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         const playable = this.snapshot.queue.filter((q) => !!q.track.spotifyUri);
         const uris = playable.map((q) => q.track.spotifyUri as string);
         const position = playable.indexOf(item);
+        this.expectSong(cmd.index);
         await this.api.play({ uris, offset: { position } }, device);
         this.claim();
         const ids = uris.map((u) => u.split(':').pop() as string);
@@ -362,6 +368,15 @@ export class SpotifyConnectZone implements PlaybackZone {
     return this.snapshot;
   }
 
+  /** Show the song at `index` right away (position 0) instead of waiting ~1 s for Spotify to report it. */
+  private expectSong(index: number): void {
+    const item = this.snapshot.queue[index];
+    if (!item) return;
+    this.trackHold = { id: item.track.id, until: this.now() + TRACK_HOLD_MS };
+    this.snapshot = { ...this.snapshot, index, positionMs: 0, status: 'playing', updatedAt: this.now() };
+    for (const cb of this.listeners) cb(this.snapshot);
+  }
+
   /** Playback was just sent to this device: Spotify takes a moment before /me/player names it. */
   private claim(): void {
     this.claimUntil = this.now() + CLAIM_MS;
@@ -425,6 +440,15 @@ export class SpotifyConnectZone implements PlaybackZone {
           if (next.repeat === th.repeat) delete th.repeat;
           else next = { ...next, repeat: th.repeat };
         }
+      }
+    }
+    const tk = this.trackHold;
+    if (tk) {
+      const reported = next.queue[next.index]?.track.id;
+      if (this.now() >= tk.until || reported === tk.id) this.trackHold = null;
+      else {
+        const i = next.queue.findIndex((q) => q.track.id === tk.id);
+        if (i >= 0) next = { ...next, index: i, positionMs: 0, status: 'playing', updatedAt: this.now() };
       }
     }
     const hold = this.volumeHold;

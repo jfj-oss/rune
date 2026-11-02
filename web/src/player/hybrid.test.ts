@@ -158,3 +158,14 @@ describe('one queue across both engines (LocalBackend + HybridEngine)', () => {
     b.dispose();
   });
 });
+
+describe('HybridEngine look-ahead', () => {
+  it('passes only the run of following songs the same engine plays', () => {
+    const local = new Fake('local'), sp = new Fake('spotify');
+    const seen: string[][] = [];
+    sp.load = (_t: Track, _s: number, _a: boolean, up: Track[] = []) => { seen.push(up.map((x) => x.id)); };
+    const h = new HybridEngine(local, sp);
+    h.load(track('sp:1', 'spotify'), 0, true, [track('sp:2', 'spotify'), track('sp:3', 'spotify'), track('l:4', 'local'), track('sp:5', 'spotify')]);
+    expect(seen[0]).toEqual(['sp:2', 'sp:3']);
+  });
+});

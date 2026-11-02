@@ -31,12 +31,15 @@ export class HybridEngine implements Engine {
     return this.active === this.local ? 'local' : this.active === this.spotify ? 'spotify' : null;
   }
 
-  load(track: Track, startMs: number, autoplay: boolean) {
+  load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
     const target = this.engineFor(track);
     if (this.active && this.active !== target) this.active.stop();
     this.active = target;
     target.setVolume(this.volume);
-    target.load(track, startMs, autoplay);
+    // look-ahead only covers the run of songs the same engine will play next
+    const run: Track[] = [];
+    for (const t of upcoming) { if (this.engineFor(t) !== target) break; run.push(t); }
+    target.load(track, startMs, autoplay, run);
   }
   play() { this.active?.play(); }
   pause() { this.active?.pause(); }

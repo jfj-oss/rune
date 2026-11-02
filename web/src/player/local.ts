@@ -75,7 +75,9 @@ export class LocalBackend implements Backend {
   private startCurrent(positionMs = 0, autoplay = true) {
     const cur = this.state.queue[this.state.index];
     if (!cur) { this.engine.stop(); return; }
-    this.engine.load(cur.track, positionMs, autoplay);
+    // what plays after this one, in order (repeat-one replays it, so nothing comes next)
+    const upcoming = this.state.repeat === 'one' ? [] : this.state.queue.slice(this.state.index + 1, this.state.index + 21).map((q) => q.track);
+    this.engine.load(cur.track, positionMs, autoplay, upcoming);
     this.set({ status: autoplay ? 'playing' : 'paused', positionMs, updatedAt: Date.now() });
   }
 

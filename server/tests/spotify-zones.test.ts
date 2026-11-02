@@ -219,6 +219,29 @@ describe('Spotify Connect zones', () => {
     });
   });
 
+  it('shows the next song at once while Spotify still reports the old one', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    api.queueData = { currently_playing: sampleTrack('t1'), queue: [sampleTrack('t2', 2, 'Something'), sampleTrack('t3', 3, 'Maxwell')] };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    await zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    const seen: string[] = [];
+    zone.onChange((st) => seen.push(st.queue[st.index]?.track.id ?? ''));
+
+    // Spotify keeps answering with t1 for a moment after "next"
+    const state = await zone.command({ type: 'next' });
+    expect(state.queue[state.index]?.track.id).toBe('sp:t2');
+    expect(state.positionMs).toBe(0);
+    expect(seen[0]).toBe('sp:t2'); // listeners hear it before Spotify answers
+
+    // once Spotify reports t2, the hold ends and real data flows again
+    api.playback = playbackState(sampleTrack('t2', 2, 'Something'));
+    api.queueData = { currently_playing: sampleTrack('t2', 2, 'Something'), queue: [sampleTrack('t3', 3, 'Maxwell')] };
+    const after = await zone.command({ type: 'seek', positionMs: 5000 });
+    expect(after.queue[after.index]?.track.id).toBe('sp:t2');
+    zone.close();
+  });
+
   it('rejects remove and out-of-range jump', async () => {
     const api = new FakeZoneApi();
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
