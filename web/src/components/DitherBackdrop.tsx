@@ -3,7 +3,9 @@ import {
   blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, paletteAt, POOLS, PULSE, pulseAt, radiusScale, RIBBONS, TONE, toneCurve, WARP,
   type DitherColour, type DitherPalette,
 } from '../lib/dither';
+import { backdropFrameMs } from '../lib/frameRate';
 import { currentItem, usePlayer } from '../store/player';
+import { useUi } from '../store/ui';
 
 /* "Dither" ambient: slow drifting abstract light forms, ordered-dithered (blue-noise thresholds) into black + a dark
    mid tone + one strong colour. Drawn by a WebGL1 fragment shader into a low-res canvas (~2 CSS px per dot) that is
@@ -186,8 +188,6 @@ function canvas2dRenderer(canvas: HTMLCanvasElement): Renderer | null {
   };
 }
 
-const FRAME_MS = 1000 / 30;
-
 /* New-song pulse: one shared start time for every backdrop on the page (app background and Now Playing). */
 let pulseStart = -Infinity;
 let lastSongKey = '';
@@ -226,6 +226,11 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
     // the 2D fallback is CPU-bound: draw it chunkier and never animate it
     let coarse = animated ? 0 : 1;
     let raf = 0, last = -Infinity, prev = 0, slow = 0, frames = 0;
+    // 30 fps only while something is happening; ~12 fps is plenty for the slow drift.
+    let playing = usePlayer.getState().state.status === 'playing';
+    let nowPlayingOpen = useUi.getState().nowPlayingOpen;
+    const offPlaying = usePlayer.subscribe((s) => { playing = s.state.status === 'playing'; });
+    const offUi = useUi.subscribe((s) => { nowPlayingOpen = s.nowPlayingOpen; });
     // `?dither-t=40` starts the animation 40 s in (for screenshots/review of a given moment)
     let t0 = performance.now() - (Number(new URLSearchParams(location.search).get('dither-t')) || 0) * 1000;
     let hiddenAt = 0;
@@ -256,7 +261,8 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
         frames++; if (dt > 40) slow++;
         if (frames >= 120) { if (slow > 40) { coarse = 1; size(); } frames = slow = 0; }
       }
-      if (now - last < FRAME_MS - 2) return;
+      const frameMs = backdropFrameMs(playing, nowPlayingOpen, currentPulse().amt > 0);
+      if (now - last < frameMs - 2) return;
       last = now;
       paint();
     };
@@ -288,6 +294,8 @@ export function DitherBackdrop({ colour }: { colour: DitherColour }) {
     canvas.addEventListener('webglcontextrestored', restored);
     return () => {
       stop();
+      offPlaying();
+      offUi();
       clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVis);
