@@ -131,9 +131,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     }
   }
 
-  function zoneFor(id: Zone): PlaybackZone | undefined {
+  async function zoneFor(id: Zone): Promise<PlaybackZone | undefined> {
     if (id === 'pc') return pc;
     if (id.startsWith('spotify:') && spotify) {
+      // After a restart the Connect zones are unknown until the device list is read.
+      if (!spotify.zones.get(id)) await spotify.zones.listZones().catch(() => undefined);
       const z = spotify.zones.get(id);
       if (z && !spotifyListeners.has(id)) {
         spotifyListeners.set(
@@ -373,12 +375,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
 
       r.get<{ Params: { zone: string } }>('/player/:zone', async (req, reply) => {
-        const z = zoneFor(req.params.zone);
+        const z = await zoneFor(req.params.zone);
         return z ? sanitize(z.state()) : reply.code(404).send({ error: 'unknown zone' });
       });
 
       r.post<{ Params: { zone: string }; Body: PlayerCommand }>('/player/:zone', async (req, reply) => {
-        const z = zoneFor(req.params.zone);
+        const z = await zoneFor(req.params.zone);
         if (!z) return reply.code(404).send({ error: 'unknown zone' });
         try {
           return sanitize(await z.command(req.body));

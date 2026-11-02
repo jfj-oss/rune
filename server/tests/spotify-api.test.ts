@@ -175,3 +175,14 @@ describe('SpotifyApi transport', () => {
     expect(calls[1]?.url.searchParams.get('ids')?.split(',')).toHaveLength(1);
   });
 });
+
+describe('player endpoints with opaque 200 bodies', () => {
+  it('treats a non-JSON 200 body (e.g. "TvJLfYpHJf") as no body', async () => {
+    const { SpotifyApi } = await import('../src/spotify/api.js');
+    const api = new SpotifyApi({
+      fetch: (async () => new Response('TvJLfYpHJf', { status: 200 })) as never,
+      getToken: async () => 'tok',
+    });
+    await expect(api.play({ uris: ['spotify:track:x'] }, 'dev')).resolves.toBeUndefined();
+  });
+});

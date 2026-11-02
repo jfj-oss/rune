@@ -210,7 +210,14 @@ export class SpotifyApi {
       }
       if (res.status === 204) return undefined as T;
       const text = await res.text();
-      return (text ? JSON.parse(text) : undefined) as T;
+      if (!text) return undefined as T;
+      // Player endpoints (play/pause/transfer…) now answer 200 with a short opaque
+      // token instead of an empty body or JSON — treat anything non-JSON as "no body".
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        return undefined as T;
+      }
     }
   }
 
