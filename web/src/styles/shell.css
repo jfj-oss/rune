@@ -1,5 +1,5 @@
 /* ---------- shell ---------- */
-.shell { position: relative; z-index: 1; height: 100dvh; display: grid; background: transparent; overflow: hidden; }
+.shell { position: relative; z-index: 1; height: 100%; display: grid; background: transparent; overflow: hidden; }
 .shell--desktop { grid-template-columns: var(--side-w) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) var(--npbar-h); transition: grid-template-columns 180ms ease; }
 .shell--desktop.shell--collapsed { grid-template-columns: var(--side-w-collapsed) minmax(0, 1fr); }
 .shell--desktop > .side { grid-row: 1; grid-column: 1; }
@@ -8,8 +8,11 @@
 .shell__col { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 .shell--desktop .main { padding-bottom: var(--npbar-h); }
 .main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; container: main / inline-size; scroll-behavior: auto; overscroll-behavior: contain; }
-.shell--mobile { grid-template-rows: minmax(0, 1fr); padding-top: var(--safe-t); }
-.shell--mobile .main { padding-bottom: calc(var(--tabs-h) + var(--safe-b) + 12px); }
+.shell--mobile { grid-template-rows: minmax(0, 1fr); }
+/* pages scroll under the (translucent) status bar like a native app; a soft fade keeps the clock readable */
+.shell--mobile .main { padding-top: var(--safe-t); padding-bottom: calc(var(--tabs-h) + var(--safe-b) + 12px); }
+.shell--mobile::before { content: ''; position: fixed; z-index: 45; top: 0; left: 0; right: 0; height: calc(var(--safe-t) + 14px); background: linear-gradient(180deg, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.35) 70%, transparent); pointer-events: none; }
+.shell--mobile .atabs, .shell--mobile .tkhead { top: var(--safe-t); }
 .shell--mobile.shell--mini .main { padding-bottom: calc(var(--tabs-h) + var(--safe-b) + var(--mini-h) + 20px); }
 
 /* ---------- sidebar ---------- */

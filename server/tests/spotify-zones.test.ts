@@ -200,7 +200,7 @@ describe('Spotify Connect zones', () => {
     expect(callsOf(api, 'setRepeat').map((c) => c.args[0])).toEqual(['context', 'track', 'off']);
   });
 
-  it('jumps by replaying the remaining queue uris', async () => {
+  it('jumps by replaying the queue from the picked song (explicit offset, safe with shuffle)', async () => {
     const api = new FakeZoneApi();
     api.playback = playbackState(sampleTrack('t1'));
     api.queueData = {
@@ -214,7 +214,8 @@ describe('Spotify Connect zones', () => {
     expect(state.queue.map((q) => q.track.id)).toEqual(['sp:t1', 'sp:t2', 'sp:t3']);
     const plays = callsOf(api, 'play');
     expect(plays.at(-1)?.args[0]).toEqual({
-      uris: ['spotify:track:t2', 'spotify:track:t3'],
+      uris: ['spotify:track:t1', 'spotify:track:t2', 'spotify:track:t3'],
+      offset: { position: 1 },
     });
   });
 
@@ -296,6 +297,23 @@ describe('mapPlaybackState', () => {
     expect(state.queue.map((q) => q.track.id)).toEqual(['sp:t1', 'sp:t2']);
     expect(state.index).toBe(0);
     expect(state.status).toBe('playing');
+  });
+
+  it('with shuffle on, lists upcoming songs in the order Spotify will play them', () => {
+    const started = ['t1', 't2', 't3', 't4', 't5'].map((id, i) => ({
+      queueId: `q${i}`,
+      track: mapTrack(sampleTrack(id, i + 1, `Song ${id}`)),
+      album: { id: 'sp:abbey', title: 'Abbey Road' },
+    }));
+    const state = mapPlaybackState(
+      'spotify:dev1',
+      { ...playbackState(sampleTrack('t2', 2, 'Song t2')), shuffle_state: true },
+      { currently_playing: sampleTrack('t2', 2, 'Song t2'), queue: [sampleTrack('t5', 5, 'Song t5'), sampleTrack('t1', 1, 'Song t1')] },
+      started,
+    );
+    // played before (not coming up again) · now · Spotify's next picks · the rest in unknown order
+    expect(state.queue.map((q) => q.track.id)).toEqual(['sp:t2', 'sp:t5', 'sp:t1', 'sp:t3', 'sp:t4']);
+    expect(state.index).toBe(0);
   });
 });
 

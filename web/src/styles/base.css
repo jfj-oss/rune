@@ -1,5 +1,8 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* iOS home-screen apps can size 100%/100vh/100dvh to the area between the notch and the home bar, leaving
+   bands top and bottom; a fixed, inset-0 root always spans the whole screen (viewport-fit=cover). */
+#root { position: fixed; inset: 0; }
 html { color-scheme: dark; -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;

@@ -129,9 +129,29 @@ export function mapPlaybackState(
     items.push(queueItemFromSpotify(sp, items.length));
   }
 
-  const index = current
+  let index = current
     ? items.findIndex((q) => q.track.id === currentKey || q.track.spotifyUri === current.uri)
     : -1;
+
+  // With Spotify's shuffle on, what plays next is Spotify's own order, not the list we sent:
+  // put the upcoming songs in the order /me/player/queue reports them.
+  if (playback.shuffle_state && index >= 0 && (spotifyQueue?.queue?.length ?? 0) > 0) {
+    const byId = new Map(items.map((q) => [q.track.id, q]));
+    const upcoming: QueueItem[] = [];
+    const taken = new Set<string>([items[index]!.track.id]);
+    for (const sp of spotifyQueue!.queue) {
+      const id = mapTrack(sp).id;
+      const it = byId.get(id);
+      if (!it || taken.has(id)) continue;
+      taken.add(id);
+      upcoming.push(it);
+    }
+    const before = items.slice(0, index).filter((q) => !taken.has(q.track.id));
+    const rest = items.slice(index + 1).filter((q) => !taken.has(q.track.id));
+    const reordered = [...before, items[index]!, ...upcoming, ...rest];
+    items.splice(0, items.length, ...reordered);
+    index = before.length;
+  }
 
   return {
     zone,
@@ -220,9 +240,9 @@ export class SpotifyConnectZone implements PlaybackZone {
         const spotifyIds = cmd.trackIds.map((id) => this.requireSpotifyTrack(id));
         const uris = spotifyIds.map((id) => `spotify:track:${id}`);
         const body: SpotifyPlayBody = { uris };
-        if (cmd.startIndex !== undefined && cmd.startIndex > 0 && uris.length > 0) {
-          body.offset = { position: Math.min(cmd.startIndex, uris.length - 1) };
-        }
+        // always name the first song: with Spotify's shuffle on, a list without an offset starts on a
+        // random one (rune shuffles before sending, so the order it sends is the order it wants)
+        if (uris.length > 0) body.offset = { position: Math.max(0, Math.min(cmd.startIndex ?? 0, uris.length - 1)) };
         if (cmd.positionMs && cmd.positionMs > 0) body.position_ms = Math.round(cmd.positionMs);
         await this.api.play(body, device);
         this.claim();
@@ -256,13 +276,16 @@ export class SpotifyConnectZone implements PlaybackZone {
       case 'jump': {
         const item = this.snapshot.queue[cmd.index];
         if (!item) throw new Error(`No queue item at index ${cmd.index} in zone ${this.zone}.`);
-        const uris = this.snapshot.queue
-          .slice(cmd.index)
-          .map((q) => q.track.spotifyUri)
-          .filter((u): u is string => !!u);
-        if (uris.length === 0) throw new Error(`Queue item ${cmd.index} has no Spotify URI.`);
-        await this.api.play({ uris }, device);
+        if (!item.track.spotifyUri) throw new Error(`Queue item ${cmd.index} has no Spotify URI.`);
+        // replay the whole queue starting at the picked song (an explicit offset: with shuffle on,
+        // Spotify would otherwise start on a random song), so the queue and Previous stay intact
+        const playable = this.snapshot.queue.filter((q) => !!q.track.spotifyUri);
+        const uris = playable.map((q) => q.track.spotifyUri as string);
+        const position = playable.indexOf(item);
+        await this.api.play({ uris, offset: { position } }, device);
         this.claim();
+        const ids = uris.map((u) => u.split(':').pop() as string);
+        this.startedQueue = await this.fetchStartedQueue(ids, position);
         return this.settle();
       }
       case 'remove':
