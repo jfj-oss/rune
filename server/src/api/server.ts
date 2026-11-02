@@ -159,6 +159,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const discover = createDiscover(db, cfg, spotify, {
     onWarn: (msg, err) => app.log.warn({ err }, msg),
   });
+  // Build "Find new songs" in the background (a full build is ~1–2 min of rate-limited
+  // lookups), so opening Discover shows a ready feed. feed() is a no-op while it is fresh.
+  const warmDiscover = () =>
+    void discover.feed({ limit: 100 }).catch((err) => app.log.warn({ err }, 'discover warm-up failed'));
+  setTimeout(warmDiscover, 90_000).unref();
+  setInterval(warmDiscover, 6 * 60 * 60_000).unref();
 
   // One Spotify sync at a time; scan/scheduler/login/manual all share it.
   // Persisted throttle: restarts must not resync (a full Liked Songs pass is ~100

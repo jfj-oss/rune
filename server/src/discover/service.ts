@@ -114,9 +114,12 @@ interface BuiltFeedGroup {
 }
 
 const CACHE_RADIO = 'radio:v1:';
-const CACHE_FEED = 'feed:v1';
+const CACHE_FEED = 'feed:v2'; // v2: wider feed (8 seed artists × 4 similar)
 const MAX_RADIO = 50;
 const MAX_FEED = 100;
+/** Your most-played / most-owned artists the feed starts from, and similar artists tried per seed. */
+const FEED_SEEDS = 8;
+const FEED_RELATED = 4;
 
 export function createDiscover(
   db: Db,
@@ -611,8 +614,8 @@ export function createDiscover(
 
   async function buildFeed(limit: number): Promise<FeedGroup[]> {
     if (!gateway) return [];
-    const perGroup = clamp(Math.ceil(limit / 3), 4, 15);
-    const seeds = await pickSeeds(3);
+    const seeds = await pickSeeds(FEED_SEEDS);
+    const perGroup = clamp(Math.ceil(limit / Math.max(1, seeds.length)) + 2, 6, 15);
     const index = ownedIndex();
     const usedPerArtist = new Map<string, number>();
     const usedTracks = new Set<string>();
@@ -631,7 +634,7 @@ export function createDiscover(
       }
       related = related
         .filter((a) => !!a.name && normalizeName(a.name) !== normalizeName(seed.name))
-        .slice(0, 2);
+        .slice(0, FEED_RELATED);
       if (related.length > 0) {
         const maxScore = Math.max(1, ...related.map((a) => a.score ?? 0));
         for (const [i, rel] of related.entries()) {

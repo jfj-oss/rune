@@ -17,7 +17,7 @@ export default function Discover() {
   const desktop = useIsDesktop();
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
-  const q = useQuery({ queryKey: KEY, queryFn: () => newSongsApi.feed(50, false), staleTime: 5 * 60_000 });
+  const q = useQuery({ queryKey: KEY, queryFn: () => newSongsApi.feed(100, false), staleTime: 5 * 60_000 });
 
   const state = usePlayer((s) => s.state);
   const playItems = usePlayer((s) => s.playItems);
@@ -29,7 +29,7 @@ export default function Discover() {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      const next = await newSongsApi.feed(50, true);
+      const next = await newSongsApi.feed(100, true);
       qc.setQueryData<FeedResponse>(KEY, next);
     } catch {
       useUi.getState().toast('Could not refresh Discover');
