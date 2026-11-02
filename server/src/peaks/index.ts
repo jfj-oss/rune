@@ -4,8 +4,8 @@
 //   GET /api/peaks/:trackId?buckets=...&bin=1          -> application/octet-stream
 //
 // Local tracks are decoded on demand (single-flight per track, one ffmpeg at a
-// time, nice -n 10) and cached under <dataDir>/peaks. Spotify tracks have no
-// audio access here and answer 404. `prefetch(trackIds)` warms the cache for
+// time, nice -n 10) and cached under <dataDir>/peaks. A Spotify track uses the
+// waveform of the same recording in the local library, else answers 404. `prefetch(trackIds)` warms the cache for
 // the current queue's upcoming tracks without blocking the caller.
 import { existsSync, statSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
@@ -65,14 +65,30 @@ export function createPeaks(db: Db, cfg: Config): PeaksService {
   const getRow = db.prepare(
     'SELECT id, source, path, cue_start_ms, cue_end_ms, duration_ms FROM tracks WHERE id = ?',
   );
+  // A Spotify song has no audio we can read, but when the same recording is in
+  // the local library (same title + a shared artist, length within 4 s) its file
+  // gives the real waveform.
+  const getTwin = db.prepare(`
+    SELECT l.id, l.source, l.path, l.cue_start_ms, l.cue_end_ms, l.duration_ms
+    FROM tracks sp
+    JOIN tracks l ON l.title = sp.title COLLATE NOCASE
+    WHERE sp.id = ? AND l.source != 'spotify' AND l.path IS NOT NULL
+      AND abs(l.duration_ms - sp.duration_ms) <= 4000
+      AND EXISTS (
+        SELECT 1 FROM track_artists a JOIN artists x ON x.id = a.artist_id
+        JOIN track_artists b ON b.track_id = l.id JOIN artists y ON y.id = b.artist_id
+        WHERE a.track_id = sp.id AND lower(x.name) = lower(y.name))
+    ORDER BY abs(l.duration_ms - sp.duration_ms)
+    LIMIT 1`);
   const queue = new PeakQueue(1, 24);
   const inflight = new Map<string, Promise<Uint8Array>>();
   let closed = false;
 
   function loadTrack(trackId: string): { track: PeakTrack; path: string } | null {
     if (closed) return null;
-    const row = getRow.get(trackId) as TrackRow | undefined;
-    // Spotify has no local audio to decode; unknown ids are indistinguishable.
+    let row = getRow.get(trackId) as TrackRow | undefined;
+    if (row?.source === 'spotify') row = getTwin.get(trackId) as TrackRow | undefined;
+    // Spotify songs without a local twin have no audio to decode.
     if (!row || row.source === 'spotify' || !row.path) return null;
     if (!sourceExists(row.path)) return null;
     const isCue = row.cue_start_ms != null;

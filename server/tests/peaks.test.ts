@@ -224,6 +224,25 @@ describe('GET /peaks/:trackId', () => {
     expect(res.rawPayload.every((v) => v >= 0 && v <= 255)).toBe(true);
   });
 
+  it('uses the local twin of a Spotify song (same title, shared artist, close length)', async () => {
+    db.prepare("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar:sp', 'tester')").run();
+    db.prepare(
+      `INSERT INTO tracks (id, album_id, source, title, disc, number, duration_ms, path)
+       VALUES ('sp:twin', 'la:1', 'spotify', 'L:BURST', 1, 1, 6500, NULL),
+              ('sp:far', 'la:1', 'spotify', 'l:burst', 1, 1, 12000, NULL),
+              ('sp:other', 'la:1', 'spotify', 'l:burst', 1, 1, 5000, NULL)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO track_artists (track_id, artist_id, position) VALUES
+       ('l:burst', 'ar:1', 0), ('sp:twin', 'ar:sp', 0), ('sp:far', 'ar:sp', 0)`,
+    ).run();
+    // sp:other has no artist in common, sp:far is 7 s longer: no twin for either
+    const local = await peaks.get('l:burst', 200);
+    expect(await peaks.get('sp:twin', 200)).toEqual(local);
+    expect(await peaks.get('sp:far', 200)).toBeNull();
+    expect(await peaks.get('sp:other', 200)).toBeNull();
+  });
+
   it('404s for Spotify, unknown tracks and missing files', async () => {
     for (const id of ['sp:abc', 'l:unknown', 'l:missing']) {
       const res = await app.inject({ url: `/peaks/${id}` });

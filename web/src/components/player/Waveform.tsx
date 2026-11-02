@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent as RPointerEvent } from 'react';
 import { formatDuration } from '../../lib/format';
-import { barAt, peakBars, playedBars, seekTimeAt } from '../../lib/waveform';
+import { barAt, fitPeaks, peakBars, playedBars, seekTimeAt } from '../../lib/waveform';
 
 interface Props {
   data: number[];
@@ -8,10 +8,11 @@ interface Props {
   durationMs: number;
   onSeek(ms: number): void;
   className?: string;
+  title?: string;
 }
 
 /** Mirrored canvas waveform: played bars use the accent colour, hover shows the time. */
-export function Waveform({ data, positionMs, durationMs, onSeek, className = '' }: Props) {
+export function Waveform({ data, positionMs, durationMs, onSeek, className = '', title }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -44,10 +45,11 @@ export function Waveform({ data, positionMs, durationMs, onSeek, className = '' 
     ctx.clearRect(0, 0, size.w, size.h);
     const css = getComputedStyle(document.documentElement);
     const accent = css.getPropertyValue('--accent').trim() || '#b3a7ff';
-    const bars = peakBars(data, size.w, size.h, 1);
+    // ~3 px per bar (2 px bar + 1 px gap), so the shape stays readable
+    const bars = peakBars(fitPeaks(data, size.w / 3), size.w, size.h, 1);
     const played = playedBars(bars.length, shown, durationMs);
     for (const b of bars) {
-      ctx.fillStyle = b.index < played ? accent : 'rgba(255,255,255,0.27)';
+      ctx.fillStyle = b.index < played ? accent : 'rgba(255,255,255,0.42)';
       ctx.fillRect(b.x, b.top, b.width, b.height);
     }
   }, [data, size, shown, durationMs]);
@@ -105,6 +107,7 @@ export function Waveform({ data, positionMs, durationMs, onSeek, className = '' 
     <div
       ref={ref}
       className={`wave ${className}`}
+      title={title}
       role="slider"
       tabIndex={0}
       aria-label="Seek"

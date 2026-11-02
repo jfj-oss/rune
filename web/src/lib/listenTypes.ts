@@ -60,6 +60,7 @@ export type NormalizeMode = 'off' | 'track' | 'album';
 
 export interface PeaksResult {
   buckets: number;
+  /** 0–1 per bucket (listenApi scales the server's 0–255 bytes). */
   data: number[];
 }
 

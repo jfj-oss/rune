@@ -99,7 +99,9 @@ export const listenApi = {
       try {
         const res = await fetch(`/api/peaks/${encodeURIComponent(trackId)}?buckets=${buckets}`);
         if (!res.ok) return null;
-        return (await res.json()) as PeaksResult;
+        const raw = (await res.json()) as PeaksResult;
+        // the server sends bytes (0–255); the waveform draws 0–1
+        return { buckets: raw.buckets, data: raw.data.map((v) => v / 255) };
       } catch {
         return null;
       }

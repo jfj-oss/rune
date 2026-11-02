@@ -50,7 +50,13 @@ export function SeekBar({ showTimes = true, className = '', buckets = 400 }: See
     <div className={`seek ${wave ? 'seek--wave' : ''} ${className}`}>
       {showTimes && <span className="seek__t">{formatDuration(shown)}</span>}
       {wave ? (
-        <Waveform data={wave} positionMs={shown} durationMs={dur} onSeek={seek} />
+        <Waveform
+          data={wave}
+          positionMs={shown}
+          durationMs={dur}
+          onSeek={seek}
+          className={peaks.generated ? 'wave--approx' : ''}
+        />
       ) : (
         <Slider
           label="Seek"

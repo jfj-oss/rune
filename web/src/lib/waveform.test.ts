@@ -88,3 +88,26 @@ describe('barAt', () => {
     expect(barAt(10, 100, 0)).toBe(-1);
   });
 });
+
+describe('generatedPeaks', () => {
+  it('is deterministic per id, in 0–1, and fades in and out', async () => {
+    const { generatedPeaks } = await import('./waveform');
+    const a = generatedPeaks('sp:abc', 400, 200_000);
+    expect(a).toHaveLength(400);
+    expect(generatedPeaks('sp:abc', 400, 200_000)).toEqual(a);
+    expect(generatedPeaks('sp:xyz', 400, 200_000)).not.toEqual(a);
+    expect(a.every((v) => v >= 0 && v <= 1)).toBe(true);
+    const mid = a.slice(150, 250).reduce((s, v) => s + v, 0) / 100;
+    expect(a[0]).toBeLessThan(mid);
+    expect(a[399]).toBeLessThan(mid);
+  });
+});
+
+describe('fitPeaks', () => {
+  it('keeps the loudest of each group and leaves short data alone', async () => {
+    const { fitPeaks } = await import('./waveform');
+    expect(fitPeaks([0.1, 0.9, 0.2, 0.3, 0.5, 0.4], 3)).toEqual([0.9, 0.3, 0.5]);
+    expect(fitPeaks([0.1, 0.2], 10)).toEqual([0.1, 0.2]);
+    expect(fitPeaks(new Array(400).fill(0.5), 126.7)).toHaveLength(126);
+  });
+});
