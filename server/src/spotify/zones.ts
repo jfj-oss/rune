@@ -39,6 +39,11 @@ export interface ConnectZoneOptions {
   now?: () => number;
 }
 
+/** How long a just-played zone ignores /me/player still naming the previous device. */
+const CLAIM_MS = 5000;
+const SETTLE_TRIES = 4;
+const SETTLE_GAP_MS = 350;
+
 const EMPTY_ALBUM = { id: 'sp:unknown', title: '', coverUrl: undefined } as const;
 
 export function emptyPlayerState(zone: Zone, now: () => number = Date.now): PlayerState {
@@ -169,6 +174,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: Promise<void> | null = null;
   private closed = false;
+  private claimUntil = 0;
+  private lastActiveDevice: string | null = null;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
     this.api = api;
@@ -206,9 +213,10 @@ export class SpotifyConnectZone implements PlaybackZone {
         }
         if (cmd.positionMs && cmd.positionMs > 0) body.position_ms = Math.round(cmd.positionMs);
         await this.api.play(body, device);
+        this.claim();
         if (cmd.paused) await this.api.pause(device).catch(() => undefined);
         this.startedQueue = await this.fetchStartedQueue(spotifyIds);
-        return this.refresh();
+        return this.settle();
       }
       case 'enqueue': {
         // Spotify's Web API only appends; it cannot insert next. `next` is ignored.
@@ -222,7 +230,8 @@ export class SpotifyConnectZone implements PlaybackZone {
         return this.refresh();
       case 'resume':
         await this.api.play({}, device);
-        return this.refresh();
+        this.claim();
+        return this.settle();
       case 'next':
         await this.api.next(device);
         return this.refresh();
@@ -241,7 +250,8 @@ export class SpotifyConnectZone implements PlaybackZone {
           .filter((u): u is string => !!u);
         if (uris.length === 0) throw new Error(`Queue item ${cmd.index} has no Spotify URI.`);
         await this.api.play({ uris }, device);
-        return this.refresh();
+        this.claim();
+        return this.settle();
       }
       case 'remove':
         throw new Error(
@@ -303,6 +313,21 @@ export class SpotifyConnectZone implements PlaybackZone {
     return this.snapshot;
   }
 
+  /** Playback was just sent to this device: Spotify takes a moment before /me/player names it. */
+  private claim(): void {
+    this.claimUntil = this.now() + CLAIM_MS;
+  }
+
+  /** Poll until Spotify reports this device as the active one (or give up after a few tries). */
+  private async settle(): Promise<PlayerState> {
+    for (let i = 0; i < SETTLE_TRIES; i++) {
+      await this.pollOnce();
+      if (this.lastActiveDevice === this.deviceId) break;
+      if (i < SETTLE_TRIES - 1) await new Promise((r) => setTimeout(r, SETTLE_GAP_MS));
+    }
+    return this.snapshot;
+  }
+
   private async pollOnce(): Promise<void> {
     if (!this.inFlight) {
       this.inFlight = this.doPoll().finally(() => {
@@ -320,14 +345,25 @@ export class SpotifyConnectZone implements PlaybackZone {
       return;
     }
     let queue: SpotifyQueue | undefined;
-    if (playback) {
+    if (playback && (!playback.device?.id || playback.device.id === this.deviceId)) {
       try {
         queue = await this.api.queue();
       } catch {
         queue = undefined;
       }
     }
-    const next = mapPlaybackState(this.zone, playback, queue, this.startedQueue, this.now);
+    // /me/player describes the account's ACTIVE device, which may be another one (the browser,
+    // the phone): then nothing is playing on this zone.
+    const activeId = playback?.device?.id ?? null;
+    this.lastActiveDevice = activeId;
+    let next: PlayerState;
+    if (playback && activeId && activeId !== this.deviceId) {
+      if (this.now() < this.claimUntil) return; // just told to play here: Spotify hasn't switched yet
+      next = { ...emptyPlayerState(this.zone, this.now), volume: this.snapshot.volume };
+    } else {
+      next = mapPlaybackState(this.zone, playback, queue, this.startedQueue, this.now);
+      this.claimUntil = 0;
+    }
     if (!sameState(next, this.snapshot)) {
       this.snapshot = next;
       for (const cb of this.listeners) cb(next);
@@ -343,7 +379,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     if (this.closed || this.listeners.size === 0) return;
     await this.pollOnce();
     if (this.closed || this.listeners.size === 0) return;
-    const delay = this.snapshot.status === 'playing' ? this.pollMsPlaying : this.pollMsIdle;
+    const delay = this.snapshot.status === 'playing' || this.now() < this.claimUntil ? this.pollMsPlaying : this.pollMsIdle;
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.loop();

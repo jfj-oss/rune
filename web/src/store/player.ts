@@ -197,6 +197,8 @@ export const usePlayer = create<PlayerStore>((set, get) => {
             attach(b);
             await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
             if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
+            // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
+            if (s.volume > 0 && Math.abs(b.state.volume - s.volume) > 1) await b.send({ type: 'volume', volume: s.volume }).catch(() => undefined);
             if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${z.name})`);
             else if (z.kind === 'pc' && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
             return;

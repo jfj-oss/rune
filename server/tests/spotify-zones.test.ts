@@ -120,6 +120,29 @@ describe('Spotify Connect zones', () => {
     expect(state.updatedAt).toBe(1000);
   });
 
+  it('reports nothing playing when another device is the active one', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { device: { ...SIM_DEVICE, id: 'browser-tab', name: 'rune — This Mac' } });
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { now: () => 1000 });
+    await (zone as unknown as { refresh(): Promise<unknown> }).refresh();
+    expect(zone.state().status).toBe('stopped');
+    expect(zone.state().queue).toEqual([]);
+  });
+
+  it('after play, waits for Spotify to switch to this device instead of reporting the old one', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { device: { ...SIM_DEVICE, id: 'browser-tab' } });
+    let polls = 0;
+    api.currentPlayback = async () => {
+      polls++;
+      return polls < 3 ? playbackState(sampleTrack('t1'), { device: { ...SIM_DEVICE, id: 'browser-tab' } }) : playbackState(sampleTrack('t1'));
+    };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { now: () => 1000 });
+    const state = await zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    expect(polls).toBe(3);
+    expect(state.status).toBe('playing');
+  });
+
   it('rejects local track ids with a clear error and no call', async () => {
     const api = new FakeZoneApi();
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
