@@ -180,7 +180,7 @@ try {
       viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
     };
-    for (const phase of ['blue', 'purple', 'green']) {
+    for (const phase of ['blue', 'purple', 'slate', 'green']) {
       const force = (ctx) => ctx.addInitScript((p) => { try { localStorage.setItem('rune.ambient', p); } catch { /* ignore */ } }, phase);
       // desktop
       {

@@ -4,6 +4,7 @@ export function Ambient() {
     <div className="ambient" aria-hidden="true">
       <i className="ambient__l ambient__l--blue" />
       <i className="ambient__l ambient__l--purple" />
+      <i className="ambient__l ambient__l--slate" />
       <i className="ambient__l ambient__l--green" />
     </div>
   );

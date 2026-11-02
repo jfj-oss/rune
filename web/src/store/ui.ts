@@ -12,8 +12,8 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'cycle' | 'blue' | 'purple' | 'green' | 'off';
-export const AMBIENTS: Ambient[] = ['cycle', 'blue', 'purple', 'green', 'off'];
+export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off';
+export const AMBIENTS: Ambient[] = ['cycle', 'blue', 'purple', 'slate', 'green', 'off'];
 const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient);
 
 /** `rune.ambient` is stored as a plain string; `?ambient=green` in the URL also sets (and persists) it. */

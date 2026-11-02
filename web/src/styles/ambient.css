@@ -5,7 +5,7 @@
 /* ---------- ambient background ----------
    Three full-viewport gradient layers stacked. Blue is the opaque base; purple then green fade in over it and
    green fades out again, so every transition is an exact crossfade. Only `opacity` is animated, and each layer
-   is its own compositor layer, so nothing repaints. ~90 s cycle: per colour 18 s hold + 12 s eased fade. */
+   is its own compositor layer, so nothing repaints. ~120 s cycle: per colour 18 s hold + 12 s eased fade. */
 .ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; background: #00161c; }
 .ambient__l { position: absolute; inset: 0; display: block; }
 .ambient__l--blue {
@@ -17,38 +17,54 @@
   background: linear-gradient(180deg, #290893 0%, #230879 18%, #1f0862 34%, #190c41 62%, #150f25 100%);
   opacity: 0;
 }
+.ambient__l--slate {
+  background:
+    radial-gradient(120% 55% at 50% -12%, rgba(70, 140, 160, 0.14), transparent 70%),
+    linear-gradient(180deg, #0f2d3a 0%, #0c2631 24%, #091c24 52%, #07141a 80%, #050f13 100%);
+  opacity: 0;
+}
+/* green is 30% darker than the original #0B3A0B family (every stop x0.7) */
 .ambient__l--green {
   background:
-    radial-gradient(120% 55% at 50% -12%, rgba(70, 150, 70, 0.22), transparent 70%),
-    linear-gradient(180deg, #0b3a0b 0%, #093209 24%, #072607 52%, #051a05 80%, #031003 100%);
+    radial-gradient(120% 55% at 50% -12%, rgba(49, 105, 49, 0.22), transparent 70%),
+    linear-gradient(180deg, #082908 0%, #062306 24%, #051b05 52%, #041204 80%, #020b02 100%);
   opacity: 0;
 }
 :root[data-ambient='off'] .ambient { display: none; }
-:root[data-ambient='blue'] .ambient__l--purple, :root[data-ambient='blue'] .ambient__l--green { opacity: 0; }
+:root[data-ambient='blue'] .ambient__l--purple, :root[data-ambient='blue'] .ambient__l--slate, :root[data-ambient='blue'] .ambient__l--green { opacity: 0; }
 :root[data-ambient='purple'] .ambient__l--purple { opacity: 1; }
+:root[data-ambient='slate'] .ambient__l--slate { opacity: 1; }
 :root[data-ambient='green'] .ambient__l--green { opacity: 1; }
-:root:not([data-ambient]) .ambient__l--purple, :root[data-ambient='cycle'] .ambient__l--purple { animation: amb-purple 90s infinite; will-change: opacity; }
-:root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: amb-green 90s infinite; will-change: opacity; }
+:root:not([data-ambient]) .ambient__l--purple, :root[data-ambient='cycle'] .ambient__l--purple { animation: amb-purple 120s infinite; will-change: opacity; }
+:root:not([data-ambient]) .ambient__l--slate, :root[data-ambient='cycle'] .ambient__l--slate { animation: amb-slate 120s infinite; will-change: opacity; }
+:root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: amb-green 120s infinite; will-change: opacity; }
+/* 120 s: blue -> purple -> slate -> green -> blue, each 18 s hold + 12 s eased fade; a layer snaps to 0 only once the next one fully covers it */
 @keyframes amb-purple {
-  0%, 20% { opacity: 0; animation-timing-function: ease-in-out; }
-  33.33%, 66.66% { opacity: 1; }
-  66.67%, 100% { opacity: 0; }
+  0%, 15% { opacity: 0; animation-timing-function: ease-in-out; }
+  25%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+@keyframes amb-slate {
+  0%, 40% { opacity: 0; animation-timing-function: ease-in-out; }
+  50%, 75% { opacity: 1; }
+  75.01%, 100% { opacity: 0; }
 }
 @keyframes amb-green {
-  0%, 53.33% { opacity: 0; animation-timing-function: ease-in-out; }
-  66.67%, 86.67% { opacity: 1; animation-timing-function: ease-in-out; }
+  0%, 65% { opacity: 0; animation-timing-function: ease-in-out; }
+  75%, 90% { opacity: 1; animation-timing-function: ease-in-out; }
   100% { opacity: 0; }
 }
-/* reduced motion: static (purple from the reference screenshot) unless a colour was chosen */
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-ambient]) .ambient__l--purple, :root[data-ambient='cycle'] .ambient__l--purple { animation: none; opacity: 1; will-change: auto; }
+  :root:not([data-ambient]) .ambient__l--slate, :root[data-ambient='cycle'] .ambient__l--slate { animation: none; opacity: 0; will-change: auto; }
   :root:not([data-ambient]) .ambient__l--green, :root[data-ambient='cycle'] .ambient__l--green { animation: none; opacity: 0; will-change: auto; }
 }
 .ambdot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
-.ambdot--cycle { background: conic-gradient(#0c4f63, #290893, #0b3a0b, #0c4f63); }
+.ambdot--cycle { background: conic-gradient(#0c4f63, #290893, #0f2d3a, #082908, #0c4f63); }
 .ambdot--blue { background: #08394a; }
 .ambdot--purple { background: #290893; }
-.ambdot--green { background: #0b3a0b; }
+.ambdot--slate { background: #0f2d3a; }
+.ambdot--green { background: #082908; }
 .ambdot--off { background: #0f1013; }
 
 /* ---------- liquid glass (smoked / tinted) ----------
