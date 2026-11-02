@@ -21,7 +21,7 @@ import { cleanFolderName, cleanTrackTitle, formatDisplay } from './names.js';
 const AUDIO_EXTENSIONS = new Set(['.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aiff', '.aif']);
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png']);
 const COVER_CACHE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'];
-const META_VERSION = 1;
+const META_VERSION = 3; // 2: ffprobe fallback
 const COVER_DIR_NAME = 'covers';
 const ARTWORK_DIR_RE = /^(?:artwork|art ?work|cover ?art|covers|scans|images)$/i;
 /** "CD1", "Disc 2", "CD 2 - Bonus", "Disc 1 - Original Album". */
@@ -165,10 +165,80 @@ function normalizeCachedMeta(raw: unknown): ParsedMeta | null {
 
 async function parseAudioFile(path: string): Promise<{ meta: ParsedMeta; parseError: boolean }> {
   try {
-    const meta = await parseFile(path, { duration: true });
-    return { meta: metaFromMetadata(meta), parseError: false };
-  } catch {
+    const meta = metaFromMetadata(await parseFile(path, { duration: true }));
+    if (meta.durationMs > 0) return { meta, parseError: false };
+    // Parsed tags but no duration/format: fill technical fields from ffprobe.
+    const probed = await probeWithFfprobe(path);
+    if (!probed) return { meta, parseError: false };
+    return {
+      meta: {
+        ...probed,
+        ...Object.fromEntries(Object.entries(meta).filter(([k, v]) => v !== undefined && !(Array.isArray(v) && v.length === 0) && !['durationMs', 'codec', 'container', 'lossless', 'sampleRate', 'bitDepth', 'bitrateKbps'].includes(k))),
+      } as ParsedMeta,
+      parseError: false,
+    };
+  } catch (e) {
+    if (process.env.LINER_SCAN_DEBUG) console.error('parse failed', path, (e as Error).message);
+    // music-metadata rejects some slightly malformed files that ffmpeg plays fine
+    // (66 in the real library). Fall back to ffprobe before giving up.
+    const probed = await probeWithFfprobe(path);
+    if (probed) return { meta: probed, parseError: false };
     return { meta: { ...EMPTY_META, error: true }, parseError: true };
+  }
+}
+
+async function probeWithFfprobe(path: string): Promise<ParsedMeta | null> {
+  const { execFile } = await import('node:child_process');
+  const out = await new Promise<string | null>((resolve) => {
+    execFile(
+      'ffprobe',
+      ['-v', 'error', '-show_format', '-show_streams', '-select_streams', 'a:0', '-of', 'json', path],
+      { maxBuffer: 8 * 1024 * 1024, timeout: 20_000 },
+      (err, stdout) => resolve(err ? null : stdout),
+    );
+  });
+  if (!out) return null;
+  try {
+    const j = JSON.parse(out) as {
+      format?: { duration?: string; bit_rate?: string; format_name?: string; tags?: Record<string, string> };
+      streams?: { codec_name?: string; sample_rate?: string; bits_per_raw_sample?: string; bits_per_sample?: number; tags?: Record<string, string> }[];
+    };
+    const st = j.streams?.[0];
+    const duration = Number(j.format?.duration);
+    if (!st || !Number.isFinite(duration) || duration <= 0) return null;
+    const tags: Record<string, string> = {};
+    for (const [k, v] of Object.entries({ ...st.tags, ...j.format?.tags })) tags[k.toLowerCase()] = v;
+    const num = (s?: string) => {
+      const n = parseInt(s ?? '', 10);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    };
+    const artist = tags.artist?.trim();
+    const codec = st.codec_name;
+    const bitDepth = num(st.bits_per_raw_sample) ?? (st.bits_per_sample || undefined);
+    const bitrate = num(j.format?.bit_rate);
+    return {
+      ...EMPTY_META,
+      title: tags.title?.trim() || undefined,
+      artists: artist ? [artist] : [],
+      albumartist: (tags.album_artist ?? tags.albumartist)?.trim() || undefined,
+      album: tags.album?.trim() || undefined,
+      year: num(tags.date?.slice(0, 4) ?? tags.year),
+      date: tags.date,
+      trackNo: num(tags.track?.split('/')[0]),
+      discNo: num(tags.disc?.split('/')[0]),
+      genre: tags.genre ? [tags.genre.trim()] : [],
+      label: tags.label ?? tags.publisher,
+      durationMs: Math.round(duration * 1000),
+      codec: codec === 'mp3' ? 'MPEG 1 Layer 3' : codec === 'flac' ? 'FLAC' : codec,
+      container: codec === 'flac' ? 'FLAC' : codec === 'mp3' ? 'MPEG' : j.format?.format_name,
+      lossless: codec === 'flac' || codec === 'alac' || codec?.startsWith('pcm') ? true : codec ? false : undefined,
+      sampleRate: num(st.sample_rate),
+      bitDepth: codec === 'flac' || codec?.startsWith('pcm') ? bitDepth : undefined,
+      bitrateKbps: bitrate ? Math.round(bitrate / 1000) : undefined,
+      error: false,
+    };
+  } catch {
+    return null;
   }
 }
 
