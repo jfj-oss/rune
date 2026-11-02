@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- PLACEHOLDER sidebar mark — replace this file to change the in-app logo. -->
+  <defs><linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9adff"/><stop offset="1" stop-color="#8f7cff"/></linearGradient></defs>
+  <circle cx="256" cy="256" r="176" fill="none" stroke="#8f7cff" stroke-opacity=".3" stroke-width="20"/>
+  <circle cx="256" cy="256" r="124" fill="none" stroke="#8f7cff" stroke-opacity=".5" stroke-width="20"/>
+  <path d="M196 372V158M196 262c0-62 40-96 124-92" fill="none" stroke="url(#a)" stroke-width="54" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="336" cy="318" r="30" fill="url(#a)"/>
+</svg>

@@ -5,3 +5,5 @@ dist
 .env
 data/
 server/config.json
+refs/
+shots/
