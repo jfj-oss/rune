@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { usePlayer } from '../store/player';
+import { shownVolume, useVolumeHold } from '../store/volumeHold';
 
 /** Typing places keep the space bar for themselves. */
 function isTyping(t: EventTarget | null): boolean {
@@ -33,11 +34,12 @@ export function KeyboardShortcuts() {
     };
     const stepVolume = (dir: 1 | -1) => {
       const now = performance.now();
-      const base = target !== null && now - lastKey < 1500 ? target : usePlayer.getState().state.volume;
+      const base = target !== null && now - lastKey < 1500 ? target : shownVolume(usePlayer.getState().state.volume, useVolumeHold.getState());
       lastKey = now;
       // next multiple of the step in that direction (62 → 65 up, 60 down)
       const next = dir > 0 ? Math.floor(base / VOLUME_STEP) * VOLUME_STEP + VOLUME_STEP : Math.ceil(base / VOLUME_STEP) * VOLUME_STEP - VOLUME_STEP;
       target = Math.max(0, Math.min(100, next));
+      useVolumeHold.getState().hold(target); // the slider shows it at once and ignores stale reports
       if (sendTimer) return;
       const wait = Math.max(0, VOLUME_SEND_MS - (now - lastSent));
       sendTimer = window.setTimeout(flush, wait);

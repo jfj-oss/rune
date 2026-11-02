@@ -13,6 +13,7 @@ import { detectIOS } from '../../lib/volume';
 import { Slider } from './Slider';
 import { VolumeSlider } from './VolumeSlider';
 import { Waveform } from './Waveform';
+import { shownVolume, useVolumeHold } from '../../store/volumeHold';
 
 interface SeekBarProps {
   showTimes?: boolean;
@@ -129,19 +130,16 @@ export function VolumeControl({ className = '' }: { className?: string }) {
   const zoneKind = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind);
   const command = usePlayer((s) => s.command);
   const [local, setLocal] = useState<number | null>(null);
-  // After a change, keep showing the chosen level until the zone reports it back: Spotify devices
-  // answer with the OLD level for a second or two, which made the slider jump back and forth.
-  const [held, setHeld] = useState<{ v: number; until: number } | null>(null);
-  const holding = held && Date.now() < held.until && Math.abs(volume - held.v) > 1;
-  const v = local ?? (holding ? held.v : volume);
+  // After a change (here or via the E/R keys), keep showing the chosen level for a few seconds:
+  // Spotify devices answer with older levels meanwhile, which made the slider jump back and forth.
+  const held = useVolumeHold();
+  const v = local ?? shownVolume(volume, held);
   const sendTimer = useRef<{ t: ReturnType<typeof setTimeout> | null; last: number; pending: number | null }>({ t: null, last: 0, pending: null });
   useEffect(() => {
-    if (!held) return;
-    const left = held.until - Date.now();
-    if (left <= 0 || Math.abs(volume - held.v) <= 1) { setHeld(null); return; }
-    const t = setTimeout(() => setHeld(null), left);
+    if (held.v === null) return;
+    const t = setTimeout(() => useVolumeHold.getState().clear(), Math.max(0, held.until - Date.now()));
     return () => clearTimeout(t);
-  }, [held, volume]);
+  }, [held.v, held.until]);
   if (v > 0) lastAudible = v;
   const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
   // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone.
@@ -160,10 +158,10 @@ export function VolumeControl({ className = '' }: { className?: string }) {
       if (st.pending != null) { const p = st.pending; st.pending = null; void command({ type: 'volume', volume: p }); }
     }, Math.max(0, wait));
   };
-  const set = (x: number) => { setLocal(x); setHeld({ v: x, until: Date.now() + 5000 }); send(x); };
+  const set = (x: number) => { setLocal(x); held.hold(x); send(x); };
   return (
     <div className={`volume ${className}`}>
-      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => { const x = v === 0 ? lastAudible : 0; setLocal(null); setHeld({ v: x, until: Date.now() + 5000 }); void command({ type: 'volume', volume: x }); }}>
+      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => { const x = v === 0 ? lastAudible : 0; setLocal(null); held.hold(x); void command({ type: 'volume', volume: x }); }}>
         <Icon size={18} />
       </button>
       <VolumeSlider value={v} onChange={set} onCommit={() => setLocal(null)} />
