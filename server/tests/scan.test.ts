@@ -79,6 +79,11 @@ let scanner: ScannerWithStats;
 const albumOneFolder = (): string => join(library, 'Artist One - Album One (1999) [FLAC]');
 const cueFile = (): string => join(library, 'Cue Album', 'Cue Album.flac');
 const noTagsFolder = (): string => join(library, 'No Tags Artist - No Tags Album (1985) [FLAC]');
+const chicagoFolder = (): string => join(library, 'Chicago - Chicago X (2013) [FLAC 24-192]');
+const sugarRayAlbumFolder = (): string => join(library, 'Sugar Ray 1459 1999 FLAC+CUE (RLG)');
+const sugarRaySingleFolder = (): string => join(library, 'Sugar Ray - 14 59');
+const sugarRaySingleFile = (): string => join(sugarRaySingleFolder(), 'Sugar Ray - Someday.flac');
+const editionFolder = (): string => join(library, 'Edition Artist - Edition Album (2010)');
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'liner-scan-'));
@@ -210,7 +215,95 @@ beforeAll(() => {
   makeFlac(join(va, '02.flac'), { title: 'Two', artist: 'Artist Y', album: 'VA Album', track: 2 });
   makeFlac(join(va, '03.flac'), { title: 'Three', artist: 'Artist Z', album: 'VA Album', track: 3 });
 
-  // 8. Embedded-only cover must be extracted into dataDir/covers.
+  // 8. Real case: inconsistent album tags in one folder ("X" vs "Chicago X").
+  // The one-off spelling must merge into the six-track majority, keeping the
+  // majority group's key (and therefore its album id).
+  const chicago = chicagoFolder();
+  mkdirSync(chicago, { recursive: true });
+  for (let n = 1; n <= 7; n++) {
+    makeFlac(join(chicago, `${String(n).padStart(2, '0')} - Chicago ${n}.flac`), {
+      title: `Chicago Track ${n}`,
+      artist: 'Chicago',
+      album: n === 4 ? 'Chicago X' : 'X',
+      albumartist: 'Chicago',
+      track: n,
+      date: '2013',
+      genre: 'Rock',
+    });
+  }
+
+  // 9. Real case: a stray single-track folder carrying the album tag of a
+  // multi-track album folder ("Sugar Ray - 14 59" beside the full "14:59").
+  const sugarAlbum = sugarRayAlbumFolder();
+  mkdirSync(sugarAlbum, { recursive: true });
+  const sugarTitles = [
+    'New Direction',
+    'Every Morning',
+    'Falls Apart',
+    'Personal Space Invader',
+    'Live & Direct',
+    'Someday',
+    'Aim for Me',
+    'Ode to the Lonely Hearted',
+  ];
+  sugarTitles.forEach((title, i) => {
+    makeFlac(join(sugarAlbum, `${String(i + 1).padStart(2, '0')} ${title}.flac`), {
+      title,
+      artist: 'Sugar Ray',
+      album: '14:59',
+      albumartist: 'Sugar Ray',
+      track: i + 1,
+      date: '1999',
+    });
+  });
+  const sugarSingle = sugarRaySingleFolder();
+  mkdirSync(sugarSingle, { recursive: true });
+  makeFlac(sugarRaySingleFile(), {
+    title: 'Someday',
+    artist: 'Sugar Ray',
+    album: '14:59',
+    albumartist: 'Sugar Ray',
+    track: 6,
+    date: '1999',
+  });
+
+  // 10. Edition/disc noise in the album tag must not split the album.
+  const edition = editionFolder();
+  mkdirSync(edition, { recursive: true });
+  makeFlac(join(edition, '01 - One.flac'), {
+    title: 'Edition One',
+    artist: 'Edition Artist',
+    album: 'Edition Album',
+    albumartist: 'Edition Artist',
+    track: 1,
+    date: '2010',
+  });
+  makeFlac(join(edition, '02 - Two.flac'), {
+    title: 'Edition Two',
+    artist: 'Edition Artist',
+    album: 'Edition Album',
+    albumartist: 'Edition Artist',
+    track: 2,
+    date: '2010',
+  });
+  makeFlac(join(edition, '03 - Three.flac'), {
+    title: 'Edition Three',
+    artist: 'Edition Artist',
+    album: 'Edition Album (Deluxe Edition)',
+    albumartist: 'Edition Artist',
+    track: 3,
+    date: '2010',
+  });
+  makeFlac(join(edition, '04 - Four.flac'), {
+    title: 'Edition Four',
+    artist: 'Edition Artist',
+    album: 'Edition Album - Remastered',
+    albumartist: 'Edition Artist',
+    track: 4,
+    date: '2010',
+  });
+
+  // 11. Embedded-only cover must be extracted into dataDir/covers.
   const embedded = join(library, 'Embedded Cover Album');
   mkdirSync(embedded, { recursive: true });
   const coverPng = join(root, 'cover.png');
@@ -269,10 +362,10 @@ describe('scanner', () => {
     const progress: ScanProgress[] = [];
     const stats = await scanner.scan((p) => progress.push(p));
 
-    expect(stats.filesSeen).toBe(15);
-    expect(stats.changedFiles).toBe(15);
+    expect(stats.filesSeen).toBe(35);
+    expect(stats.changedFiles).toBe(35);
     expect(stats.errors).toBe(0);
-    expect(stats.albumsFound).toBe(9);
+    expect(stats.albumsFound).toBe(12);
     expect(stats.cueAlbums).toBe(1);
     expect(stats.elapsedMs).toBeGreaterThanOrEqual(0);
 
@@ -298,6 +391,34 @@ describe('scanner', () => {
     expect(discTracks.map((t) => t.disc)).toEqual([1, 2]);
     expect(discTracks.map((t) => t.title)).toEqual(['Disc One Track', 'Disc Two Track']);
     expect(discAlbum.folder_path).toBe(join(library, 'Disc Pack'));
+
+    // --- inconsistent album tags merge into the majority group (real "Chicago X")
+    const chicagoAlbum = albumRow('X');
+    expect(chicagoAlbum.folder_path).toBe(chicagoFolder());
+    expect(artistName(String(chicagoAlbum.artist_id))).toBe('Chicago');
+    expect(chicagoAlbum.year).toBe(2013);
+    expect(String(chicagoAlbum.id)).toBe(ids.localAlbum(chicagoFolder(), 'x'));
+    expect(tracksOf(String(chicagoAlbum.id))).toHaveLength(7);
+    expect(db.prepare('SELECT id FROM albums WHERE title = ?').get('Chicago X')).toBeUndefined();
+
+    // --- edition/disc noise in the tag does not split the album
+    const editionAlbum = albumRow('Edition Album');
+    expect(String(editionAlbum.id)).toBe(ids.localAlbum(editionFolder(), 'edition album'));
+    expect(tracksOf(String(editionAlbum.id))).toHaveLength(4);
+    expect(
+      db.prepare('SELECT id FROM albums WHERE title = ?').get('Edition Album (Deluxe Edition)'),
+    ).toBeUndefined();
+
+    // --- stray one-track folder folds into the album it duplicates (real "14:59")
+    const sugarAlbum = albumRow('14:59');
+    expect(sugarAlbum.folder_path).toBe(sugarRayAlbumFolder());
+    expect(String(sugarAlbum.id)).toBe(ids.localAlbum(sugarRayAlbumFolder()));
+    const sugarTracks = tracksOf(String(sugarAlbum.id));
+    expect(sugarTracks).toHaveLength(9);
+    expect(sugarTracks.filter((t) => t.path === sugarRaySingleFile())).toHaveLength(1);
+    expect(
+      db.prepare('SELECT id FROM albums WHERE folder_path = ?').get(sugarRaySingleFolder()),
+    ).toBeUndefined();
 
     // --- folder with two album tags split, using groupKey in the album id
     const compA = albumRow('Comp A');
@@ -372,7 +493,7 @@ describe('scanner', () => {
 
   it('is incremental: a second scan changes nothing', async () => {
     const stats = await scanner.scan();
-    expect(stats.filesSeen).toBe(15);
+    expect(stats.filesSeen).toBe(35);
     expect(stats.changedFiles).toBe(0);
     expect(stats.changedAlbums).toBe(0);
     expect(stats.vanishedFiles).toBe(0);
@@ -408,6 +529,26 @@ describe('scanner', () => {
     expect(after.mb_release_id).toBe('rel-1');
     const ta = db.prepare('SELECT artist_id FROM track_artists WHERE track_id = ?').all(firstTrack) as { artist_id: string }[];
     expect(ta.map((r) => r.artist_id)).toEqual([mbArtist]);
+
+    // The merged album survives on its majority id; its match is not overwritten
+    // when one of the merged files changes.
+    const chicago = albumRow('X');
+    const chicagoId = String(chicago.id);
+    db.prepare(
+      "UPDATE albums SET mb_release_id = 'rel-chicago', title = 'Chicago X', label = 'Columbia' WHERE id = ?",
+    ).run(chicagoId);
+    const chicagoFile = join(chicagoFolder(), '01 - Chicago 1.flac');
+    utimesSync(chicagoFile, future, future);
+    stats = await scanner.scan();
+    expect(stats.changedAlbums).toBe(1);
+    const chicagoAfter = db.prepare('SELECT * FROM albums WHERE id = ?').get(chicagoId) as Record<
+      string,
+      unknown
+    >;
+    expect(chicagoAfter.title).toBe('Chicago X');
+    expect(chicagoAfter.mb_release_id).toBe('rel-chicago');
+    expect(chicagoAfter.label).toBe('Columbia');
+    expect(tracksOf(chicagoId)).toHaveLength(7);
   });
 
   it('reparses a file when its mtime changes', async () => {
