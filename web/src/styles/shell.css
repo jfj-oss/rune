@@ -47,7 +47,7 @@
 .search--page input { font-size: 16px; }
 
 /* ---------- now-playing bar ---------- */
-.npbar { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(380px, 1.6fr) minmax(320px, 1fr); align-items: center; gap: 24px; padding: 0 20px; z-index: 40; }
+.npbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(340px, 1.5fr) auto; align-items: center; gap: 20px; padding: 0 20px; z-index: 40; }
 .npbar__now { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .npbar__art { width: 56px; height: 56px; flex: none; border-radius: var(--r); transition: transform var(--t); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
 .npbar__art:hover { transform: scale(1.05); }
@@ -59,7 +59,10 @@
 .npbar__center { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
 .npbar__center .seek { width: 100%; max-width: 640px; }
 .npbar__right { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
-.npbar__right .volume { width: 130px; }
+.npbar__right .volume { width: clamp(240px, 22vw, 340px); flex: none; }
+.npbar__right .zonebtn { min-width: 0; flex: 0 1 auto; max-width: 170px; }
+.npbar__right .zonebtn svg { flex: none; }
+.npbar__right .volume--hint { width: auto; max-width: 220px; }
 
 .transport { display: flex; align-items: center; gap: 12px; }
 .transport--big { gap: 22px; justify-content: center; }
@@ -67,6 +70,7 @@
 .seek__t { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; min-width: 34px; }
 .seek__t--r { text-align: right; }
 .volume { display: flex; align-items: center; gap: 4px; }
+.volume--hint { font-size: 12.5px; color: var(--text-3); justify-content: center; min-height: 28px; }
 .signaldot { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border-radius: 999px; color: var(--text-2); font-size: 13px; }
 .signaldot:hover { background: color-mix(in srgb, #fff 8%, transparent); }
 .signaldot__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-3); box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, transparent); }
@@ -157,8 +161,8 @@
 .np__sub { font-size: 16px; color: var(--text-2); margin-top: -6px; }
 .seek--np { margin-top: 10px; }
 .np__transport { padding: 6px 0 2px; }
-.np__vol { display: flex; justify-content: center; }
-.np__vol .volume { width: 260px; }
+.np__vol { display: flex; justify-content: center; padding-top: 4px; }
+.np__vol .volume { width: 100%; }
 .np__signal { display: flex; align-items: center; gap: 2px 10px; flex-wrap: wrap; color: var(--text-3); font-size: 12.5px; }
 .np__signal .signaldot { padding-left: 0; }
 .np__signal .signaldot:hover { background: none; color: var(--text); }

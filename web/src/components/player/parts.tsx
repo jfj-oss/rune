@@ -4,7 +4,9 @@ import { formatDuration } from '../../lib/format';
 import { usePosition } from '../../hooks/usePosition';
 import { currentItem, usePlayer, useSignalPath } from '../../store/player';
 import { Popover } from '../Popover';
+import { detectIOS } from '../../lib/volume';
 import { Slider } from './Slider';
+import { VolumeSlider } from './VolumeSlider';
 
 export function SeekBar({ showTimes = true, className = '' }: { showTimes?: boolean; className?: string }) {
   const state = usePlayer((s) => s.state);
@@ -78,18 +80,29 @@ export function Transport({ big = false, extras = true }: { big?: boolean; extra
   );
 }
 
+/** Volume to restore on unmute: the last non-zero level, shared by every VolumeControl. */
+let lastAudible = 60;
+
 export function VolumeControl({ className = '' }: { className?: string }) {
   const volume = usePlayer((s) => s.state.volume);
+  const zoneKind = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind);
   const command = usePlayer((s) => s.command);
   const [local, setLocal] = useState<number | null>(null);
   const v = local ?? volume;
+  if (v > 0) lastAudible = v;
+  const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
+  // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone.
+  if (ios && zoneKind === 'browser') {
+    return <div className={`volume volume--hint ${className}`}>Use the {ios} volume buttons</div>;
+  }
   const Icon = v === 0 ? VolumeX : v < 40 ? Volume1 : Volume2;
+  const set = (x: number) => { setLocal(x); void command({ type: 'volume', volume: x }); };
   return (
     <div className={`volume ${className}`}>
-      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => void command({ type: 'volume', volume: v === 0 ? 60 : 0 })}>
+      <button className="btn-icon" aria-label={v === 0 ? 'Unmute' : 'Mute'} onClick={() => { setLocal(null); void command({ type: 'volume', volume: v === 0 ? lastAudible : 0 }); }}>
         <Icon size={18} />
       </button>
-      <Slider label="Volume" value={v} max={100} onChange={(x) => { setLocal(x); void command({ type: 'volume', volume: x }); }} onCommit={() => setLocal(null)} />
+      <VolumeSlider value={v} onChange={set} onCommit={() => setLocal(null)} />
     </div>
   );
 }

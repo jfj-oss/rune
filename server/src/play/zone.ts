@@ -764,7 +764,7 @@ class PcZoneImpl implements PcZone {
   }
 
   private async cmdVolume(volume: number): Promise<void> {
-    const v = Math.round(Math.min(100, Math.max(0, volume)));
+    const v = Math.round(Math.min(100, Math.max(0, volume)) * 2) / 2; // 0.5 % resolution
     this.volume = v;
     await this.setMpvVolume(v);
     this.emitChange();
