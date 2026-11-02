@@ -5,20 +5,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
 import { FormatBadge, AlbumCard } from '../components/AlbumCard';
+import { Connections } from '../components/album/Connections';
 import { Credits } from '../components/album/Credits';
+import { AboutMeta } from '../components/album/Editions';
 import { FixMatchBanner, FixMatchDialog } from '../components/album/FixMatch';
 import { ArtistNotes } from '../components/album/Notes';
 import { Prose, Reception, ScoreChip } from '../components/album/Reception';
 import { TrackList } from '../components/album/TrackList';
+import { PlayStats } from '../components/discover/PlayStats';
 import { MobileBack } from '../components/MobileBack';
 import { SaveButton } from '../components/SaveButton';
 import { Cover } from '../components/Cover';
 import { AddToPlaylistItem } from '../components/AddToPlaylist';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty, HScroll, SectionHead, SourceLink } from '../components/Rows';
+import { discoverApi } from '../discoverApi';
 import { useScrollRoot } from '../hooks/scrollRoot';
 import { albumItems, usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
+import type { AlbumEditions } from '../lib/discover';
 import { textPreview } from '../lib/previews';
 import { usePreview } from '../store/preview';
 import { useUi } from '../store/ui';
@@ -31,12 +36,13 @@ export default function AlbumPage() {
   const loc = useLocation();
   const album = useQuery({ queryKey: ['album', id], queryFn: () => api.album(id) });
   const details = useQuery({ queryKey: ['details', id], queryFn: () => api.details(id), retry: false, staleTime: 5 * 60_000 });
+  const editions = useQuery({ queryKey: ['editions', id], queryFn: () => discoverApi.editions(id), staleTime: 5 * 60_000 });
   const artistId = album.data?.artist.id;
   const artist = useQuery({ queryKey: ['artist', artistId], queryFn: () => api.artist(artistId!), enabled: !!artistId });
 
   if (album.isError) return <div className="page"><Empty title="Album not found">It may have been removed from the library.</Empty></div>;
   if (!album.data) return <AlbumSkeleton />;
-  return <AlbumView album={album.data} details={details} artist={artist.data} hash={loc.hash} />;
+  return <AlbumView album={album.data} details={details} editions={editions} artist={artist.data} hash={loc.hash} />;
 }
 
 function AlbumSkeleton() {
@@ -50,7 +56,7 @@ function AlbumSkeleton() {
   );
 }
 
-function AlbumView({ album, details, artist, hash }: { album: Album; details: UseQueryResult<AlbumDetails | null>; artist?: Artist; hash: string }) {
+function AlbumView({ album, details, editions, artist, hash }: { album: Album; details: UseQueryResult<AlbumDetails | null>; editions: UseQueryResult<AlbumEditions>; artist?: Artist; hash: string }) {
   const root = useScrollRoot();
   const { playAlbum, enqueueAlbum } = usePlay();
   const toast = useUi((s) => s.toast);
@@ -62,16 +68,20 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
   const totalMs = album.tracks.reduce((n, t) => n + t.durationMs, 0);
   const lowConf = album.source === 'local' && album.matchConfidence !== undefined && album.matchConfidence < 0.7;
 
+  const ed = editions.data;
+  const loadingEditions = editions.isLoading;
+  const hasEditionFacts = !!ed && (!!ed.originalReleaseDate || !!ed.releaseGroupType || ed.secondaryTypes.length > 0 || ed.editions.length > 0 || ed.otherVersionsInLibrary.length > 0);
   const hasReview = !!d && (!!d.reception || d.scores.length > 0 || d.quotes.length > 0);
-  const hasAbout = !!d && (d.artistNotes.length > 0 || !!d.background);
+  const hasAbout = (!!d && (d.artistNotes.length > 0 || !!d.background)) || hasEditionFacts;
+  const aboutLoading = loadingDetails || loadingEditions;
   const hasCredits = album.credits.length > 0;
   const tabs = useMemo(() => {
     const t: { id: SectionId; label: string }[] = [{ id: 'tracks', label: 'Tracks' }];
     if (hasReview || loadingDetails) t.push({ id: 'review', label: 'Review' });
-    if (hasAbout || loadingDetails) t.push({ id: 'about', label: 'About' });
+    if (hasAbout || aboutLoading) t.push({ id: 'about', label: 'About' });
     if (hasCredits) t.push({ id: 'credits', label: 'Credits' });
     return t;
-  }, [hasReview, hasAbout, hasCredits, loadingDetails]);
+  }, [hasReview, hasAbout, aboutLoading, hasCredits, loadingDetails]);
 
   const [active, setActive] = useState<SectionId>('tracks');
   const refs = useRef<Partial<Record<SectionId, HTMLElement | null>>>({});
@@ -181,7 +191,7 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
           </section>
         )}
 
-        {!loadingDetails && !hasReview && !hasAbout && (
+        {!loadingDetails && !aboutLoading && !hasReview && !hasAbout && (
           <section className="asec asec--quiet"><p className="muted">No reviews found for this album.</p></section>
         )}
 
@@ -192,20 +202,38 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
           </section>
         )}
 
-        {d && d.artistNotes.length > 0 && (
+        {aboutLoading && (
           <section className="asec" id="about" data-sec="about" ref={setRef('about')}>
-            <SectionHead title="In the artist's words" />
-            <ArtistNotes notes={d.artistNotes} album={album} />
+            <SectionHead title="About" />
+            <AboutMeta album={album} editions={ed} loading={loadingEditions} />
+            {loadingDetails && (
+              <div className="about__part" aria-live="polite">
+                <p className="muted secnote">Looking up background…</p>
+                <div className="skel skel--line shimmer" /><div className="skel skel--line shimmer" style={{ width: '92%' }} /><div className="skel skel--line shimmer" style={{ width: '78%' }} />
+              </div>
+            )}
           </section>
         )}
 
-        {d?.background && (
-          <section className="asec" id={d.artistNotes.length ? 'background' : 'about'} data-sec={d.artistNotes.length ? undefined : 'about'} ref={d.artistNotes.length ? undefined : setRef('about')}>
-            <SectionHead title="Background" />
-            <div className="bg">
-              <Prose text={d.background.value} lines={9} />
-              <SourceLink source={d.background.source} url={d.background.url} onPreview={() => openPreview(textPreview('Background', 'Background', d.background!))} />
-            </div>
+        {!aboutLoading && hasAbout && (
+          <section className="asec" id="about" data-sec="about" ref={setRef('about')}>
+            <SectionHead title="About" />
+            <AboutMeta album={album} editions={ed} loading={false} />
+            {d && d.artistNotes.length > 0 && (
+              <div className="about__part">
+                <h3 className="eyebrow about__sub">In the artist’s words</h3>
+                <ArtistNotes notes={d.artistNotes} album={album} />
+              </div>
+            )}
+            {d?.background && (
+              <div className="about__part">
+                <h3 className="eyebrow about__sub">Background</h3>
+                <div className="bg">
+                  <Prose text={d.background.value} lines={9} />
+                  <SourceLink source={d.background.source} url={d.background.url} onPreview={() => openPreview(textPreview('Background', 'Background', d.background!))} />
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -215,6 +243,13 @@ function AlbumView({ album, details, artist, hash }: { album: Album; details: Us
             <Credits album={album} />
           </section>
         )}
+
+        <section className="asec">
+          <SectionHead title="Your plays" />
+          <PlayStats kind="album" id={album.id} />
+        </section>
+
+        <Connections albumId={album.id} />
 
         {more.length > 0 && (
           <section className="asec">

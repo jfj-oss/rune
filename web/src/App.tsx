@@ -7,12 +7,17 @@ import AlbumPage from './pages/Album';
 import Albums from './pages/Albums';
 import ArtistPage from './pages/Artist';
 import Artists from './pages/Artists';
+import Duplicates from './pages/Duplicates';
 import Genres, { GenrePage } from './pages/Genres';
 import Home from './pages/Home';
+import People from './pages/People';
+import PersonPage from './pages/Person';
 import Placeholder from './pages/Placeholder';
 import PlaylistPage from './pages/Playlist';
 import Playlists from './pages/Playlists';
 import SearchPage from './pages/Search';
+import Settings from './pages/Settings';
+import Stats from './pages/Stats';
 import Tracks from './pages/Tracks';
 import { ReviewPreviewHost } from './components/ReviewPreview';
 import { startHistoryReporter } from './lib/historyReporter';
@@ -36,6 +41,11 @@ export default function App() {
             <Route path="/album/:id" element={<AlbumPage />} />
             <Route path="/artists" element={<Artists />} />
             <Route path="/artist/:id" element={<ArtistPage />} />
+            <Route path="/people" element={<People />} />
+            <Route path="/person/:id" element={<PersonPage />} />
+            <Route path="/stats" element={<Stats />} />
+            <Route path="/duplicates" element={<Duplicates />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/tracks" element={<Tracks />} />
             <Route path="/genres" element={<Genres />} />

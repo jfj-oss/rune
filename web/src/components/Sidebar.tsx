@@ -1,4 +1,4 @@
-import { AudioLines, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Plus, Tags } from 'lucide-react';
+import { AudioLines, ChartColumn, Disc3, Home, ListMusic, Mic2, PanelLeftClose, PanelLeftOpen, Plus, Tags, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { usePlaylistUi } from '../store/playlistUi';
 import { useUi } from '../store/ui';
@@ -16,8 +16,10 @@ export function Sidebar() {
         <NavLink to="/" end className={item} title="Home"><Home size={18} /><span>Home</span></NavLink>
         <NavLink to="/albums" className={item} title="Albums" end={false}><Disc3 size={18} /><span>Albums</span></NavLink>
         <NavLink to="/artists" className={item} title="Artists"><Mic2 size={18} /><span>Artists</span></NavLink>
+        <NavLink to="/people" className={item} title="People"><Users size={18} /><span>People</span></NavLink>
         <NavLink to="/tracks" className={item} title="Tracks"><AudioLines size={18} /><span>Tracks</span></NavLink>
         <NavLink to="/genres" className={item} title="Genres"><Tags size={18} /><span>Genres</span></NavLink>
+        <NavLink to="/stats" className={item} title="Stats"><ChartColumn size={18} /><span>Stats</span></NavLink>
       </div>
       <hr className="side__rule" />
       <div className="side__group">
