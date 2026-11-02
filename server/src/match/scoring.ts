@@ -246,11 +246,14 @@ export function preliminaryScore(local: LocalAlbumForMatch, item: MbSearchReleas
 }
 
 export function titleCase(value: string): string {
+  // Keep short all-caps words as given (AOR, EBM, UK); capitalize after space, -, /, (.
   return value
-    .toLowerCase()
-    .replace(/(^|[\s\-/])(\p{L})/gu, (_m, prefix: string, ch: string) => prefix + ch.toUpperCase())
+    .split(/(\s+)/)
+    .map((w) => (/^[A-Z&]{2,4}$/.test(w) ? w : w.toLowerCase().replace(/(^|[\-/(])(\p{L})/gu, (_m, p: string, c: string) => p + c.toUpperCase())))
+    .join('')
     .replace(/\bR&b\b/g, 'R&B')
     .replace(/\bDj\b/g, 'DJ')
     .replace(/\bUk\b/g, 'UK')
-    .replace(/\bUs\b/g, 'US');
+    .replace(/\bUs\b/g, 'US')
+    .replace(/^Aor$/, 'AOR');
 }
