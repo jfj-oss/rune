@@ -137,6 +137,22 @@ describe('AudioEngine look-ahead', () => {
     expect(spare.src).toBe('');
   });
 
+  it('ignores metadata from a load that has already been superseded', () => {
+    const engine = new AudioEngine();
+    engine.load(local('l:A'), 5000, true, []);
+    const active = elementFor('l:A')!;
+    expect(active.playCalls).toBe(0); // waiting for A's metadata to seek
+
+    engine.load(local('l:C'), 0, true, []);
+    const plays = active.playCalls;
+    active.currentTime = 0;
+
+    // A's late loadedmetadata must not seek/start C at 5 s.
+    active.dispatch('loadedmetadata');
+    expect(active.playCalls).toBe(plays);
+    expect(active.currentTime).toBe(0);
+  });
+
   it('applies the volume to both elements', () => {
     const engine = new AudioEngine();
     engine.setVolume(35);

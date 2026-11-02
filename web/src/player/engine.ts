@@ -65,6 +65,8 @@ export class AudioEngine implements Engine {
   private loadedId: string | null = null;
   /** Track id currently buffered in `spareEl`, if any. */
   private preloadedId: string | null = null;
+  /** Invalidates metadata handlers left over from a previous load/seek. */
+  private loadGen = 0;
 
   // Loudness levelling: the server sends X-Rune-Gain-Db on local streams; apply it
   // with a GainNode. One graph (and one MediaElementSource, which browsers only
@@ -197,6 +199,7 @@ export class AudioEngine implements Engine {
   }
 
   load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
+    const gen = ++this.loadGen;
     if (track.source === 'spotify') {
       this.el.pause();
       this.releasePreload();
@@ -218,12 +221,15 @@ export class AudioEngine implements Engine {
       }
     }
     this.resumeContext();
+    // Capture the element: a later load may swap elements before metadata arrives.
+    const target = this.el;
     const start = () => {
-      if (!isLiveTrack(track)) this.el.currentTime = startMs / 1000;
-      if (autoplay) void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
+      if (gen !== this.loadGen || target !== this.el) return;
+      if (!isLiveTrack(track)) target.currentTime = startMs / 1000;
+      if (autoplay) void target.play().catch(() => this.errorFn('Tap play to start audio'));
     };
     if (!isLiveTrack(track) && startMs > 0) {
-      this.el.addEventListener('loadedmetadata', start, { once: true });
+      target.addEventListener('loadedmetadata', start, { once: true });
     } else if (autoplay) {
       // A swapped-in preload is already at its start: play it without rebuffering.
       if (swap) this.el.currentTime = 0;
@@ -246,6 +252,7 @@ export class AudioEngine implements Engine {
   }
   position() { return Number.isFinite(this.el.currentTime) ? this.el.currentTime * 1000 : null; }
   stop() {
+    this.loadGen++;
     this.bumpGainToken(this.el);
     this.el.pause();
     this.el.removeAttribute('src');
