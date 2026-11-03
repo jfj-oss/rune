@@ -12,7 +12,7 @@
 .ahero__bg { position: absolute; inset: 0; z-index: 0; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, #000 35%, rgba(0, 0, 0, 0.6) 62%, rgba(0, 0, 0, 0.2) 86%, transparent 100%); mask-image: linear-gradient(180deg, #000 35%, rgba(0, 0, 0, 0.6) 62%, rgba(0, 0, 0, 0.2) 86%, transparent 100%); }
 .ahero__bg img { position: absolute; inset: -80px; width: calc(100% + 160px); height: calc(100% + 160px); object-fit: cover; filter: blur(72px) saturate(1.4); opacity: 0.62; transform: scale(1.1); }
 .ahero__wash { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8, 8, 14, 0.3) 0%, rgba(8, 8, 14, 0.45) 60%, rgba(8, 8, 14, 0) 100%); }
-.ahero__inner { position: relative; z-index: 1; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 40px; align-items: end; max-width: 1240px; }
+.ahero__inner { position: relative; z-index: 1; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 40px; align-items: end; max-width: 1240px; margin-inline: auto; }
 .ahero__cover { width: 300px; }
 .ahero__cover .cover { box-shadow: var(--shadow-hero); border-radius: 6px; }
 .ahero__txt { min-width: 0; display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
@@ -43,13 +43,14 @@
 
 .atabs__sentinel { height: 1px; margin-bottom: -1px; pointer-events: none; }
 .atabs { position: sticky; top: 0; z-index: 20; }
-.atabs__in { display: flex; gap: 6px; padding: 0 var(--pad); max-width: 1240px; overflow-x: auto; scrollbar-width: none; }
+/* the tabs and body share the hero's centred 1240 px column (their own padding sits outside it) */
+.atabs__in { display: flex; gap: 6px; padding: 0 var(--pad); max-width: calc(1240px + 2 * var(--pad)); margin-inline: auto; overflow-x: auto; scrollbar-width: none; }
 .atabs button { position: relative; height: 52px; padding: 0 18px 0 0; margin-right: 12px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-3); transition: color var(--t); white-space: nowrap; }
 .atabs button:hover { color: var(--text-2); }
 .atabs button.is-active { color: var(--text); }
 .atabs button::after { content: ''; position: absolute; left: 0; right: 18px; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; transform: scaleX(0); transform-origin: left; transition: transform 200ms ease; }
 .atabs button.is-active::after { transform: none; }
-.abody { padding: 8px var(--pad) 0; max-width: 1240px; }
+.abody { padding: 8px var(--pad) 0; max-width: calc(1240px + 2 * var(--pad)); margin-inline: auto; }
 .asec { padding-top: 36px; scroll-margin-top: 54px; }
 .asec--quiet { padding-top: 28px; }
 .asec--quiet p { font-size: 14px; }
@@ -58,7 +59,7 @@
 .lookup { max-width: 640px; }
 .lookup .skel { margin-top: 12px; }
 .bg { max-width: 760px; }
-.page--album .tracks { max-width: 1120px; }
+
 @media (max-width: 899px) { .asec { padding-top: 28px; } .atabs button { height: 46px; }  }
 
 /* ---------- artist ---------- */
