@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { coverSrc } from '../api';
 import { tileGradient } from '../lib/color';
 import { initials } from '../lib/format';
+import { genArtFor } from '../lib/waveCover';
+import { WaveCover } from './WaveCover';
 
 interface Props {
   album: { id: string; title?: string; coverUrl?: string };
@@ -17,6 +19,9 @@ interface Props {
 /** Square, never cropped. Shows an initials tile until (or unless) the image loads. */
 export function Cover({ album, size = 200, sizes, className = '', eager, alt = '', src: override }: Props) {
   const [state, setState] = useState<'loading' | 'ok' | 'err'>('loading');
+  // a random few albums wear a generative cover instead of their artwork
+  const art = genArtFor(album.id);
+  if (art) return <div className={`cover cover--gen ${className}`}><WaveCover kind={art.kind} seed={art.seed} /></div>;
   const src = override === undefined ? coverSrc(album, size) : override;
   const external = !!src && src.startsWith('http');
   const srcSet = override === undefined && size === 200 && !external ? `${coverSrc(album, 200)} 200w, ${coverSrc(album, 600)} 600w` : undefined;

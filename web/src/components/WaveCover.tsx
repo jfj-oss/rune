@@ -2,16 +2,16 @@ import { useEffect, useRef } from 'react';
 import { backdropShown } from '../lib/backdropShown';
 import { DITHER_PALETTES } from '../lib/dither';
 import { ditherLevels } from '../lib/dotLogo';
-import { oppositePalette, waveField } from '../lib/waveCover';
+import { coverField, oppositePalette, type GenKind } from '../lib/waveCover';
 
 const FRAME_MS = 1000 / 24;
 
 /**
- * An animated cover: a thick wave filling ~80% of the square, dithered like the backdrop (blue-noise, light / mid
+ * An animated generative cover (a thick wave filling ~80% of the square, ripples, aurora or dunes), dithered like the backdrop (blue-noise, light / mid
  * dots on black) in the colour opposite the one the backdrop is showing right now. Runs only while on screen and the
  * tab is visible; still with reduced motion.
  */
-export function WaveCover({ seed = 0 }: { seed?: number }) {
+export function WaveCover({ seed = 0, kind = 'wave' }: { seed?: number; kind?: GenKind }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -34,7 +34,7 @@ export function WaveCover({ seed = 0 }: { seed?: number }) {
     };
     const draw = (ms: number) => {
       if (!img) return;
-      waveField(ms / 1000, w, h, field, seed);
+      coverField(kind, ms / 1000, w, h, field, seed);
       ditherLevels(field, w, h, levels, seed * 7, seed * 13);
       const { light, mid } = oppositePalette(backdropShown() ?? DITHER_PALETTES.red);
       const d = img.data;
@@ -47,13 +47,15 @@ export function WaveCover({ seed = 0 }: { seed?: number }) {
     const frame = (now: number) => {
       raf = 0;
       if (now - last >= FRAME_MS - 2) { last = now; draw(now - born); }
-      if (!reduce.matches && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!still() && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
+    // thumbnails in lists stay still (many of them, too small to see the motion)
+    const still = () => reduce.matches || canvas.getBoundingClientRect().width < 64;
     const start = () => {
-      if (reduce.matches) { draw(0); return; }
+      if (still()) { draw(4); return; }
       if (!raf && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
-    const ro = new ResizeObserver(() => { fit(); draw(reduce.matches ? 0 : performance.now() - born); });
+    const ro = new ResizeObserver(() => { fit(); draw(still() ? 4 : performance.now() - born); start(); });
     ro.observe(canvas);
     const io = new IntersectionObserver(([e]) => { onScreen = !!e?.isIntersecting; start(); });
     io.observe(canvas);
@@ -68,6 +70,6 @@ export function WaveCover({ seed = 0 }: { seed?: number }) {
       document.removeEventListener('visibilitychange', start);
       reduce.removeEventListener('change', start);
     };
-  }, [seed]);
+  }, [seed, kind]);
   return <canvas ref={ref} className="wavecover" aria-hidden />;
 }

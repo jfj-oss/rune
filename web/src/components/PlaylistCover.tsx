@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { coverSrc } from '../api';
 import { tileGradient } from '../lib/color';
 import { isLiked } from '../hooks/usePlaylistPlay';
-import { WAVE_COVER_IDS } from '../lib/waveCover';
+import { genArtFor } from '../lib/waveCover';
 import { WaveCover } from './WaveCover';
 
 interface Props {
@@ -19,10 +19,11 @@ interface Props {
 /** Playlist artwork: Spotify's image, a 2x2 album mosaic for rune playlists, otherwise a gradient tile (heart for Liked Songs). */
 export function PlaylistCover({ id, name, imageUrl, albumIds, smart, iconSize = 40 }: Props) {
   const [state, setState] = useState<'loading' | 'ok' | 'err'>('loading');
-  if (WAVE_COVER_IDS.has(id)) {
+  const art = genArtFor(id);
+  if (art) {
     return (
       <div className="cover plcover plcover--wave" aria-label={name} role="img">
-        <WaveCover seed={[...id].reduce((n, ch) => (n * 31 + ch.charCodeAt(0)) % 997, 0) % 7} />
+        <WaveCover kind={art.kind} seed={art.seed} />
       </div>
     );
   }

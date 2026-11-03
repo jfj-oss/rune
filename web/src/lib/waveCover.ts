@@ -72,3 +72,70 @@ export function asciiWaveAt(x: number, y: number, t: number): number {
   }
   return f;
 }
+
+// ---------- more generative covers, for a random few albums ----------
+
+export type GenKind = 'wave' | 'ripple' | 'aurora' | 'dunes';
+const KINDS: GenKind[] = ['wave', 'ripple', 'aurora', 'dunes'];
+/** Characters of each kind's ASCII header: [faint edge, crest]. */
+export const ASCII_CHARS: Record<GenKind, [string, string]> = { wave: ['x', 'o'], ripple: ['·', 'o'], aurora: [':', '|'], dunes: ['-', '~'] };
+/** About one album in this many wears a generative cover. */
+export const ALBUM_ODDS = 30;
+
+function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  // finalise (FNV's low bits are weak): murmur3's avalanche
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/** The generative art an id wears, if any: the wave playlists, and a fixed random ~1 in 30 albums. */
+export function genArtFor(id: string): { kind: GenKind; seed: number } | null {
+  const h = hash(id);
+  if (WAVE_COVER_IDS.has(id)) return { kind: 'wave', seed: h % 7 };
+  if (id.startsWith('pl:')) return null;
+  if (h % ALBUM_ODDS !== 0) return null;
+  // a separate hash for the kind, so it is not tied to the bits that chose the album
+  const k = hash(`${id}#kind`);
+  return { kind: KINDS[k % KINDS.length]!, seed: (k >>> 8) % 7 };
+}
+
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const frac = (x: number) => x - Math.floor(x);
+
+/** Cover brightness 0..1 for a kind (the wave is waveField). */
+export function coverField(kind: GenKind, t: number, w: number, h: number, into = new Float32Array(w * h), seed = 0): Float32Array {
+  if (kind === 'wave') return waveField(t, w, h, into, seed);
+  const cx = 0.5 + 0.12 * Math.sin(0.21 * t + seed), cy = 0.52 + 0.1 * Math.cos(0.17 * t + seed);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const u = (x + 0.5) / w, v = (y + 0.5) / h;
+    let f: number;
+    if (kind === 'ripple') {
+      const r = Math.hypot(u - cx, v - cy);
+      const ring = 0.5 + 0.5 * Math.sin(TAU * r * 5 - 1.6 * t + seed);
+      f = smooth(0.3, 1, ring) * (1 - smooth(0.5, 0.8, r)) + 0.35 * (1 - smooth(0, 0.12, r));
+    } else if (kind === 'aurora') {
+      const sway = 0.07 * Math.sin(TAU * 1.3 * v + 0.5 * t + seed) + 0.04 * Math.sin(TAU * 2.7 * v - 0.3 * t);
+      const c = 0.5 + 0.5 * Math.sin(TAU * (2.1 * u + sway) + 0.35 * t + seed);
+      f = smooth(0.25, 1, c) * (1 - 0.55 * v) + 0.12 * (1 - v);
+    } else {
+      const s = 0.5 + 0.5 * Math.sin(TAU * 1.5 * (u + 0.6 * v) - 0.7 * t + 0.5 * Math.sin(TAU * u + 0.3 * t + seed));
+      f = smooth(0.2, 0.95, s) * (0.65 + 0.35 * v);
+    }
+    into[y * w + x] = Math.min(1, f);
+  }
+  return into;
+}
+
+/** How strongly a kind's ASCII header lights cell (x, y) at t (0..1). The wave is asciiWaveAt. */
+export function asciiAt(kind: GenKind, x: number, y: number, t: number): number {
+  const line = (d: number, wdt: number) => Math.exp(-((d / wdt) ** 2));
+  if (kind === 'wave') return asciiWaveAt(x, y, t);
+  if (kind === 'ripple') {
+    const r = Math.hypot((x - 0.62) * 2.6, y - 0.5);
+    return line(frac(r * 2.6 - 0.3 * t) - 0.5, 0.11) * (1 - smooth(0.7, 1.6, r));
+  }
+  if (kind === 'aurora') return line(frac(2.4 * x + 0.12 * Math.sin(TAU * y + 0.4 * t) + 0.04 * t) - 0.5, 0.09) * (1 - 0.45 * y);
+  return line(frac(1.7 * x + 0.9 * y - 0.11 * t) - 0.5, 0.1);
+}

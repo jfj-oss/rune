@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { backdropShown } from '../lib/backdropShown';
 import { blueNoise, DITHER_PALETTES, type Rgb } from '../lib/dither';
-import { asciiWaveAt, oppositePalette } from '../lib/waveCover';
+import { ASCII_CHARS, asciiAt, oppositePalette, type GenKind } from '../lib/waveCover';
 
 const CELL_W = 6, CELL_H = 8; // CSS px per character
 const FRAME_MS = 1000 / 20;
@@ -15,7 +15,7 @@ const css = (c: Rgb, a = 1) => `rgba(${Math.round(c[0])}, ${Math.round(c[1])}, $
  * The header behind a wave playlist: very sparse, very fine "x" and "o" characters riding slow waves, dithered with
  * the backdrop's blue noise, in the colour opposite the backdrop's (like the cover). On screen + visible tab only.
  */
-export function AsciiWaves() {
+export function AsciiWaves({ kind = 'wave' }: { kind?: GenKind }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -39,15 +39,16 @@ export function AsciiWaves() {
       ctx.font = `600 ${CELL_H}px ui-monospace, "SF Mono", Menlo, monospace`;
       ctx.textBaseline = 'top';
       const o = css(light), x = css(mid, 0.95);
+      const chars = ASCII_CHARS[kind];
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
-          const f = asciiWaveAt((c + 0.5) / cols, (r + 0.5) / rows, t);
+          const f = asciiAt(kind, (c + 0.5) / cols, (r + 0.5) / rows, t);
           if (f < 0.08) continue;
           const th = (rank![(r % N) * N + (c % N)]! + 0.5) / (N * N);
           if (th >= f * DENSITY) continue;
           const crest = f > 0.62;
           ctx.fillStyle = crest ? o : x;
-          ctx.fillText(crest ? 'o' : 'x', c * CELL_W, r * CELL_H);
+          ctx.fillText(crest ? chars[1] : chars[0], c * CELL_W, r * CELL_H);
         }
       }
     };
@@ -75,6 +76,6 @@ export function AsciiWaves() {
       document.removeEventListener('visibilitychange', start);
       reduce.removeEventListener('change', start);
     };
-  }, []);
+  }, [kind]);
   return <canvas ref={ref} className="asciiwaves" aria-hidden />;
 }

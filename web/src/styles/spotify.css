@@ -65,3 +65,4 @@
 .page--search .card__badge { opacity: 1; }
 .plcover--wave { background: #000; }
 .wavecover { position: absolute; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.cover--gen { background: #000; }
