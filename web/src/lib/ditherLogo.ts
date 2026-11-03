@@ -81,3 +81,41 @@ export function paintGrid(levels: Uint8Array, pal: DitherPalette, into: Uint8Cla
     into[o] = Math.round(c[0]); into[o + 1] = Math.round(c[1]); into[o + 2] = Math.round(c[2]); into[o + 3] = 255;
   }
 }
+
+/** Seconds of the logo's little animation: the dots pop in, then a band of light runs across now and then. */
+export const LOGO_INTRO_MS = 900;
+export const LOGO_WAVE_MS = 1100;
+export const LOGO_WAVE_EVERY_MS = 6000;
+export const LOGO_FIRST_WAVE_MS = 2200;
+const WAVE_HALF = 0.13;
+
+/** Where the animation is `elapsed` ms after the logo appeared: reveal 0..1 and the wave's position (null = none). */
+export function logoAnimAt(elapsed: number): { reveal: number; wave: number | null; nextInMs: number } {
+  const reveal = Math.min(1, Math.max(0, elapsed / LOGO_INTRO_MS));
+  const k = elapsed - LOGO_FIRST_WAVE_MS;
+  const ph = k < 0 ? -1 : k % LOGO_WAVE_EVERY_MS;
+  const wave = ph >= 0 && ph < LOGO_WAVE_MS ? ph / LOGO_WAVE_MS : null;
+  const nextInMs = reveal < 1 || wave !== null ? 0 : k < 0 ? -k : LOGO_WAVE_EVERY_MS - ph;
+  return { reveal, wave, nextInMs };
+}
+
+/**
+ * One animation frame from the finished level grid. While `reveal` < 1 the dots appear in Bayer order (like a dither
+ * fading in, one dot after another); while `wave` (0..1) runs, a diagonal band from the upper left lifts the dots it
+ * passes one tone up — denser in the middle of the band, so they light up and go out in sequence.
+ */
+export function animateLevels(levels: Uint8Array, w: number, h: number, reveal: number, wave: number | null, into: Uint8Array = new Uint8Array(levels.length)): Uint8Array {
+  const pos = wave === null ? 0 : -WAVE_HALF + wave * (1 + 2 * WAVE_HALF);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    let l = levels[i]!;
+    const rank = (BAYER[(y & 7) * 8 + (x & 7)]! + 0.5) / 64;
+    if (l !== OUTSIDE && rank > reveal) l = OUTSIDE;
+    if (l !== OUTSIDE && wave !== null && l < 2) {
+      const d = Math.abs((x / w + y / h) / 2 - pos);
+      if (d < WAVE_HALF && (1 - d / WAVE_HALF) * 0.85 > rank) l += 1;
+    }
+    into[i] = l;
+  }
+  return into;
+}

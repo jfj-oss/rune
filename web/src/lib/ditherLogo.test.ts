@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DITHER_PALETTES } from './dither';
-import { ditherGrid, logoDot, logoGrid, OUTSIDE, paintGrid, resampleTones, type ToneMap } from './ditherLogo';
+import { animateLevels, ditherGrid, LOGO_FIRST_WAVE_MS, LOGO_INTRO_MS, LOGO_WAVE_EVERY_MS, LOGO_WAVE_MS, logoAnimAt, logoDot, logoGrid, OUTSIDE, paintGrid, resampleTones, type ToneMap } from './ditherLogo';
 
 const flat = (w: number, h: number, tone: number, inside = (_x: number, _y: number) => true): ToneMap => {
   const t = new Uint8Array(w * h).fill(tone), m = new Uint8Array(w * h);
@@ -70,5 +70,30 @@ describe('logoGrid / logoDot / paintGrid', () => {
     expect([...out.slice(4, 8)]).toEqual([...DITHER_PALETTES.blue.mid, 255]);
     expect([...out.slice(8, 12)]).toEqual([...DITHER_PALETTES.blue.light, 255]);
     expect(out[15]).toBe(0);
+  });
+});
+
+describe('logo animation', () => {
+  const w = 16, h = 16;
+  const base = new Uint8Array(w * h).fill(1);
+  it('reveals every dot by the end of the intro and none at the start', () => {
+    expect([...animateLevels(base, w, h, 0, null)].every((l) => l === OUTSIDE)).toBe(true);
+    expect([...animateLevels(base, w, h, 1, null)]).toEqual([...base]);
+    const half = animateLevels(base, w, h, 0.5, null).filter((l) => l !== OUTSIDE).length;
+    expect(half).toBe(w * h / 2);
+  });
+  it('the wave lifts some dots near the band one tone, never past light or outside the cut-out', () => {
+    const grid = new Uint8Array(w * h).fill(1); grid[0] = OUTSIDE; grid[w * h - 1] = 2;
+    const f = animateLevels(grid, w, h, 1, 0.5);
+    expect(f[0]).toBe(OUTSIDE);
+    expect(f[w * h - 1]).toBe(2);
+    expect(f.filter((l) => l === 2).length).toBeGreaterThan(1);
+    expect(Math.max(...f.filter((l) => l !== OUTSIDE))).toBe(2);
+  });
+  it('schedules: intro, quiet, then a wave every few seconds', () => {
+    expect(logoAnimAt(0)).toMatchObject({ reveal: 0, wave: null, nextInMs: 0 });
+    expect(logoAnimAt(LOGO_INTRO_MS + 100)).toMatchObject({ reveal: 1, wave: null, nextInMs: LOGO_FIRST_WAVE_MS - LOGO_INTRO_MS - 100 });
+    expect(logoAnimAt(LOGO_FIRST_WAVE_MS + LOGO_WAVE_MS / 2).wave).toBeCloseTo(0.5);
+    expect(logoAnimAt(LOGO_FIRST_WAVE_MS + LOGO_WAVE_MS + 10).nextInMs).toBe(LOGO_WAVE_EVERY_MS - LOGO_WAVE_MS - 10);
   });
 });

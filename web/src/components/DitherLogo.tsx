@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useCoverColor } from '../hooks/useCoverColor';
 import { mixPalette, paletteAt, paletteFromColour, type DitherColour, type DitherPalette } from '../lib/dither';
-import { crispFor, ditherGrid, logoDot, logoGrid, paintGrid, resampleTones, type ToneMap } from '../lib/ditherLogo';
+import { animateLevels, crispFor, ditherGrid, logoAnimAt, logoDot, logoGrid, paintGrid, resampleTones, type ToneMap } from '../lib/ditherLogo';
 import { currentItem, usePlayer } from '../store/player';
 import { useUi, type Ambient } from '../store/ui';
 
@@ -66,6 +66,9 @@ function LogoCanvas({ size, colour }: { size: number; colour: LogoColour }) {
     let grid: Uint8Array | null = null, gw = 0, gh = 0, img: ImageData | null = null;
     let shown: DitherPalette | null = null, drawn: DitherPalette | null = null;
     let last = performance.now(), timer = 0;
+    // the little animation (dots pop in, then a band of light now and then) runs on its own clock
+    const born = performance.now();
+    let frame: Uint8Array | null = null, wasAnimating = false;
 
     const build = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -91,21 +94,28 @@ function LogoCanvas({ size, colour }: { size: number; colour: LogoColour }) {
       last = now;
       shown = shown ? mixPalette(shown, want, k) : want;
       if (!grid || !img) build();
-      if (differs(shown, drawn)) {
-        paintGrid(grid!, shown, img!.data);
+      const anim = still ? null : logoAnimAt(now - born);
+      const animating = !!anim && (anim.reveal < 1 || anim.wave !== null);
+      if (animating) frame = animateLevels(grid!, gw, gh, anim.reveal, anim.wave, frame && frame.length === grid!.length ? frame : undefined);
+      if (differs(shown, drawn) || animating || wasAnimating) {
+        paintGrid(animating ? frame! : grid!, shown, img!.data);
         ctx.putImageData(img!, 0, 0);
         drawn = shown;
       }
-      // keep ticking (a few times a second) only while the colour is moving: the cycle, or an album blend
-      const moving = !still && document.visibilityState === 'visible' && (colourRef.current === 'cycle' || differs(want, shown));
-      if (moving) timer = window.setTimeout(tick, colourRef.current === 'cycle' && !differs(want, shown) ? 250 : 80);
+      wasAnimating = animating;
+      if (still || document.visibilityState !== 'visible') return;
+      // keep ticking a few times a second while the colour is moving (the cycle, an album blend), ~30 fps while the
+      // dots animate, and otherwise sleep until the next band of light
+      let delay = colourRef.current === 'cycle' || differs(want, shown) ? (colourRef.current === 'cycle' && !differs(want, shown) ? 250 : 80) : Infinity;
+      delay = Math.min(delay, animating ? 33 : anim!.nextInMs);
+      if (delay < Infinity) timer = window.setTimeout(tick, delay);
     };
     kick.current = () => { if (!timer) tick(); };
     const onVis = () => {
       if (document.visibilityState === 'visible') { if (hiddenAt) t0 += performance.now() - hiddenAt; hiddenAt = 0; last = performance.now(); kick.current(); }
       else { hiddenAt = performance.now(); clearTimeout(timer); timer = 0; }
     };
-    const onResize = () => { grid = null; kick.current(); };
+    const onResize = () => { grid = null; frame = null; kick.current(); };
     const onMotion = () => { clearTimeout(timer); timer = 0; kick.current(); };
     build();
     tick();
