@@ -348,6 +348,8 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
               onContextMenu={trackMenuHandler(item)}
             >
  {editable && !mine && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
+              {/* edit mode has a fixed first column (lock / grip): keep it filled so every row lines up */}
+              {editable && mine && !reorder && <span aria-hidden />}
               {editable && mine && reorder && (
                 <button className="prow__grip" aria-label={`Drag to reorder ${t.title}`} onPointerDown={(e) => onGripDown(e, i)} onPointerMove={onGripMove} onPointerUp={() => endDrag(true)} onPointerCancel={() => endDrag(false)}>
                   <GripVertical size={16} />
