@@ -15,8 +15,16 @@ export function quotePreview(q: CriticQuote, details?: AlbumDetails): PreviewIte
   return { kind: 'quote', label: 'Review excerpt', title: q.outlet, author: q.author, quote: q.quote, url: q.url, context: contextFor(details, q.outlet, q.author) };
 }
 
+const outletKey = (o: string) => o.toLowerCase().replace(/^the\s+/, '').trim();
+
 export function scorePreview(s: CriticScore, details?: AlbumDetails): PreviewItem {
-  return { kind: 'score', label: 'Critic score', title: s.outlet, score: s, url: s.url, context: contextFor(details, s.outlet) };
+  // the same outlet's stored excerpt, if rune has one, so the score comes with words
+  const q = details?.quotes?.find((x) => outletKey(x.outlet) === outletKey(s.outlet));
+  return {
+    kind: 'score', label: 'Critic score', title: s.outlet, score: s, url: s.url,
+    ...(q ? { quote: q.quote, author: q.author } : {}),
+    context: contextFor(details, s.outlet, q?.author),
+  };
 }
 
 /** Full stored text (reception, background, artist note, bio) with its attribution. */

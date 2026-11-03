@@ -123,12 +123,16 @@ function Summary({ item, onOpenOriginal }: { item: PreviewItem; onOpenOriginal()
       )}
 
       {item.quote && <blockquote className="pv__quote">“{item.quote}”</blockquote>}
-      {item.kind === 'quote' && <p className="pv__meta">Short excerpt from {item.title}{item.author ? `, ${item.author}` : ''} · {hostOf(item.url)}</p>}
+      {item.quote && <p className="pv__meta">Short excerpt from {item.title}{item.author ? `, ${item.author}` : ''} · {hostOf(item.url)}</p>}
 
       {item.text && (
         <div className="pv__text prose">
           {item.text.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
         </div>
+      )}
+
+      {item.kind === 'score' && !item.quote && !(ctx && ctx.sentences.length > 0) && (
+        <p className="pv__empty">rune has no text from this review stored, only the score. Open original to read it on {hostOf(item.url)}.</p>
       )}
 
       {ctx && ctx.sentences.length > 0 && (

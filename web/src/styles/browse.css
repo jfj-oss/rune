@@ -23,6 +23,7 @@
 .pv__title { font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; }
 .pv__by { margin-top: -12px; color: var(--text-2); font-size: 14.5px; }
 .pv__meta { font-size: 12.5px; color: var(--text-3); }
+.pv__empty { margin-top: 20px; font-size: 14px; line-height: 1.5; color: var(--text-2); max-width: 38ch; }
 .pv__score { display: grid; gap: 10px; }
 .pv__val { font-size: 52px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
 .pv__val small { font-size: 16px; font-weight: 500; opacity: 0.6; letter-spacing: 0; }
