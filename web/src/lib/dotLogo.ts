@@ -4,9 +4,9 @@
 
 import { blueNoise, densities, ditherLevel, type DotSize } from './dither';
 
-/** One loop: pair A swaps in the first 47%, pair B from 50% to 97% (a short beat between them). */
+/** One loop: pair A swaps in the first half, pair B in the second, each starting the moment the other lands. */
 export const LOOP_MS = 1800;
-const MOVE = 0.47;
+const MOVE = 0.5;
 const B_START = 0.5;
 
 /** Layout, as fractions of the logo's width. */
