@@ -33,7 +33,7 @@ function useBackdropPalette(): DitherPalette {
 /**
  * The in-app mark: four balls on a square; one diagonal pair at a time swaps corners with a trail behind it. The whole
  * picture is drawn as a soft brightness field and dithered like the backdrop (blue-noise thresholds and light / mid
- * shares) at one dot per device pixel, a finer grain than the backdrop's. Still with reduced motion; paused when hidden.
+ * shares) at one dot per CSS pixel, a little finer than the backdrop's. Still with reduced motion; paused when hidden.
  * (The old static mark is still at web/public/icons/mark.svg.)
  */
 export function Logo({ size = 28 }: { size?: number }) {
@@ -47,9 +47,10 @@ export function Logo({ size = 28 }: { size?: number }) {
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    // the backdrop's dithering at the finest grain the screen has: one dot per device pixel
+    // the backdrop's dithering at one dot per CSS pixel (2 device pixels on a Retina screen): between the finest grain
+    // and the backdrop's own ~1.5 px
     const dpr = window.devicePixelRatio || 1;
-    const dot = 1;
+    const dot = Math.max(1, Math.round(dpr));
     const w = Math.max(8, Math.round((size * dpr) / dot));
     canvas.width = canvas.height = w;
     canvas.style.width = canvas.style.height = `${(w * dot) / dpr}px`;
