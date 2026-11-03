@@ -31,6 +31,7 @@ import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
 import { registerJsonCompression } from './compress.js';
+import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
@@ -98,6 +99,24 @@ interface LocalSearchResult {
 
 const IMAGE_TYPES: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif' };
 
+/** Client → server websocket messages larger than this are dropped unparsed. */
+const MAX_CLIENT_MESSAGE = 16 * 1024;
+
+/** ws gives a Buffer/ArrayBuffer (or an array of them); tests may hand over a string. */
+function clientMessageText(data: unknown): string | null {
+  if (typeof data === 'string') return data;
+  try {
+    if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
+    if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('utf8');
+    if (Array.isArray(data)) {
+      return Buffer.concat(data.map((d) => (Buffer.isBuffer(d) ? d : Buffer.from(d as ArrayBuffer)))).toString('utf8');
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 /** A real MusicBrainz release id: 5 hyphen-separated hex groups (not just 36 of anything). */
 const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -135,6 +154,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
   // ---------- live events
   const clients = new Set<{ send: (s: string) => void; slim?: boolean }>();
+  /** A hidden tab is connected but not watching, so Spotify zones may idle. */
+  const presence = createClientPresence();
   /** Per zone: the queue fingerprint last broadcast (slim clients then get position updates without it). */
   const sentQueueRev = new Map<string, string>();
   /** /search?local=1 and /search share this 15 s memo; library changes clear it. */
@@ -187,7 +208,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         ...opts.spotifyOptions,
         // Connect zones poll just after each song ends while somebody is watching;
         // with no live socket they poll slower still and skip the queue.
-        hasClients: () => clients.size > 0,
+        hasClients: () => presence.hasVisible(),
         // Budget-level changes get one warn line each.
         logger: app.log,
         // One line per hour of Spotify traffic: enough to see a runaway poller.
@@ -641,9 +662,34 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const client = socket as typeof socket & { slim?: boolean };
         client.slim = req.query.slim === '1';
         clients.add(client);
+        presence.add(socket);
         // Somebody is watching again: Spotify zones return to the watched schedule right now.
         spotify?.zones.wake();
-        socket.on('close', () => clients.delete(socket));
+        socket.on('close', () => {
+          clients.delete(socket);
+          presence.remove(socket);
+        });
+        // Client → server: tab visibility (hidden tabs do not count as watching) and the
+        // browser Spotify SDK's own playback reports (a free alternative to GET /me/player).
+        socket.on('message', (data: unknown) => {
+          const text = clientMessageText(data);
+          if (text === null || Buffer.byteLength(text, 'utf8') > MAX_CLIENT_MESSAGE) return;
+          let msg: unknown;
+          try {
+            msg = JSON.parse(text);
+          } catch {
+            return; // garbage
+          }
+          if (!msg || typeof msg !== 'object') return;
+          const m = msg as { type?: unknown; visible?: unknown };
+          if (m.type === 'presence') {
+            if (typeof m.visible !== 'boolean') return;
+            // Hidden → visible: the zones poll again now.
+            if (presence.setVisible(socket, m.visible)) spotify?.zones.wake();
+          } else if (m.type === 'sdk-state') {
+            spotify?.reportLocalPlayback(msg);
+          }
+        });
         if (pc) {
           const state = sanitize(pc.state());
           socket.send(JSON.stringify({ type: 'player', state, queueRev: fingerprint(JSON.stringify(state.queue)) } satisfies ServerEvent));

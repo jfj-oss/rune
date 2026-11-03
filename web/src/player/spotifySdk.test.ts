@@ -1,6 +1,6 @@
 import type { Track } from '@liner/shared';
-import { describe, expect, it, vi } from 'vitest';
-import { SpotifySdkEngine } from './spotifySdk';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setSdkReporter, SpotifySdkEngine } from './spotifySdk';
 
 vi.mock('../clientLog', () => ({ clientLog: () => undefined }));
 
@@ -103,5 +103,91 @@ describe('SpotifySdkEngine look-ahead', () => {
     e.load(track('z'), 0, true);
     expect(player.nextTrack).not.toHaveBeenCalled();
     expect(ensure).toHaveBeenCalledTimes(2);
+  });
+});
+
+afterEach(() => {
+  setSdkReporter(null);
+  vi.useRealTimers();
+});
+
+const sdkState = (id: string, position = 1000, paused = false) => ({
+  paused,
+  position,
+  duration: 200_000,
+  shuffle: true,
+  repeat_mode: 2,
+  track_window: {
+    current_track: {
+      id,
+      uri: `spotify:track:${id}`,
+      name: `Song ${id}`,
+      duration_ms: 200_000,
+      artists: [{ name: 'Artist', uri: 'spotify:artist:ar1' }],
+      album: { name: 'Album', uri: 'spotify:album:al1', images: [{ url: 'http://img.example/a.jpg', width: 300, height: 300 }] },
+    },
+    previous_tracks: [],
+    next_tracks: [],
+  },
+});
+
+function engineWithDevice(): SpotifySdkEngine {
+  const e = new SpotifySdkEngine('test');
+  (e as unknown as { status: unknown }).status = { phase: 'ready', deviceId: 'dev1' };
+  return e;
+}
+
+describe('SpotifySdkEngine local playback reports', () => {
+  it('reports SDK state even when this tab has no rune track loaded', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const reports: unknown[] = [];
+    setSdkReporter((r) => reports.push(r));
+    const e = engineWithDevice();
+    (e as unknown as { onState(s: unknown): void }).onState(sdkState('a'));
+
+    expect(reports).toEqual([
+      {
+        type: 'sdk-state',
+        deviceId: 'dev1',
+        active: true,
+        playing: true,
+        positionMs: 1000,
+        durationMs: 200_000,
+        shuffle: true,
+        repeat: 2,
+        volume: 0.7,
+        track: {
+          id: 'a',
+          uri: 'spotify:track:a',
+          name: 'Song a',
+          durationMs: 200_000,
+          artists: [{ name: 'Artist', uri: 'spotify:artist:ar1' }],
+          album: {
+            name: 'Album',
+            uri: 'spotify:album:al1',
+            images: [{ url: 'http://img.example/a.jpg', width: 300, height: 300 }],
+          },
+        },
+      },
+    ]);
+  });
+
+  it('throttles unchanged state and reports the device inactive once', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    const reports: unknown[] = [];
+    setSdkReporter((r) => reports.push(r));
+    const e = engineWithDevice();
+    const onState = (s: unknown) => (e as unknown as { onState(s: unknown): void }).onState(s);
+
+    onState(sdkState('a'));
+    onState(sdkState('a')); // nothing changed: throttled
+    expect(reports).toHaveLength(1);
+
+    onState(null);
+    onState(null); // only the first null is a transition
+    expect(reports).toHaveLength(2);
+    expect(reports[1]).toEqual({ type: 'sdk-state', deviceId: 'dev1', active: false });
   });
 });

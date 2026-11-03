@@ -167,6 +167,36 @@ export type ServerEvent =
   | { type: 'scan'; progress: ScanProgress }
   | { type: 'library-changed' };
 
+/** The track as Spotify's Web Playback SDK reports it (no rune ids yet). */
+export interface SdkPlaybackTrack {
+  /** Spotify's own id (not namespaced with 'sp:'). */
+  id: string;
+  uri: string;
+  name: string;
+  durationMs: number;
+  artists: { name: string; uri: string }[];
+  album: { name: string; uri: string; images: { url: string; width: number | null; height: number | null }[] };
+}
+
+/** Websocket /api/ws messages client → server */
+export type ClientEvent =
+  /** A tab says whether it is actually on screen. Hidden tabs do not count as watching. */
+  | { type: 'presence'; visible: boolean }
+  /** The browser's Web Playback SDK device reports its own state (local calls, no Web API quota). */
+  | {
+      type: 'sdk-state';
+      deviceId: string;
+      active: boolean;
+      playing?: boolean;
+      positionMs?: number;
+      durationMs?: number;
+      track?: SdkPlaybackTrack | null;
+      shuffle?: boolean;
+      repeat?: 0 | 1 | 2;
+      /** 0..1 */
+      volume?: number;
+    };
+
 export interface ScanProgress {
   running: boolean;
   filesSeen: number;

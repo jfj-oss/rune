@@ -707,12 +707,38 @@ describe('POST /api/albums/:id/match', () => {
 // ---------------------------------------------------------------- websocket
 
 describe('GET /api/ws', () => {
+  let wsBase: string | null = null;
+  const wsUrl = async (): Promise<string> => {
+    if (!wsBase) wsBase = (await app.listen({ port: 0, host: '127.0.0.1' })).replace(/^http/, 'ws');
+    return wsBase;
+  };
+
   it('sends the initial scan progress on connect', async () => {
-    const address = await app.listen({ port: 0, host: '127.0.0.1' });
-    const event = await firstScanEvent(address.replace(/^http/, 'ws') + '/api/ws');
+    const event = await firstScanEvent((await wsUrl()) + '/api/ws');
     expect(event).toEqual({
       type: 'scan',
       progress: { running: false, filesSeen: 0, albumsFound: 0, matched: 0, errors: 0 },
+    });
+  }, 10_000);
+
+  it('ignores garbage, oversized and unknown client messages without dropping the socket', async () => {
+    const ws = new WebSocket((await wsUrl()) + '/api/ws');
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timed out waiting for the socket')), 5_000);
+      ws.addEventListener('error', () => reject(new Error('websocket connection failed')));
+      ws.addEventListener('message', () => {
+        clearTimeout(timer);
+        // The initial scan event arrived: the socket is usable, now send junk at it.
+        ws.send('not json');
+        ws.send('{"type":"presence","visible":"yes"}'); // wrong type
+        ws.send(JSON.stringify({ type: 'sdk-state', deviceId: 'x', active: false })); // no Spotify module here
+        ws.send('x'.repeat(20 * 1024)); // over the 16 KB cap
+        setTimeout(() => {
+          expect(ws.readyState).toBe(WebSocket.OPEN);
+          ws.close();
+          resolve();
+        }, 50);
+      }, { once: true });
     });
   }, 10_000);
 });

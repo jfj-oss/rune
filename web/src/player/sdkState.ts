@@ -33,3 +33,44 @@ export function detectEnded(prev: Snap | null, next: Snap): boolean {
   const listed = next.previousIds.includes(next.id) && prev.durationMs > 0 && expected > prev.durationMs * 0.5;
   return nearEnd || listed;
 }
+
+// ---------- local playback reports ----------
+
+/** What the SDK last told the server, and when it was sent. */
+export interface ReportState {
+  active: boolean;
+  trackId: string | null;
+  playing: boolean;
+  positionMs: number;
+  shuffle: boolean;
+  repeat: 0 | 1 | 2;
+  /** 0..1 */
+  volume: number;
+  /** Date.now() when this state was sent. */
+  at: number;
+}
+
+/** Position drift beyond this is a seek, not clock skew. */
+export const REPORT_SEEK_MS = 3000;
+/** Even with no change, report this often so the server's synthetic answer stays fresh. */
+export const REPORT_HEARTBEAT_MS = 15_000;
+
+const sameVolume = (a: number, b: number) => Math.abs(a - b) < 0.001;
+
+/**
+ * Should this SDK state be sent to the server? Pure so it can be unit-tested: send on any
+ * visible change, on a seek (position differs from the extrapolated previous report by
+ * more than {@link REPORT_SEEK_MS}) and as a heartbeat every {@link REPORT_HEARTBEAT_MS}.
+ */
+export function shouldReport(prev: ReportState | null, next: ReportState, now: number): boolean {
+  if (!prev) return true;
+  if (prev.active !== next.active) return true;
+  if (prev.trackId !== next.trackId) return true;
+  if (prev.playing !== next.playing) return true;
+  if (prev.shuffle !== next.shuffle) return true;
+  if (prev.repeat !== next.repeat) return true;
+  if (!sameVolume(prev.volume, next.volume)) return true;
+  const expected = prev.positionMs + (prev.playing ? Math.max(0, now - prev.at) : 0);
+  if (Math.abs(next.positionMs - expected) > REPORT_SEEK_MS) return true;
+  return now - prev.at >= REPORT_HEARTBEAT_MS;
+}

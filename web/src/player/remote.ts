@@ -1,6 +1,7 @@
-import type { PlayerState, ScanProgress, ServerEvent } from '@liner/shared';
+import type { ClientEvent, PlayerState, ScanProgress, ServerEvent } from '@liner/shared';
 import { api } from '../api';
 import type { ExtCommand, PlayItem } from '../lib/types';
+import { setSdkReporter } from './spotifySdk';
 import { emptyState, livePosition, type Backend } from './types';
 import type { ZoneTransport } from './zoneEngine';
 
@@ -29,6 +30,21 @@ class Socket {
   }
   private emit(ev: ServerEvent) {
     for (const f of this.listeners) f(ev);
+  }
+
+  /** Send a client → server message; silently drops when the socket is not open (mock mode has none). */
+  send(ev: ClientEvent) {
+    const ws = this.ws;
+    if (this.closed || !ws || typeof ws.send !== 'function') return;
+    // 1 = OPEN (the stub in the socket tests has no readyState at all)
+    if (typeof ws.readyState === 'number' && ws.readyState !== 1) return;
+    try { ws.send(JSON.stringify(ev)); } catch { /* closing */ }
+  }
+
+  /** A hidden tab (background, other Space) is not watching. */
+  sendPresence() {
+    const visible = typeof document === 'undefined' || document.visibilityState === 'visible';
+    this.send({ type: 'presence', visible });
   }
 
   /** Last full queue per zone and its fingerprint, to fill in slim player events. */
@@ -67,6 +83,7 @@ class Socket {
     ws.onopen = () => {
       this.retry = 0;
       this.connected = true;
+      this.sendPresence();
       if (this.everOpen) for (const f of this.reconnectFns) f();
       this.everOpen = true;
     };
@@ -89,6 +106,14 @@ class Socket {
   }
 }
 export const socket = new Socket();
+
+// The Spotify SDK engine reports its local state through this socket (it never imports the socket).
+setSdkReporter((report) => socket.send(report));
+
+// Tabs in the background do not count as watching: tell the server whenever visibility changes.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => socket.sendPresence());
+}
 
 export type { ScanProgress };
 

@@ -1,10 +1,21 @@
 import { clientLog } from '../clientLog';
-import type { Track } from '@liner/shared';
+import type { ClientEvent, Track } from '@liner/shared';
 import type { Engine } from './engine';
-import { detectEnded, extrapolate, spotifyIdOf, type Snap } from './sdkState';
+import { detectEnded, extrapolate, shouldReport, spotifyIdOf, type ReportState, type Snap } from './sdkState';
 
 // ---------- minimal typings for the Web Playback SDK (no @types dependency) ----------
-interface SdkTrack { id: string | null; uri: string; linked_from?: { id: string | null; uri: string | null } }
+interface SdkImage { url: string; width?: number | null; height?: number | null }
+interface SdkArtist { name: string; uri: string }
+interface SdkAlbum { name: string; uri: string; images?: SdkImage[] }
+interface SdkTrack {
+  id: string | null;
+  uri: string;
+  name?: string;
+  duration_ms?: number;
+  artists?: SdkArtist[];
+  album?: SdkAlbum;
+  linked_from?: { id: string | null; uri: string | null };
+}
 interface SdkState {
   paused: boolean;
   position: number;
@@ -24,6 +35,7 @@ interface SdkPlayer {
   seek(ms: number): Promise<void>;
   nextTrack?(): Promise<void>;
   setVolume(v: number): Promise<void>;
+  getVolume?(): Promise<number>;
   activateElement?(): Promise<void>;
 }
 declare global {
@@ -61,6 +73,15 @@ function loadSdkScript(): Promise<void> {
 export type SdkPhase = 'off' | 'loading' | 'ready' | 'error';
 export interface SdkStatus { phase: SdkPhase; deviceId: string | null; error?: string }
 
+export type SdkStateReport = Extract<ClientEvent, { type: 'sdk-state' }>;
+/** Where the SDK sends its local playback reports (wired to the shared websocket by remote.ts). */
+let sdkReporter: ((report: SdkStateReport) => void) | null = null;
+export function setSdkReporter(fn: ((report: SdkStateReport) => void) | null): void {
+  sdkReporter = fn;
+}
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** After load(): how long SDK positions are checked against where the new track can be. */
 const STALE_WINDOW_MS = 8000;
@@ -88,6 +109,12 @@ export class SpotifySdkEngine implements Engine {
   private errorFn: (m: string) => void = () => {};
   private syncFn: (pos: number, playing: boolean) => void = () => {};
   private poll: ReturnType<typeof setInterval> | null = null;
+  /** Slow local poll that keeps the server's synthetic playback answer fresh (free: SDK only). */
+  private reportPoll: ReturnType<typeof setInterval> | null = null;
+  /** Last report sent to the server (for throttling). */
+  private report: ReportState | null = null;
+  /** Whether the SDK last reported its device as active (drives the free heartbeat poll). */
+  private reportActive = false;
   /** After load(), ignore "paused" events until playback really started (they describe an earlier play of the same track). */
   private awaitUntil = 0;
   private loadAt = 0;
@@ -155,7 +182,14 @@ export class SpotifySdkEngine implements Engine {
       player.addListener('player_state_changed', ((s: SdkState | null) => this.onState(s)) as never);
       const ok = await player.connect();
       if (!ok) throw new Error('Could not connect to Spotify');
-      this.poll = setInterval(() => { if (this.cur) void this.player?.getCurrentState().then((s) => this.onState(s), () => undefined); }, 4000);
+      this.poll = setInterval(() => { if (this.cur) void this.readState(); }, 4000);
+      // SDK calls are local (no Web API quota): while this device is the active one, keep the
+      // server's report fresh even when this tab has no rune queue loaded (it may be driven
+      // from another rune client as a Connect zone).
+      this.reportPoll = setInterval(() => {
+        if (!this.reportActive || this.cur) return;
+        void this.readState();
+      }, 10_000);
     } catch (e) {
       this.starting = null;
       this.setStatus({ phase: 'error', error: (e as Error).message });
@@ -175,7 +209,84 @@ export class SpotifySdkEngine implements Engine {
   }
 
   // ---------- state from the SDK ----------
+  /**
+   * Local SDK read (no quota). The volume is re-read too: another rune client may have changed it
+   * through Spotify, and the report must not keep announcing the old level.
+   */
+  private async readState(): Promise<void> {
+    const p = this.player;
+    if (!p) return;
+    try {
+      const v = await p.getVolume?.();
+      if (typeof v === 'number' && Number.isFinite(v)) this.volume = clamp01(v);
+    } catch { /* keep the known volume */ }
+    try {
+      this.onState(await p.getCurrentState());
+    } catch { /* next tick */ }
+  }
+
+  /**
+   * Tell the server what this tab's Spotify device is doing. Runs whatever this tab's own
+   * queue does, because the device can also be driven from another rune client.
+   */
+  private reportSdkState(s: SdkState | null): void {
+    const reporter = sdkReporter;
+    const deviceId = this.status.deviceId;
+    if (!reporter || !deviceId) return;
+    const now = Date.now();
+    if (!s) {
+      // Device no longer active (playback moved elsewhere): say so once.
+      if (this.reportActive) {
+        reporter({ type: 'sdk-state', deviceId, active: false });
+        this.report = null;
+        this.reportActive = false;
+      }
+      return;
+    }
+    const t = s.track_window.current_track;
+    if (!t || !t.id) return; // local files have no Spotify id: nothing usable as a synthetic answer
+    const track = {
+      id: t.id,
+      uri: t.uri,
+      name: t.name ?? '',
+      durationMs: s.duration || t.duration_ms || 0,
+      artists: (t.artists ?? []).map((a) => ({ name: a.name, uri: a.uri })),
+      album: {
+        name: t.album?.name ?? '',
+        uri: t.album?.uri ?? '',
+        images: (t.album?.images ?? []).map((i) => ({ url: i.url, width: i.width ?? null, height: i.height ?? null })),
+      },
+    };
+    const next: ReportState = {
+      active: true,
+      trackId: track.id,
+      playing: !s.paused,
+      positionMs: Math.max(0, s.position ?? 0),
+      shuffle: !!s.shuffle,
+      repeat: s.repeat_mode === 1 ? 1 : s.repeat_mode === 2 ? 2 : 0,
+      volume: clamp01(this.volume),
+      at: now,
+    };
+    this.reportActive = true;
+    if (!shouldReport(this.report, next, now)) return;
+    this.report = next;
+    reporter({
+      type: 'sdk-state',
+      deviceId,
+      active: true,
+      playing: next.playing,
+      positionMs: next.positionMs,
+      durationMs: track.durationMs,
+      track,
+      shuffle: next.shuffle,
+      repeat: next.repeat,
+      volume: next.volume,
+    });
+  }
+
   private onState(s: SdkState | null) {
+    // Report to the server first: this is needed even when this tab drives no rune queue.
+    this.reportSdkState(s);
     const cur = this.cur;
     if (!cur) return;
     if (!s) {
@@ -406,6 +517,8 @@ export class SpotifySdkEngine implements Engine {
 
   dispose() {
     if (this.poll) clearInterval(this.poll);
+    if (this.reportPoll) clearInterval(this.reportPoll);
+    this.reportActive = false;
     this.player?.disconnect();
   }
 }
