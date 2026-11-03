@@ -186,6 +186,21 @@ export interface SpotifyBudgetLogger {
   warn(obj: Record<string, unknown>, msg: string): void;
 }
 
+/** One persisted clock-hour bucket (`hour` is epoch ms at the hour's start). */
+export interface SpotifyUsageBucket {
+  hour: number;
+  total: number;
+  byPath: Record<string, number>;
+}
+
+/** Persisted request counters + circuit breaker, so a restart does not forget them. */
+export interface SpotifyUsageState {
+  /** Only the last 25 clock hours are kept. */
+  buckets: SpotifyUsageBucket[];
+  /** Epoch ms until which Spotify refuses requests, or null. */
+  blockedUntil: number | null;
+}
+
 export interface SpotifyApiOptions {
   /** Injected for tests. Defaults to global fetch. */
   fetch?: FetchLike;
@@ -206,6 +221,10 @@ export interface SpotifyApiOptions {
   dailyBudget?: number;
   /** Receives one warn line per budget-level change. */
   logger?: SpotifyBudgetLogger;
+  /** Returns the last persisted counters/breaker (undefinable when none are stored). */
+  loadUsage?: () => SpotifyUsageState | undefined;
+  /** Persists the counters/breaker; called at most every 60 s, and on `close()`. */
+  saveUsage?: (usage: SpotifyUsageState) => void;
 }
 
 /** Spotify's developer app has an unpublished daily quota; this is a safety margin. */
@@ -250,6 +269,7 @@ export class SpotifyApi {
   private readonly onHourlyUsage: ((usage: SpotifyHourlyUsage) => void) | undefined;
   private readonly dailyBudget: number;
   private readonly logger: SpotifyBudgetLogger | undefined;
+  private readonly saveUsage: ((usage: SpotifyUsageState) => void) | undefined;
   /** Last observed level, so a change logs exactly one line. */
   private lastBudgetLevel: SpotifyBudgetLevel = 'normal';
 
@@ -259,6 +279,9 @@ export class SpotifyApi {
   /** Epoch-hour -> `METHOD path` -> count. */
   private readonly hourCounts = new Map<number, Map<string, number>>();
   private lastRecordedHour: number | null = null;
+  /** Counters changed since the last persist; the 60 s tick saves only when set. */
+  private usageDirty = false;
+  private usageClosed = false;
   /** Rolls the hourly line even when no request arrives (e.g. while the breaker is open). */
   private hourlyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -273,8 +296,10 @@ export class SpotifyApi {
     this.onHourlyUsage = opts.onHourlyUsage;
     this.dailyBudget = Math.max(1, opts.dailyBudget ?? DEFAULT_DAILY_BUDGET);
     this.logger = opts.logger;
-    if (this.onHourlyUsage) {
-      this.hourlyTimer = setInterval(() => this.flushHourlyUsage(), 60_000);
+    this.saveUsage = opts.saveUsage;
+    if (opts.loadUsage) this.restoreUsage(opts.loadUsage());
+    if (this.onHourlyUsage || this.saveUsage) {
+      this.hourlyTimer = setInterval(() => this.tickMinute(), 60_000);
       (this.hourlyTimer as { unref?: () => void }).unref?.();
     }
   }
@@ -382,6 +407,8 @@ export class SpotifyApi {
         const retryAfterMs = Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : 1000;
         if (retryAfterMs > this.maxRetryAfterMs) {
           this.blockedUntilAt = this.now() + retryAfterMs;
+          // A lockout must outlive the process, not wait for the next 60 s tick.
+          this.saveUsageNow();
           throw new HttpError(`Spotify rate limited; retry after ${retryAfterMs}ms`, 429, await safeText(res), retryAfterMs);
         }
         rateLimitRetries++;
@@ -416,14 +443,71 @@ export class SpotifyApi {
       this.hourCounts.set(hour, bucket);
     }
     bucket.set(key, (bucket.get(key) ?? 0) + 1);
+    this.usageDirty = true;
     this.logCompletedHours(hour);
     this.pruneHours(hour);
+  }
+
+  /** The unref'd 60 s timer: roll the hourly line and persist changed counters. */
+  private tickMinute(): void {
+    this.flushHourlyUsage();
+    if (this.usageDirty) this.saveUsageNow();
   }
 
   private flushHourlyUsage(): void {
     const hour = Math.floor(this.now() / HOUR_MS);
     this.logCompletedHours(hour);
     this.pruneHours(hour);
+  }
+
+  /** Restore persisted buckets (dropping stale/future ones) and a still-active lockout. */
+  private restoreUsage(state: SpotifyUsageState | undefined): void {
+    if (!state) return;
+    const currentHour = Math.floor(this.now() / HOUR_MS);
+    const oldestHour = currentHour - (USAGE_KEEP_HOURS - 1);
+    for (const raw of Array.isArray(state.buckets) ? state.buckets : []) {
+      if (!raw || typeof raw.hour !== 'number' || !Number.isFinite(raw.hour)) continue;
+      const hour = Math.floor(raw.hour / HOUR_MS);
+      // More than 25 h old, or somehow in the future: not part of the rolling window.
+      if (hour < oldestHour || hour > currentHour) continue;
+      const byPath = raw.byPath && typeof raw.byPath === 'object' ? raw.byPath : {};
+      const bucket = this.hourCounts.get(hour) ?? new Map<string, number>();
+      for (const [path, count] of Object.entries(byPath)) {
+        if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) continue;
+        bucket.set(path, (bucket.get(path) ?? 0) + Math.floor(count));
+      }
+      if (bucket.size > 0) this.hourCounts.set(hour, bucket);
+    }
+    const until = state.blockedUntil;
+    if (typeof until === 'number' && Number.isFinite(until) && until > this.now()) this.blockedUntilAt = until;
+  }
+
+  /** Persist immediately (breaker trip / shutdown), bypassing the 60 s throttle. */
+  private saveUsageNow(): void {
+    if (!this.saveUsage) return;
+    const now = this.now();
+    this.saveUsage({
+      buckets: [...this.hourCounts.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([hour, bucket]) => ({
+          hour: hour * HOUR_MS,
+          total: sumCounts(bucket.values()),
+          byPath: Object.fromEntries(bucket),
+        })),
+      blockedUntil: this.blockedUntilAt !== null && this.blockedUntilAt > now ? this.blockedUntilAt : null,
+    });
+    this.usageDirty = false;
+  }
+
+  /** Flush the counters and stop the timer; safe to call more than once. */
+  close(): void {
+    if (this.usageClosed) return;
+    this.usageClosed = true;
+    if (this.hourlyTimer) {
+      clearInterval(this.hourlyTimer);
+      this.hourlyTimer = null;
+    }
+    this.saveUsageNow();
   }
 
   private pruneHours(hour: number): void {

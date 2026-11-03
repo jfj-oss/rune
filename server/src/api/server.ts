@@ -1081,6 +1081,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     await settleJobs();
     for (const off of spotifyListeners.values()) off();
     await spotify?.zones.close();
+    spotify?.close();
     await pc?.close();
     await app.close();
   };
@@ -1102,6 +1103,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       { name: 'peaks-close', run: () => peaks.close() },
       { name: 'iradio-close', run: () => iradio.close() },
       { name: 'spotify-zones-close', run: () => spotify?.zones.close() },
+      { name: 'spotify-usage-flush', run: () => spotify?.close() },
       { name: 'http-close', run: () => app.close() },
     ],
     // Wrap the better-sqlite3 handle: its close() returns the Database, which

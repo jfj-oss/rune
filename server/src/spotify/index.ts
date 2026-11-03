@@ -6,7 +6,7 @@ import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
 import { getAlbum } from '../api/library.js';
-import { SpotifyApi, type SpotifyBudgetLogger, type SpotifyHourlyUsage } from './api.js';
+import { SpotifyApi, type SpotifyBudgetLogger, type SpotifyHourlyUsage, type SpotifyUsageState } from './api.js';
 import { SpotifyAuth, registerSpotifyRoutes, type SpotifyAuthOptions, type SpotifyStatus } from './auth.js';
 import { SpotifyCatalog, type SearchResults } from './catalog.js';
 import {
@@ -68,10 +68,44 @@ export interface SpotifyModule {
   getPlaylist(id: string): PlaylistDetail | undefined;
   /** Register /api/spotify/* on the app given to us by the main session. */
   registerRoutes(app: FastifyInstance): SpotifyAuth;
+  /** Persist request counters + breaker and stop the usage timer (idempotent). */
+  close(): void;
+}
+
+const SPOTIFY_USAGE_KEY = 'spotify.usage';
+
+/** The app_state table is normally created by the server; create it for standalone use too. */
+function ensureAppState(db: Db): void {
+  db.exec('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+}
+
+/** Corrupt/legacy JSON is treated as "nothing persisted" rather than failing startup. */
+function loadSpotifyUsage(db: Db): SpotifyUsageState | undefined {
+  try {
+    const raw = (
+      db.prepare('SELECT value FROM app_state WHERE key = ?').get(SPOTIFY_USAGE_KEY) as
+        | { value: string }
+        | undefined
+    )?.value;
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as Partial<SpotifyUsageState> | null;
+    if (!parsed || typeof parsed !== 'object') return undefined;
+    const blockedUntil = typeof parsed.blockedUntil === 'number' ? parsed.blockedUntil : null;
+    return { buckets: Array.isArray(parsed.buckets) ? parsed.buckets : [], blockedUntil };
+  } catch {
+    return undefined;
+  }
+}
+
+function saveSpotifyUsage(db: Db, usage: SpotifyUsageState): void {
+  db.prepare(
+    'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).run(SPOTIFY_USAGE_KEY, JSON.stringify(usage));
 }
 
 export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = {}): SpotifyModule {
   const auth = new SpotifyAuth(db, cfg, opts);
+  ensureAppState(db);
   const api = new SpotifyApi({
     fetch: opts.fetch,
     baseUrl: opts.endpoints?.api,
@@ -80,6 +114,9 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     onHourlyUsage: opts.onHourlyUsage,
     dailyBudget: cfg.spotify?.dailyBudget,
     logger: opts.logger,
+    // Request counts and the circuit breaker outlive a rune restart.
+    loadUsage: () => loadSpotifyUsage(db),
+    saveUsage: (usage) => saveSpotifyUsage(db, usage),
   });
   // songs rune has stored (played, saved, in playlists) start with their titles + covers, no lookup
   const zones = createSpotifyZones(api, {
@@ -131,6 +168,7 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     getPlaylist: (id) => getPlaylist(db, id),
     registerRoutes: (app: FastifyInstance) =>
       registerSpotifyRoutes(app, db, cfg, { ...opts, auth }),
+    close: () => api.close(),
   };
 }
 
