@@ -136,7 +136,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     let full: string;
     let slim: string | null = null;
     if (ev.type === 'player') {
-      // a Spotify zone emits every second while playing; its queue (10–400 KB) rarely changes
+      // Spotify states arrive every poll; their queue (10–400 KB) rarely changes
       const queueRev = fingerprint(JSON.stringify(ev.state.queue));
       full = JSON.stringify({ ...ev, queueRev });
       if (sentQueueRev.get(ev.state.zone) === queueRev) {
@@ -170,9 +170,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const spotify = cfg.spotifyClientId
     ? createSpotify(db, cfg, {
         ...opts.spotifyOptions,
-        // Connect zones poll /me/player every 3 s only while somebody is watching;
-        // with no live socket they slow to 30 s / 120 s and skip the queue.
+        // Connect zones poll just after each song ends while somebody is watching;
+        // with no live socket they poll slower still and skip the queue.
         hasClients: () => clients.size > 0,
+        // Budget-level changes get one warn line each.
+        logger: app.log,
         // One line per hour of Spotify traffic: enough to see a runaway poller.
         onHourlyUsage: (usage) => {
           app.log.info(
@@ -193,6 +195,16 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     : undefined;
   spotify?.registerRoutes(app);
   const spotifyListeners = new Map<Zone, () => void>();
+  /**
+   * Background Spotify work (syncs, linking, discovery warm-ups) is deferred when the
+   * rolling daily budget is low or used up. A user command is never deferred.
+   */
+  function spotifyBudgetDefers(job: string): boolean {
+    const level = spotify?.api.budgetLevel() ?? 'normal';
+    if (level !== 'low' && level !== 'out') return false;
+    app.log.info({ level, job }, `spotify budget low: deferring ${job}`);
+    return true;
+  }
 
   // ---------- feature modules (services; their routes are registered under /api)
   const loudness = createLoudness(db, cfg, { log: (msg) => app.log.warn(msg) });
@@ -208,11 +220,14 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // a small persisted request budget shared by every discovery call.
   const discover = createDiscover(db, cfg, spotify, {
     onWarn: (msg, err) => app.log.warn({ err }, msg),
+    onInfo: (msg) => app.log.info(msg),
   });
   // Build "Find new songs" in the background (a full build is ~1–2 min of rate-limited
   // lookups), so opening Discover shows a ready feed. feed() is a no-op while it is fresh.
-  const warmDiscover = () =>
+  const warmDiscover = () => {
+    if (spotifyBudgetDefers('discover warm-up')) return;
     void discover.feed({ limit: 100 }).catch((err) => app.log.warn({ err }, 'discover warm-up failed'));
+  };
   setTimeout(warmDiscover, 90_000).unref();
   setInterval(warmDiscover, 6 * 60 * 60_000).unref();
 
@@ -240,6 +255,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   function runSpotifySync(opts: { force?: boolean } = {}): Promise<void> {
     if (!spotify) return Promise.resolve();
     if (spotifySyncInFlight) return spotifySyncInFlight;
+    // Background syncs pause once the daily budget is low; a manual/forced sync is a user action.
+    if (!opts.force && spotifyBudgetDefers('library sync')) return Promise.resolve();
     const nowMs = Date.now();
     const blockedUntil = Number(getState('spotify.blockedUntil') ?? 0);
     if (blockedUntil > nowMs) {
@@ -289,6 +306,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   let linkingInFlight: Promise<void> | null = null;
   function runLinkingInBackground(): void {
     if (!linking || linkingInFlight) return;
+    if (spotifyBudgetDefers('spotify linking')) return;
     if (Number(getState('spotify.blockedUntil') ?? 0) > Date.now()) return;
     linkingInFlight = (async () => {
       try {
@@ -379,6 +397,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (detailsRunning) return;
     detailsRunning = true;
     try {
+      // Artist pictures are a background extra: skip them (once, with one log line) at low budget.
+      const spotifyPhotos = !spotifyBudgetDefers('artist photo lookup');
       const pending = db
         .prepare(
           `SELECT a.id FROM albums a LEFT JOIN album_details d ON d.album_id = a.id
@@ -399,18 +419,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           app.log.warn({ err: e, id }, 'artist info failed');
           return null;
         });
-        if (info && !info.imagePath) await spotifyArtistPhoto.lookup(id);
+        if (spotifyPhotos && info && !info.imagePath) await spotifyArtistPhoto.lookup(id);
       }
       // Artists looked up before the Spotify fallback existed.
-      const noPhoto = db
-        .prepare(
-          `SELECT DISTINCT a.artist_id AS id FROM albums a JOIN artist_info i ON i.artist_id = a.artist_id
-           WHERE a.in_library = 1 AND a.source = 'local' AND i.image_path IS NULL`,
-        )
-        .all() as { id: string }[];
-      for (const { id } of noPhoto) {
-        if (scanning) break;
-        await spotifyArtistPhoto.lookup(id);
+      if (spotifyPhotos) {
+        const noPhoto = db
+          .prepare(
+            `SELECT DISTINCT a.artist_id AS id FROM albums a JOIN artist_info i ON i.artist_id = a.artist_id
+             WHERE a.in_library = 1 AND a.source = 'local' AND i.image_path IS NULL`,
+          )
+          .all() as { id: string }[];
+        for (const { id } of noPhoto) {
+          if (scanning) break;
+          await spotifyArtistPhoto.lookup(id);
+        }
       }
       for (const { id } of pending) {
         if (scanning) break; // a rescan/match is running; resume afterwards
@@ -603,7 +625,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const client = socket as typeof socket & { slim?: boolean };
         client.slim = req.query.slim === '1';
         clients.add(client);
-        // Somebody is watching again: Spotify zones go back to 3 s / 10 s polling right now.
+        // Somebody is watching again: Spotify zones return to the watched schedule right now.
         spotify?.zones.wake();
         socket.on('close', () => clients.delete(socket));
         if (pc) {

@@ -43,6 +43,8 @@ export interface DiscoverServiceOptions {
   mb?: MbClient;
   budget?: DiscoverBudgetOptions;
   onWarn?: (msg: string, err?: unknown) => void;
+  /** One info line, e.g. when a background refresh is deferred by the daily budget. */
+  onInfo?: (msg: string) => void;
   /** How long the owned-index load is reused (default 30s). */
   ownedTtlMs?: number;
   /** Spotify searches spent mapping LB recordings per radio (default 10). */
@@ -156,6 +158,7 @@ export function createDiscover(
   const ownedTtlMs = Math.max(0, opts.ownedTtlMs ?? 30_000);
   const backgroundRefresh = opts.backgroundRefresh ?? true;
   const log = opts.onWarn ?? (() => undefined);
+  const info = opts.onInfo ?? (() => undefined);
 
   let owned: OwnedIndex | null = null;
   let ownedAt = 0;
@@ -787,6 +790,12 @@ export function createDiscover(
     // Stale-while-revalidate: a normal page load gets the old feed instantly and
     // a background refresh runs; the explicit Refresh button waits for fresh data.
     if (cached && !options.refresh && backgroundRefresh) {
+      // A background refresh is the first thing to defer when Spotify's daily budget is low.
+      const level = spotify?.api.budgetLevel() ?? 'normal';
+      if (level === 'low' || level === 'out') {
+        info('spotify budget low: deferring discover feed refresh');
+        return feedFromCache(cached.value, cached.fetchedAt, limit);
+      }
       void ensureFeedBuild(limit)
         .then((groups) => cache.set(CACHE_FEED, { groups }))
         .catch((err) => log('discover: background feed refresh failed', err));

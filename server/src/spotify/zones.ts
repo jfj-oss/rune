@@ -1,9 +1,11 @@
 // Spotify Connect playback zones. Each Connect device exposed by the account
-// becomes a PlaybackZone whose state is polled from /me/player (3 s while
-// playing, 10 s while idle; polling stops when nothing subscribes).
+// becomes a PlaybackZone whose state is polled from /me/player. While a song is
+// playing the next poll is scheduled just after that song ends, so a track change
+// is still seen immediately without asking Spotify every few seconds.
 import type { PlayerCommand, PlayerState, QueueItem, Track, Zone } from '@liner/shared';
 import type { PlaybackZone } from '../modules.js';
 import type {
+  SpotifyBudgetLevel,
   SpotifyDevice,
   SpotifyPlaybackState,
   SpotifyPlayBody,
@@ -36,13 +38,10 @@ export interface SpotifyZoneApi {
 }
 
 export interface ConnectZoneOptions {
-  pollMsPlaying?: number;
-  pollMsIdle?: number;
-  /** Poll delays when no rune client is connected (default 30 s playing / 120 s idle). */
-  pollMsPlayingUnwatched?: number;
-  pollMsIdleUnwatched?: number;
   /** Whether at least one websocket client is connected. Undefined = always watched. */
   hasClients?: () => boolean;
+  /** Rolling daily budget level; background polls slow down as it fills (default normal). */
+  budgetLevel?: () => SpotifyBudgetLevel;
   /** Songs rune already has (title, artists, album, cover) by 'sp:' id: shown at once, no Spotify lookup. */
   knownTracks?: (ids: string[]) => QueueItem[];
   /** Spotify's circuit breaker: while this is in the future, the loop must not call Spotify. */
@@ -59,10 +58,34 @@ const VOLUME_HOLD_MS = 4000;
 const TRACK_HOLD_MS = 4000;
 const SETTLE_GAP_MS = 350;
 /**
+ * After a command the UI wants confirmation at once: poll ~1 s and ~3 s after it,
+ * then fall back to the track-aware schedule below.
+ */
+const FAST_FOLLOW_UP_FIRST_MS = 1000;
+const FAST_FOLLOW_UP_SECOND_MS = 2000;
+/** Poll just after the playing song ends (duration - position + slack), capped. */
+const WATCHED_PLAYING_MAX_MS = 30_000;
+const UNWATCHED_PLAYING_MAX_MS = 60_000;
+const WATCHED_PLAYING_SLACK_MS = 1_500;
+const UNWATCHED_PLAYING_SLACK_MS = 5_000;
+/** Used when /me/player does not include a duration. */
+const WATCHED_PLAYING_UNKNOWN_MS = 15_000;
+const UNWATCHED_PLAYING_UNKNOWN_MS = 30_000;
+const WATCHED_IDLE_MS = 20_000;
+const UNWATCHED_IDLE_MS = 300_000;
+const MIN_BACKGROUND_POLL_MS = 1_500;
+/** 'out' means at most one background poll every ten minutes. */
+const OUT_BACKGROUND_POLL_MS = 600_000;
+const BUDGET_DELAY_MULTIPLIER: Record<Exclude<SpotifyBudgetLevel, 'out'>, number> = {
+  normal: 1,
+  tight: 2,
+  low: 4,
+};
+/**
  * How long a /me/player/queue answer stays good enough to reuse. The item id changing
  * (or a command / a connected client) forces a fresh read sooner.
  */
-const QUEUE_STALE_MS = 30_000;
+const QUEUE_STALE_MS = 300_000;
 /** Metadata lookups for a just-started queue: the window around startIndex, in parallel. */
 const STARTED_LOOKUPS = 8;
 const STARTED_LOOKUP_CONCURRENCY = 3;
@@ -215,11 +238,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   readonly name: string;
 
   private readonly api: SpotifyZoneApi;
-  private readonly pollMsPlaying: number;
-  private readonly pollMsIdle: number;
-  private readonly pollMsPlayingUnwatched: number;
-  private readonly pollMsIdleUnwatched: number;
   private readonly hasClients: (() => boolean) | undefined;
+  private readonly budgetLevel: (() => SpotifyBudgetLevel) | undefined;
   private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
   private readonly blockedUntil: (() => number | null) | undefined;
   private readonly now: () => number;
@@ -243,17 +263,18 @@ export class SpotifyConnectZone implements PlaybackZone {
   private lastQueueAt = Number.NEGATIVE_INFINITY;
   private lastQueueItemId: string | null = null;
   private queueDirty = false;
+  /** Last successful /me/player answer: duration/position drive the next poll time. */
+  private lastPlayback: SpotifyPlaybackState | null = null;
+  /** Polls still owed after a user command (fast UI confirmation, budget never applies). */
+  private fastPolls = 0;
 
   constructor(api: SpotifyZoneApi, deviceId: string, name: string, opts: ConnectZoneOptions = {}) {
     this.api = api;
     this.deviceId = deviceId;
     this.name = name;
     this.zone = `spotify:${deviceId}`;
-    this.pollMsPlaying = opts.pollMsPlaying ?? 3000;
-    this.pollMsIdle = opts.pollMsIdle ?? 10_000;
-    this.pollMsPlayingUnwatched = opts.pollMsPlayingUnwatched ?? 30_000;
-    this.pollMsIdleUnwatched = opts.pollMsIdleUnwatched ?? 120_000;
     this.hasClients = opts.hasClients;
+    this.budgetLevel = opts.budgetLevel;
     this.knownTracks = opts.knownTracks;
     this.blockedUntil = opts.blockedUntil;
     this.now = opts.now ?? Date.now;
@@ -274,9 +295,21 @@ export class SpotifyConnectZone implements PlaybackZone {
   }
 
   async command(cmd: PlayerCommand): Promise<PlayerState> {
-    const device = this.deviceId;
     // A command may change what is up next: the next poll must not reuse a cached queue.
     this.queueDirty = true;
+    // Two fast follow-up polls confirm the command in the UI regardless of budget.
+    this.fastPolls = 2;
+    // Drop a slow background timer: it must not fire at the old, track-aware time now.
+    this.clearTimer();
+    try {
+      return await this.runCommand(cmd);
+    } finally {
+      this.scheduleFastFollowUp();
+    }
+  }
+
+  private async runCommand(cmd: PlayerCommand): Promise<PlayerState> {
+    const device = this.deviceId;
     switch (cmd.type) {
       case 'play': {
         const spotifyIds = cmd.trackIds.map((id) => this.requireSpotifyTrack(id));
@@ -524,10 +557,13 @@ export class SpotifyConnectZone implements PlaybackZone {
     try {
       playback = await this.api.currentPlayback();
     } catch {
+      // Do not schedule from a stale position: a failed read falls back to the capped delay.
+      this.lastPlayback = null;
       return;
     }
+    this.lastPlayback = playback;
     // Reuse the last queue unless the playing item changed, a command ran, or the read went
-    // stale (30 s). With no connected client there is nobody to show it to: do not fetch it.
+    // stale (5 min). With no connected client there is nobody to show it to: do not fetch it.
     let queue: SpotifyQueue | undefined = this.lastQueue;
     if (playback && (!playback.device?.id || playback.device.id === this.deviceId)) {
       const itemId = playback.item?.id ?? null;
@@ -624,16 +660,54 @@ export class SpotifyConnectZone implements PlaybackZone {
       this.scheduleAt(nowBlocked + 1000);
       return;
     }
-    const busy = this.snapshot.status === 'playing' || this.now() < this.claimUntil;
-    // Nobody connected: poll slowly (history still gets recorded, just coarser).
-    const delay = this.clientsWatching()
-      ? busy
-        ? this.pollMsPlaying
-        : this.pollMsIdle
-      : busy
-        ? this.pollMsPlayingUnwatched
-        : this.pollMsIdleUnwatched;
-    this.scheduleIn(delay);
+    // A command is still owed fast follow-ups: budget never delays them.
+    if (this.fastPolls > 0) {
+      this.fastPolls--;
+      if (this.fastPolls > 0) {
+        this.scheduleIn(FAST_FOLLOW_UP_SECOND_MS);
+        return;
+      }
+    }
+    this.scheduleIn(this.backgroundDelayMs());
+  }
+
+  /** One fast poll after a command; the loop schedules the second one. */
+  private scheduleFastFollowUp(): void {
+    if (this.closed || this.listeners.size === 0 || this.fastPolls <= 0) return;
+    this.scheduleIn(FAST_FOLLOW_UP_FIRST_MS);
+  }
+
+  /**
+   * Next background poll: just after the current song ends while playing (so a track
+   * change is seen ~1.5 s after it happens), much slower when paused/idle, and slower
+   * still with nobody connected. The daily budget multiplies this delay.
+   */
+  private backgroundDelayMs(): number {
+    const watched = this.clientsWatching();
+    let delay: number;
+    if (this.snapshot.status === 'playing') {
+      const duration =
+        this.lastPlayback?.item?.duration_ms ?? this.snapshot.queue[this.snapshot.index]?.track.durationMs ?? 0;
+      const position = this.lastPlayback?.progress_ms ?? this.snapshot.positionMs;
+      const remaining = duration > 0 ? Math.max(0, duration - position) : null;
+      if (watched) {
+        delay =
+          remaining === null
+            ? WATCHED_PLAYING_UNKNOWN_MS
+            : Math.min(WATCHED_PLAYING_MAX_MS, remaining + WATCHED_PLAYING_SLACK_MS);
+      } else {
+        delay =
+          remaining === null
+            ? UNWATCHED_PLAYING_UNKNOWN_MS
+            : Math.min(UNWATCHED_PLAYING_MAX_MS, remaining + UNWATCHED_PLAYING_SLACK_MS);
+      }
+    } else {
+      delay = watched ? WATCHED_IDLE_MS : UNWATCHED_IDLE_MS;
+    }
+    delay = Math.max(MIN_BACKGROUND_POLL_MS, delay);
+    const level = this.budgetLevel?.() ?? 'normal';
+    if (level === 'out') return Math.max(delay, OUT_BACKGROUND_POLL_MS);
+    return delay * BUDGET_DELAY_MULTIPLIER[level];
   }
 
   private scheduleAt(at: number): void {
@@ -642,6 +716,8 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   private scheduleIn(delay: number): void {
     if (this.closed || this.listeners.size === 0) return;
+    // One timer at a time: a command may schedule its follow-up while a poll is in flight.
+    this.clearTimer();
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.loop();
@@ -738,7 +814,7 @@ export class SpotifyZones {
     return this.zones.get(zoneId);
   }
 
-  /** A client connected: every zone polls at once again (3 s / 10 s while watched). */
+  /** A client connected: every zone polls at once again and returns to the watched schedule. */
   wake(): void {
     for (const zone of this.zones.values()) zone.wake();
   }

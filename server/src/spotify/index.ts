@@ -6,7 +6,7 @@ import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
 import { getAlbum } from '../api/library.js';
-import { SpotifyApi, type SpotifyHourlyUsage } from './api.js';
+import { SpotifyApi, type SpotifyBudgetLogger, type SpotifyHourlyUsage } from './api.js';
 import { SpotifyAuth, registerSpotifyRoutes, type SpotifyAuthOptions, type SpotifyStatus } from './auth.js';
 import { SpotifyCatalog, type SearchResults } from './catalog.js';
 import {
@@ -35,6 +35,8 @@ export interface CreateSpotifyOptions extends SpotifyAuthOptions, ConnectZoneOpt
   catalogTtlMs?: number;
   /** One pino line per completed hour of Spotify traffic (see SpotifyApiOptions). */
   onHourlyUsage?: (usage: SpotifyHourlyUsage) => void;
+  /** Receives the budget-level warn line (normally the Fastify/pino logger). */
+  logger?: SpotifyBudgetLogger;
 }
 
 export interface SpotifyLibrarySyncResult {
@@ -76,12 +78,16 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     getToken: (force) => auth.getAccessToken(force),
     now: opts.now,
     onHourlyUsage: opts.onHourlyUsage,
+    dailyBudget: cfg.spotify?.dailyBudget,
+    logger: opts.logger,
   });
   // songs rune has stored (played, saved, in playlists) start with their titles + covers, no lookup
   const zones = createSpotifyZones(api, {
     knownTracks: (ids) => loadQueueItems(db, ids),
     // While Spotify is out of quota the zone loop parks itself until the breaker expires.
     blockedUntil: () => api.blockedUntil(),
+    // Background polls slow down as the rolling daily budget fills up.
+    budgetLevel: () => api.budgetLevel(),
     ...opts,
   });
   const catalog = new SpotifyCatalog(api, { ttlMs: opts.catalogTtlMs, now: opts.now });
@@ -107,10 +113,13 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
         throw err;
       }
     },
-    searchCatalog: (q) => catalog.search(q),
-    fetchAlbum: (albumId) => fetchSpotifyAlbum(api, db, albumId, { now }),
-    artistPage: (artistId) => artistPages.get(artistId),
-    artistImage: (artistId) => artistPages.image(artistId),
+    // User-facing reads are allowed at every level but 'out': then serve what the DB has.
+    searchCatalog: (q) =>
+      api.budgetLevel() === 'out' ? Promise.resolve({ albums: [], artists: [], tracks: [] }) : catalog.search(q),
+    fetchAlbum: (albumId) =>
+      api.budgetLevel() === 'out' ? Promise.resolve(getAlbum(db, albumId)) : fetchSpotifyAlbum(api, db, albumId, { now }),
+    artistPage: (artistId) => (api.budgetLevel() === 'out' ? null : artistPages.get(artistId)),
+    artistImage: (artistId) => (api.budgetLevel() === 'out' ? Promise.resolve(null) : artistPages.image(artistId)),
     setAlbumSaved: async (albumId, saved) => {
       if (saved && !getAlbum(db, albumId)) {
         await fetchSpotifyAlbum(api, db, albumId, { now });

@@ -168,6 +168,11 @@ export class SpotifyGateway {
 
   /** Budget + 429 translation for one Spotify request. */
   private async call<T>(fn: () => Promise<T>): Promise<T> {
+    // Out of daily budget: fail soft (cached/radio-limited) instead of hammering Spotify.
+    if (this.api.budgetLevel() === 'out') {
+      const until = (this.opts.now ?? Date.now)() + 600_000;
+      throw new DiscoverBlockedError(until, 'budget');
+    }
     await this.budget.take();
     try {
       return await fn();

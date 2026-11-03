@@ -18,6 +18,11 @@ export interface Config {
   publicUrl?: string;
   /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
   spotifyClientId?: string;
+  /** Spotify integration settings. */
+  spotify?: {
+    /** Requests allowed in a rolling 24 h window before background jobs stop (default 4000). */
+    dailyBudget?: number;
+  };
   /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
   lastfmApiKey?: string;
   /** Name of the Spotify Connect device that represents this PC (default 'HORSE',

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  SpotifyBudgetLevel,
   SpotifyDevice,
   SpotifyPlayBody,
   SpotifyPlaybackState,
@@ -263,64 +264,159 @@ describe('Spotify Connect zones', () => {
     await expect(zone.command({ type: 'jump', index: 4 })).rejects.toThrow(/No queue item/);
   });
 
-  it('polls every second while playing and stops when the last listener leaves', async () => {
+  it('polls once the playing song has finished (capped at 30 s) and stops when the last listener leaves', async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();
-    api.playback = playbackState(sampleTrack('t1'));
-    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { pollMsPlaying: 1000, pollMsIdle: 3000 });
+    api.playback = playbackState(sampleTrack('t1')); // 259 s long, 12 s in
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
 
     const unsubscribe = zone.onChange(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(api.currentPlaybackCalls).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(1000);
+    // 246 s left would be far away; the watched playing cap is 30 s.
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(api.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(api.currentPlaybackCalls).toBe(2);
 
     unsubscribe();
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     expect(api.currentPlaybackCalls).toBe(2);
     await zone.close();
   });
 
-  it('reuses the queue for 30 s instead of reading it every poll', async () => {
+  it('schedules the next poll just after the track ends: 40 s left → 30 s, 8 s left → 9.5 s', async () => {
+    vi.useFakeTimers();
+
+    // 40 s left: the 30 s cap wins.
+    const apiLong = new FakeZoneApi();
+    apiLong.playback = playbackState(sampleTrack('t1'), { progress_ms: 20_000 });
+    apiLong.playback.item!.duration_ms = 60_000;
+    const longZone = new SpotifyConnectZone(apiLong, 'dev1', 'Sim Phone');
+    longZone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apiLong.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(apiLong.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(apiLong.currentPlaybackCalls).toBe(2);
+    await longZone.close();
+
+    // 8 s left: poll 1.5 s after the song ends.
+    const apiShort = new FakeZoneApi();
+    apiShort.playback = playbackState(sampleTrack('t1'), { progress_ms: 52_000 });
+    apiShort.playback.item!.duration_ms = 60_000;
+    const shortZone = new SpotifyConnectZone(apiShort, 'dev1', 'Sim Phone');
+    shortZone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(apiShort.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(9_499);
+    expect(apiShort.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(apiShort.currentPlaybackCalls).toBe(2);
+    await shortZone.close();
+  });
+
+  it('polls every 20 s while paused and watched', async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();
-    api.playback = playbackState(sampleTrack('t1'));
+    api.playback = playbackState(sampleTrack('t1'), { is_playing: false });
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(api.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.currentPlaybackCalls).toBe(2);
+    await zone.close();
+  });
+
+  it('reuses the queue while the item is unchanged and re-reads it when the item changes', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
     api.queueData = {
       currently_playing: sampleTrack('t1'),
       queue: [sampleTrack('t2', 2, 'Something')],
     };
-    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', {
-      pollMsPlaying: 1000,
-      pollMsIdle: 3000,
-    });
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
     zone.onChange(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(api.currentPlaybackCalls).toBe(1);
     expect(api.queueCalls).toBe(1);
 
-    // 29 s of the same song: one read is enough (stale after 30 s).
-    await vi.advanceTimersByTimeAsync(29_000);
+    // A plain position poll (same item, 30 s later) does not re-read the queue.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.currentPlaybackCalls).toBe(2);
     expect(api.queueCalls).toBe(1);
 
-    // The song changes at 30 s: that poll reads the queue, then it is reused again.
-    api.playback = playbackState(sampleTrack('t2', 2, 'Something'));
-    api.queueData = { currently_playing: sampleTrack('t2'), queue: [] };
-    await vi.advanceTimersByTimeAsync(31_000);
+    // The item changes: this poll reads the queue once, then reuses it again.
+    api.playback = playbackState(sampleTrack('t2', 2, 'Something'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.currentPlaybackCalls).toBe(3);
+    expect(api.queueCalls).toBe(2);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.currentPlaybackCalls).toBe(4);
+    expect(api.queueCalls).toBe(2);
+    await zone.close();
+  });
 
-    expect(api.currentPlaybackCalls).toBe(61); // ~1/s, like before
-    expect(api.queueCalls).toBe(3); // 0 s, the change at 30 s, and the fresh read at 60 s — not 61
+  it('refreshes the cached queue after five minutes even when the item did not change', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
+    api.queueData = { currently_playing: sampleTrack('t1'), queue: [] };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.queueCalls).toBe(1);
+
+    // 9 polls × 30 s: still the same cached queue (last read at 0 s).
+    await vi.advanceTimersByTimeAsync(270_000);
+    expect(api.queueCalls).toBe(1);
+
+    // At 300 s the cached answer is stale: read it again.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.currentPlaybackCalls).toBe(11);
+    expect(api.queueCalls).toBe(2);
+    await zone.close();
+  });
+
+  it('picks up a track change within 2 s of the song ending', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 9_000 });
+    api.playback.item!.duration_ms = 10_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(1);
+
+    // The song ends at 1 s and Spotify moves on to t2.
+    api.playback = playbackState(sampleTrack('t2', 2, 'Something'), { progress_ms: 0 });
+    // The scheduled poll is at 1 s (remaining) + 1.5 s slack = 2.5 s.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(api.currentPlaybackCalls).toBe(2);
+    const state = zone.state();
+    expect(state.queue[state.index]?.track.id).toBe('sp:t2');
     await zone.close();
   });
 
   it('polls slowly and skips the queue while no client is connected, then speeds up on connect', async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();
-    api.playback = playbackState(sampleTrack('t1'));
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
     let connected = false;
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', {
-      pollMsPlaying: 1000,
-      pollMsIdle: 3000,
       hasClients: () => connected,
     });
     zone.onChange(() => {});
@@ -328,30 +424,30 @@ describe('Spotify Connect zones', () => {
     expect(api.currentPlaybackCalls).toBe(1);
     expect(api.queueCalls).toBe(0); // nobody to show the queue to
 
-    // Unwatched playing: 30 s.
-    await vi.advanceTimersByTimeAsync(29_000);
+    // Unwatched playing: 60 s (the track has 10 min left).
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(api.currentPlaybackCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1);
     expect(api.currentPlaybackCalls).toBe(2);
     expect(api.queueCalls).toBe(0);
 
-    // A client connects: poll at once and read the queue; back to 1 s while playing.
+    // A client connects: poll at once and read the queue; 30 s while playing.
     connected = true;
     zone.wake();
     await vi.advanceTimersByTimeAsync(0);
     expect(api.currentPlaybackCalls).toBe(3);
     expect(api.queueCalls).toBe(1);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(api.currentPlaybackCalls).toBe(4);
 
-    // Idle and unwatched: 120 s.
-    api.playback = playbackState(sampleTrack('t1'), { is_playing: false });
+    // Idle and unwatched: 300 s.
+    api.playback = playbackState(sampleTrack('t1', 1, 'Come Together'), { is_playing: false });
     connected = false;
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(api.currentPlaybackCalls).toBe(5);
-    await vi.advanceTimersByTimeAsync(119_000);
+    await vi.advanceTimersByTimeAsync(299_999);
     expect(api.currentPlaybackCalls).toBe(5);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1);
     expect(api.currentPlaybackCalls).toBe(6);
     expect(api.queueCalls).toBe(1);
     await zone.close();
@@ -375,8 +471,10 @@ describe('Spotify Connect zones', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(api.currentPlaybackCalls).toBe(1);
 
-    // Back to the normal 3 s playing interval.
-    await vi.advanceTimersByTimeAsync(3000);
+    // Back to the normal background delay (30 s cap while a long song plays).
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(api.currentPlaybackCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(api.currentPlaybackCalls).toBe(2);
     await zone.close();
   });
@@ -410,10 +508,7 @@ describe('Spotify Connect zones', () => {
     api.tracksData.set('t1', sampleTrack('t1', 1, 'Come Together'));
     api.tracksData.set('t2', sampleTrack('t2', 2, 'Something'));
     api.trackDelayMs = 2000;
-    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', {
-      pollMsPlaying: 1000,
-      pollMsIdle: 3000,
-    });
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
     const states: ReturnType<typeof zone.state>[] = [];
     zone.onChange((s) => states.push(s));
 
@@ -438,6 +533,70 @@ describe('Spotify Connect zones', () => {
     expect(zone.state().queue[1]?.track.title).toBe('Something');
     expect(states.some((s) => s.queue[1]?.track.title === 'Something')).toBe(true);
     await started;
+    await zone.close();
+  });
+
+  it('polls ~1 s and ~3 s after a command, even when the budget is out', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { budgetLevel: () => 'out' });
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(1);
+
+    // The command itself goes through, as does its immediate refresh poll.
+    await zone.command({ type: 'seek', positionMs: 1000 });
+    expect(callsOf(api, 'seek')).toHaveLength(1);
+    const afterCommand = api.currentPlaybackCalls;
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(api.currentPlaybackCalls).toBe(afterCommand + 1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.currentPlaybackCalls).toBe(afterCommand + 2);
+
+    // Only after the follow-ups does the 'out' delay (ten minutes) apply.
+    await vi.advanceTimersByTimeAsync(599_999);
+    expect(api.currentPlaybackCalls).toBe(afterCommand + 2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.currentPlaybackCalls).toBe(afterCommand + 3);
+    await zone.close();
+  });
+
+  it('multiplies background delays by the budget level, and "out" polls every ten minutes', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 20_000 });
+    api.playback.item!.duration_ms = 60_000;
+    let level: SpotifyBudgetLevel = 'normal';
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { budgetLevel: () => level });
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(1);
+
+    // 40 s left → the normal 30 s cap; tight doubles it.
+    level = 'tight';
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.currentPlaybackCalls).toBe(2);
+
+    // low ×4 = 120 s.
+    level = 'low';
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(api.currentPlaybackCalls).toBe(2);
+    await vi.advanceTimersByTimeAsync(60_001); // 120 s from the last poll
+    expect(api.currentPlaybackCalls).toBe(3);
+
+    // out → at most once every 10 minutes.
+    level = 'out';
+    await vi.advanceTimersByTimeAsync(59_999); // 120 s after the last poll
+    expect(api.currentPlaybackCalls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.currentPlaybackCalls).toBe(4);
+    await vi.advanceTimersByTimeAsync(599_999);
+    expect(api.currentPlaybackCalls).toBe(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.currentPlaybackCalls).toBe(5);
     await zone.close();
   });
 });

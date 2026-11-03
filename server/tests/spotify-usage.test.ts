@@ -72,6 +72,7 @@ describe('Spotify quota reporting', () => {
       last24h: expect.any(Number),
       byPath: expect.any(Array),
       blockedUntil: null,
+      budget: { daily: expect.any(Number), used24h: expect.any(Number), level: 'normal' },
     });
 
     const res = await app.inject({

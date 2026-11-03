@@ -156,6 +156,16 @@ export interface SpotifyHourlyUsage {
   topPaths: SpotifyUsageCount[];
 }
 
+export type SpotifyBudgetLevel = 'normal' | 'tight' | 'low' | 'out';
+
+export interface SpotifyBudget {
+  /** Requests allowed in a rolling 24 h window. */
+  daily: number;
+  /** Requests seen in the rolling 24 h window. */
+  used24h: number;
+  level: SpotifyBudgetLevel;
+}
+
 export interface SpotifyUsage {
   /** Real network requests since this client was created. */
   sinceStart: number;
@@ -167,6 +177,13 @@ export interface SpotifyUsage {
   byPath: SpotifyUsageCount[];
   /** Epoch ms when the circuit breaker stops blocking, or null when not blocked. */
   blockedUntil: number | null;
+  /** Rolling daily budget and the level derived from it. */
+  budget: SpotifyBudget;
+}
+
+/** Structural logger so the API does not depend on Fastify/pino. */
+export interface SpotifyBudgetLogger {
+  warn(obj: Record<string, unknown>, msg: string): void;
 }
 
 export interface SpotifyApiOptions {
@@ -185,8 +202,14 @@ export interface SpotifyApiOptions {
   now?: () => number;
   /** Called once per completed clock hour that had requests. */
   onHourlyUsage?: (usage: SpotifyHourlyUsage) => void;
+  /** Requests allowed in a rolling 24 h window (default 4000). */
+  dailyBudget?: number;
+  /** Receives one warn line per budget-level change. */
+  logger?: SpotifyBudgetLogger;
 }
 
+/** Spotify's developer app has an unpublished daily quota; this is a safety margin. */
+export const DEFAULT_DAILY_BUDGET = 4000;
 const HOUR_MS = 3_600_000;
 /** Current hour + the previous 24, enough for the rolling 24-hour total. */
 const USAGE_KEEP_HOURS = 25;
@@ -225,6 +248,10 @@ export class SpotifyApi {
   private readonly maxRetryAfterMs: number;
   private readonly now: () => number;
   private readonly onHourlyUsage: ((usage: SpotifyHourlyUsage) => void) | undefined;
+  private readonly dailyBudget: number;
+  private readonly logger: SpotifyBudgetLogger | undefined;
+  /** Last observed level, so a change logs exactly one line. */
+  private lastBudgetLevel: SpotifyBudgetLevel = 'normal';
 
   /** Circuit breaker: set when Spotify answers with a Retry-After above maxRetryAfterMs. */
   private blockedUntilAt: number | null = null;
@@ -244,6 +271,8 @@ export class SpotifyApi {
     this.maxRetryAfterMs = opts.maxRetryAfterMs ?? 60_000;
     this.now = opts.now ?? Date.now;
     this.onHourlyUsage = opts.onHourlyUsage;
+    this.dailyBudget = Math.max(1, opts.dailyBudget ?? DEFAULT_DAILY_BUDGET);
+    this.logger = opts.logger;
     if (this.onHourlyUsage) {
       this.hourlyTimer = setInterval(() => this.flushHourlyUsage(), 60_000);
       (this.hourlyTimer as { unref?: () => void }).unref?.();
@@ -281,7 +310,38 @@ export class SpotifyApi {
       last24h,
       byPath: topCounts(merged, USAGE_BY_PATH),
       blockedUntil: this.blockedUntil(),
+      budget: this.budget(),
     };
+  }
+
+  /** Rolling daily budget: how much of it the last 24 h used, and how tight that is. */
+  budget(): SpotifyBudget {
+    const used24h = this.last24hCount();
+    const level = budgetLevelFor(used24h, this.dailyBudget);
+    if (level !== this.lastBudgetLevel) {
+      const previous = this.lastBudgetLevel;
+      this.lastBudgetLevel = level;
+      this.logger?.warn(
+        { from: previous, to: level, used24h, daily: this.dailyBudget },
+        `spotify budget: ${previous} → ${level} (${used24h}/${this.dailyBudget} in 24h)`,
+      );
+    }
+    return { daily: this.dailyBudget, used24h, level };
+  }
+
+  /** `normal` until half the budget is used, then tight / low / out. */
+  budgetLevel(): SpotifyBudgetLevel {
+    return this.budget().level;
+  }
+
+  private last24hCount(): number {
+    const hour = Math.floor(this.now() / HOUR_MS);
+    let total = 0;
+    for (const [h, bucket] of this.hourCounts) {
+      if (h < hour - 24) continue;
+      total += sumCounts(bucket.values());
+    }
+    return total;
   }
 
   // ---------- transport ----------
@@ -664,6 +724,14 @@ export class SpotifyApi {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
+}
+
+/** <50% normal, <80% tight, <100% low, otherwise out. */
+export function budgetLevelFor(used24h: number, dailyBudget: number): SpotifyBudgetLevel {
+  if (used24h < dailyBudget * 0.5) return 'normal';
+  if (used24h < dailyBudget * 0.8) return 'tight';
+  if (used24h < dailyBudget) return 'low';
+  return 'out';
 }
 
 async function safeText(res: FetchResponseLike): Promise<string> {

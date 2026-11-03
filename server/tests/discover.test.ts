@@ -686,6 +686,37 @@ describe('discover feed', () => {
     expect(res.status).toBe('unavailable');
     expect(res.message).toContain('not connected');
   });
+
+  it('defers the background feed refresh when the Spotify daily budget is low', async () => {
+    const db = openDb(':memory:');
+    // A stale cached feed: a page load would normally trigger a background rebuild.
+    const cache = new DiscoverCache(db, () => NOW);
+    cache.set('feed:v2', { groups: [] });
+    db.prepare('UPDATE discover_cache SET fetched_at = ? WHERE key = ?').run(
+      NOW - 7 * 60 * 60_000,
+      'feed:v2',
+    );
+
+    const fake = fakeSpotify();
+    // The real API, but its rolling budget already reports 'low'.
+    Object.assign(fake.spotify.api, { budgetLevel: () => 'low' });
+    const infos: string[] = [];
+    const discover = createDiscover(db, CFG, fake.spotify, {
+      fetch: lbFake().fetch as unknown as typeof globalThis.fetch,
+      mb: mbFake(() => NOW).client,
+      now: () => NOW,
+      sleep: async () => undefined,
+      budget: { minIntervalMs: 0, hourlyLimit: 1000 },
+      backgroundRefresh: true,
+      onInfo: (m) => infos.push(m),
+      onWarn: () => undefined,
+    });
+
+    const res = await discover.feed({ limit: 10 });
+    expect(res.cached).toBe(true);
+    expect(infos).toEqual(['spotify budget low: deferring discover feed refresh']);
+    expect(fake.calls).toHaveLength(0);
+  });
 });
 
 describe('debug candidates (LB/MB only)', () => {

@@ -269,6 +269,61 @@ describe('SpotifyApi transport', () => {
   });
 });
 
+describe('daily budget', () => {
+  it('derives normal/tight/low/out from the rolling 24 h count and logs each change once', async () => {
+    const T = Date.UTC(2026, 10, 2, 10, 15);
+    const warns: { obj: Record<string, unknown>; msg: string }[] = [];
+    const { fetch } = fakeFetch(() => jsonResponse(200, { id: 'me' }));
+    const api = new SpotifyApi({
+      fetch,
+      baseUrl: BASE,
+      getToken: async () => 'tok',
+      now: () => T,
+      dailyBudget: 10,
+      logger: { warn: (obj, msg) => warns.push({ obj, msg }) },
+    });
+
+    expect(api.budget()).toEqual({ daily: 10, used24h: 0, level: 'normal' });
+    for (let i = 0; i < 4; i++) await api.me();
+    expect(api.budgetLevel()).toBe('normal'); // 40%
+
+    await api.me(); // 50%
+    expect(api.budgetLevel()).toBe('tight');
+
+    for (let i = 0; i < 3; i++) await api.me(); // 80%
+    expect(api.budgetLevel()).toBe('low');
+
+    for (let i = 0; i < 2; i++) await api.me(); // 100%
+    expect(api.budgetLevel()).toBe('out');
+    expect(api.usage().budget).toEqual({ daily: 10, used24h: 10, level: 'out' });
+
+    // Exactly one line per transition, not one per poll.
+    expect(warns.map((w) => w.msg)).toEqual([
+      'spotify budget: normal → tight (5/10 in 24h)',
+      'spotify budget: tight → low (8/10 in 24h)',
+      'spotify budget: low → out (10/10 in 24h)',
+    ]);
+  });
+
+  it('uses the rolling 24 h window: requests older than that no longer count', async () => {
+    const HOUR = 3_600_000;
+    let t = Date.UTC(2026, 10, 2, 0, 15);
+    const { fetch } = fakeFetch(() => jsonResponse(200, { id: 'me' }));
+    const api = new SpotifyApi({
+      fetch,
+      baseUrl: BASE,
+      getToken: async () => 'tok',
+      now: () => t,
+      dailyBudget: 4,
+    });
+    for (let i = 0; i < 4; i++) await api.me();
+    expect(api.budget().level).toBe('out');
+
+    t += 25 * HOUR; // the old clock hours have rolled out of the window
+    expect(api.budget()).toEqual({ daily: 4, used24h: 0, level: 'normal' });
+  });
+});
+
 describe('player endpoints with opaque 200 bodies', () => {
   it('treats a non-JSON 200 body (e.g. "TvJLfYpHJf") as no body', async () => {
     const { SpotifyApi } = await import('../src/spotify/api.js');
