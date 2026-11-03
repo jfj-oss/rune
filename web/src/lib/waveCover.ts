@@ -79,8 +79,6 @@ export type GenKind = 'wave' | 'ripple' | 'aurora' | 'dunes';
 const KINDS: GenKind[] = ['wave', 'ripple', 'aurora', 'dunes'];
 /** Characters of each kind's ASCII header: [faint edge, crest]. */
 export const ASCII_CHARS: Record<GenKind, [string, string]> = { wave: ['x', 'o'], ripple: ['·', 'o'], aurora: [':', '|'], dunes: ['-', '~'] };
-/** About one album in this many wears a generative cover. */
-export const ALBUM_ODDS = 30;
 
 function hash(s: string): number {
   let h = 2166136261;
@@ -90,15 +88,15 @@ function hash(s: string): number {
   return h >>> 0;
 }
 
-/** The generative art an id wears, if any: the wave playlists, and a fixed random ~1 in 30 albums. */
-export function genArtFor(id: string): { kind: GenKind; seed: number } | null {
-  const h = hash(id);
-  if (WAVE_COVER_IDS.has(id)) return { kind: 'wave', seed: h % 7 };
-  if (id.startsWith('pl:')) return null;
-  if (h % ALBUM_ODDS !== 0) return null;
-  // a separate hash for the kind, so it is not tied to the bits that chose the album
+/** The pattern an album with no artwork wears as its cover (always one, fixed by the id). */
+export function genKindFor(id: string): { kind: GenKind; seed: number } {
   const k = hash(`${id}#kind`);
   return { kind: KINDS[k % KINDS.length]!, seed: (k >>> 8) % 7 };
+}
+
+/** Generative cover + header for the wave playlists (MUDs, HORSE); other playlists keep their own art. */
+export function genArtFor(id: string): { kind: GenKind; seed: number } | null {
+  return WAVE_COVER_IDS.has(id) ? { kind: 'wave', seed: hash(id) % 7 } : null;
 }
 
 const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };

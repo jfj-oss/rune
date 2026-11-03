@@ -1,11 +1,11 @@
 import type { Album, AlbumDetails, Artist } from '@liner/shared';
-import { genArtFor } from '../lib/waveCover';
+import { genKindFor } from '../lib/waveCover';
 import { AsciiWaves } from '../components/AsciiWaves';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { Copy, ListEnd, MoreHorizontal, Play, Plus, Radio, Shuffle, Star, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { api, coverSrc } from '../api';
+import { api } from '../api';
 import { FormatBadge, AlbumCard } from '../components/AlbumCard';
 import { Connections } from '../components/album/Connections';
 import { Credits } from '../components/album/Credits';
@@ -141,14 +141,15 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
 
   const more = (artist?.albums ?? []).filter((a) => a.id !== album.id);
   const year = album.year;
-  const art = genArtFor(album.id);
+  // every album's header is an ASCII sea (wave, ripple, aurora or dunes, fixed by the album)
+  const art = genKindFor(album.id);
 
   return (
     <div className="page page--album">
       {lowConf && <FixMatchBanner onFix={() => setFixing(true)} />}
       <section className="ahero">
         <div className="ahero__bg" aria-hidden>
-          {art ? <AsciiWaves kind={art.kind} /> : <img src={coverSrc(album, 200)} alt="" />}
+          <AsciiWaves kind={art.kind} />
           <div className="ahero__wash" />
         </div>
         <MobileBack />
