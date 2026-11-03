@@ -25,3 +25,19 @@ export function formatScoreValue(s: Pick<CriticScore, 'score' | 'scale'>): strin
 export function scoreSuffix(s: Pick<CriticScore, 'scale'>): string {
   return s.scale >= 100 ? '' : `/${s.scale}`;
 }
+
+/** The album's overall rating from all its critic scores: the mean of the normalised scores (each outlet
+    counted once), shown as 0–5 stars. `stars` is exact (e.g. 4.2); the star row fills to it. */
+export function aggregateScore(scores: readonly Pick<CriticScore, 'outlet' | 'score' | 'scale'>[]): { stars: number; mean: number; count: number } | null {
+  const seen = new Set<string>();
+  const vals: number[] = [];
+  for (const s of scores) {
+    const key = s.outlet.toLowerCase().replace(/^the\s+/, '').trim();
+    if (seen.has(key) || !Number.isFinite(s.score) || !(s.scale > 0)) continue;
+    seen.add(key);
+    vals.push(normalizeScore(s));
+  }
+  if (!vals.length) return null;
+  const mean = vals.reduce((a, v) => a + v, 0) / vals.length;
+  return { stars: Math.round(mean / 2) / 10, mean: Math.round(mean), count: vals.length };
+}

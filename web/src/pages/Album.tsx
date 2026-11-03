@@ -10,6 +10,7 @@ import { Credits } from '../components/album/Credits';
 import { AboutMeta } from '../components/album/Editions';
 import { FixMatchBanner, FixMatchDialog } from '../components/album/FixMatch';
 import { ArtistNotes } from '../components/album/Notes';
+import { GlassStars } from '../components/album/GlassStars';
 import { Prose, Reception, ScoreChip } from '../components/album/Reception';
 import { TrackList } from '../components/album/TrackList';
 import { PlayStats } from '../components/discover/PlayStats';
@@ -25,6 +26,7 @@ import { useScrollRoot } from '../hooks/scrollRoot';
 import { paletteFromColour } from '../lib/dither';
 import { albumItems, usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
+import { aggregateScore } from '../lib/scores';
 import type { AlbumEditions } from '../lib/discover';
 import { textPreview } from '../lib/previews';
 import { startRadio } from '../lib/radio';
@@ -184,6 +186,7 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
                 )}
               </Popover>
             </div>
+            {d && d.scores.length > 0 && <OverallStars scores={d.scores} />}
             {d && d.scores.length > 0 && (
               <div className="ahero__scores" aria-label="Critic scores">{d.scores.map((s) => <ScoreChip key={s.outlet} s={s} details={d} />)}</div>
             )}
@@ -285,6 +288,20 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
       </div>
 
       {fixing && <FixMatchDialog albumId={album.id} onClose={() => setFixing(false)} />}
+    </div>
+  );
+}
+
+/** The overall rating: every critic score averaged into five glass stars. */
+function OverallStars({ scores }: { scores: AlbumDetails['scores'] }) {
+  const agg = aggregateScore(scores);
+  if (!agg) return null;
+  const critics = plural(agg.count, 'critic score');
+  return (
+    <div className="ahero__stars" role="img" aria-label={`${agg.stars.toFixed(1)} out of 5 stars, the average of ${critics}`} title={`Average of ${critics}: ${agg.mean}/100`}>
+      <GlassStars value={agg.stars} />
+      <b>{agg.stars.toFixed(1)}</b>
+      <span>from {critics}</span>
     </div>
   );
 }

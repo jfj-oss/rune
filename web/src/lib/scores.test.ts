@@ -28,3 +28,22 @@ describe('scoreTone / format', () => {
     expect(scoreSuffix({ scale: 100 })).toBe('');
   });
 });
+
+describe('aggregateScore', () => {
+  it('averages normalised scores into 0–5 stars, each outlet once', async () => {
+    const { aggregateScore } = await import('./scores');
+    const a = aggregateScore([
+      { outlet: 'Metacritic', score: 84, scale: 100 },
+      { outlet: 'AllMusic', score: 4, scale: 5 },
+      { outlet: 'The AllMusic', score: 1, scale: 5 },
+      { outlet: 'Pitchfork', score: 7.6, scale: 10 },
+    ])!;
+    expect(a.count).toBe(3);
+    expect(a.mean).toBe(80);
+    expect(a.stars).toBe(4);
+  });
+  it('is null with no usable scores', async () => {
+    const { aggregateScore } = await import('./scores');
+    expect(aggregateScore([])).toBeNull();
+  });
+});
