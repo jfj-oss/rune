@@ -12,6 +12,11 @@ import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 
 const APP_ID = 'com.spotify.Client';
+/**
+ * Spotify 1.2.95 hangs at start-up on KDE's Wayland (its first Wayland request is never answered, so it
+ * never signs in or appears as a device). Under XWayland it starts normally.
+ */
+const LAUNCH_ARGS = ['run', '--socket=x11', '--nosocket=wayland', APP_ID, '--ozone-platform=x11'];
 const SCRIPT_NAME = 'rune-spotify-minimize';
 const SCRIPT_FILE = 'spotify-minimize.js';
 const UNLOAD_AFTER_MS = 45_000;
@@ -20,7 +25,8 @@ const COMMAND_TIMEOUT_MS = 10_000;
 
 /** The KWin script the autostart helper used: minimize Spotify's windows as they open. */
 const KWIN_SCRIPT = `workspace.windowAdded.connect(function (w) {
-  if (w.resourceClass === "com.spotify.Client" && w.normalWindow) w.minimized = true;
+  var c = String(w.resourceClass).toLowerCase();
+  if ((c === "com.spotify.client" || c === "spotify") && w.normalWindow) w.minimized = true;
 });
 `;
 
@@ -190,7 +196,7 @@ export function createPcSpotify(
       if (qdbus) await loadMinimizeScript(qdbus);
 
       try {
-        runner.spawnDetached('flatpak', ['run', APP_ID]);
+        runner.spawnDetached('flatpak', LAUNCH_ARGS);
       } catch (err) {
         log('could not start Spotify', err);
         return { started: false, running: false };

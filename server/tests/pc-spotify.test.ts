@@ -120,7 +120,7 @@ describe('createPcSpotify', () => {
       librespotProbe: async () => ({ status: 204 }),
     });
     expect(await pcSpotify.start()).toEqual({ started: true, running: false });
-    expect(runner.launches).toEqual([['flatpak', 'run', 'com.spotify.Client']]);
+    expect(runner.launches).toEqual([['flatpak', 'run', '--socket=x11', '--nosocket=wayland', 'com.spotify.Client', '--ozone-platform=x11']]);
   });
 
   it('reports running from flatpak ps without starting anything', async () => {
@@ -136,11 +136,11 @@ describe('createPcSpotify', () => {
 
     const first = await pcSpotify.start();
     expect(first).toEqual({ started: true, running: false });
-    expect(runner.launches).toEqual([['flatpak', 'run', 'com.spotify.Client']]);
+    expect(runner.launches).toEqual([['flatpak', 'run', '--socket=x11', '--nosocket=wayland', 'com.spotify.Client', '--ozone-platform=x11']]);
 
     // The script lives in the rune data dir and matches the autostart helper's logic.
     const script = readFileSync(join(dir, 'spotify-minimize.js'), 'utf8');
-    expect(script).toContain('w.resourceClass === "com.spotify.Client"');
+    expect(script).toContain('c === "com.spotify.client" || c === "spotify"');
     expect(script).toContain('w.normalWindow');
     expect(script).toContain('w.minimized = true');
 
@@ -185,7 +185,7 @@ describe('createPcSpotify', () => {
     const { runner, pcSpotify } = service();
     runner.qdbus = null;
     expect(await pcSpotify.start()).toEqual({ started: true, running: false });
-    expect(runner.launches).toEqual([['flatpak', 'run', 'com.spotify.Client']]);
+    expect(runner.launches).toEqual([['flatpak', 'run', '--socket=x11', '--nosocket=wayland', 'com.spotify.Client', '--ozone-platform=x11']]);
     expect(runner.calls.some((c) => c.command === 'qdbus6' || c.command === 'qdbus')).toBe(false);
   });
 
