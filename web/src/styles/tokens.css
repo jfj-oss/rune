@@ -24,8 +24,8 @@
   --shadow-hero: 0 30px 70px -10px rgba(0, 0, 0, 0.6), 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-pop: 0 18px 48px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
 
-  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --serif: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --serif: 'Source Serif 4 Variable', 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 
   --side-w: 220px;
   --side-w-collapsed: 64px;
