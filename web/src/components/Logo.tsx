@@ -4,6 +4,14 @@ import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type Dit
 import { currentItem, usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 
+/** The dot itself, then its trail: later, smaller, fainter. */
+const TRAIL = [
+  { lag: 0, size: 1, alpha: 1 },
+  { lag: 45, size: 0.86, alpha: 0.42 },
+  { lag: 90, size: 0.72, alpha: 0.24 },
+  { lag: 135, size: 0.58, alpha: 0.12 },
+];
+
 const css = (c: Rgb) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;
 
 /** The palette the Dither backdrop is showing: its hue, the album page's colour, the playing album's, or the cycle. */
@@ -45,10 +53,17 @@ export function Logo({ size = 28 }: { size?: number }) {
     ['--dot-L' as string]: `${diag}px`,
     ['--dot-o' as string]: `${size * 0.12}px`,
   };
+  // each dot is followed by fading, shrinking copies running the same path a little later: its trail
+  const dot = (n: 1 | 2) =>
+    TRAIL.map((t, k) => (
+      <b key={`${n}-${k}`} className={`dotlogo__x dotlogo__x--${n}${k ? ' dotlogo__ghost' : ''}`} style={{ ['--lag' as string]: `${t.lag}ms`, ['--gs' as string]: t.size, ['--ga' as string]: t.alpha }}>
+        <i className={`dotlogo__y dotlogo__y--${n}`} />
+      </b>
+    )).reverse();
   const pair = (cls: string) => (
     <span className={`dotlogo__pair ${cls}`}>
-      <b className="dotlogo__x dotlogo__x--1"><i className="dotlogo__y dotlogo__y--1" /></b>
-      <b className="dotlogo__x dotlogo__x--2"><i className="dotlogo__y dotlogo__y--2" /></b>
+      {dot(1)}
+      {dot(2)}
     </span>
   );
   return (
