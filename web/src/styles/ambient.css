@@ -30,7 +30,7 @@
 .ambdot--dither-green { --c: #22924c; }
 .ambdot--dither-olive { --c: #a39642; }
 .ambdot--dither-lime { --c: #a2a646; }
-.ambdot--dither-teal { --c: #005a6c; }
+.ambdot--dither-teal { --c: #005d63; }
 .ambdot--dither-cycle { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, conic-gradient(#d4584f, #8f5ae8, #3f74e8, #22924c, #d4584f); }
 .ambdot--dither-album { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, linear-gradient(135deg, #e0a040, #c04a70 50%, #3f74e8); }
 
