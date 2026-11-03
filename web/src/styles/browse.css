@@ -28,6 +28,7 @@
 .pv__val { font-size: 52px; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
 .pv__val small { font-size: 16px; font-weight: 500; opacity: 0.6; letter-spacing: 0; }
 .pv__val--high { color: var(--ok); } .pv__val--mid { color: var(--warn); } .pv__val--low { color: var(--bad); }
+.pv__val--text { color: var(--ok); } .pv__val--notext { color: var(--score-notext); }
 .pv__quote { font-family: var(--serif); font-style: italic; font-size: 21px; line-height: 1.5; padding-left: 18px; border-left: 3px solid var(--accent); color: var(--text); }
 .pv__text { max-width: none; font-size: 16.5px; }
 .pv__ctx { display: grid; gap: 10px; padding: 16px 18px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }

@@ -1,8 +1,9 @@
 import type { AlbumDetails, CriticQuote, CriticScore } from '@liner/shared';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ExternalLink } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { formatScoreValue, normalizeScore, scoreSuffix, scoreTone } from '../../lib/scores';
-import { quotePreview, scorePreview, textPreview } from '../../lib/previews';
+import { formatScoreValue, normalizeScore, scoreSuffix } from '../../lib/scores';
+import { quotePreview, scoreHasText, scorePreview, textPreview, textTone } from '../../lib/previews';
+import { hostOf } from '../../lib/format';
 import { usePreview } from '../../store/preview';
 import { SourceLink } from '../Rows';
 
@@ -74,35 +75,50 @@ export function Prose({ text, lines = 10, className = '', maxHeight = 560 }: { t
   );
 }
 
+/** Green scores (rune has text for them) open the preview; red ones are bare numbers and go straight to the site. */
+function scoreAction(s: CriticScore, details: AlbumDetails | undefined, open: (i: ReturnType<typeof scorePreview>) => void) {
+  const has = scoreHasText(s, details);
+  return {
+    tone: textTone(has),
+    props: has
+      ? { as: 'button' as const, type: 'button' as const, onClick: () => open(scorePreview(s, details)), 'aria-haspopup': 'dialog' as const }
+      : { as: 'a' as const, href: s.url, target: '_blank', rel: 'noopener noreferrer' },
+  };
+}
+
+function ScoreLink({ props, className, title, children }: { props: ReturnType<typeof scoreAction>['props']; className: string; title?: string; children: React.ReactNode }) {
+  if (props.as === 'a') {
+    const { as: _a, ...rest } = props;
+    return <a {...rest} className={className} title={title ? `${title} — opens ${hostOf(props.href)}` : `Opens ${hostOf(props.href)}`}>{children}</a>;
+  }
+  const { as: _b, ...rest } = props;
+  return <button {...rest} className={className} title={title}>{children}</button>;
+}
+
 export function ScoreChip({ s, details }: { s: CriticScore; details?: AlbumDetails }) {
-  const n = normalizeScore(s);
   const open = usePreview((p) => p.open);
+  const { tone, props } = scoreAction(s, details, open);
   return (
-    <button
-      type="button"
-      className={`score score--${scoreTone(n)}`}
-      onClick={() => open(scorePreview(s, details))}
-      aria-haspopup="dialog"
-      title={`${s.outlet}${s.reviewCount ? ` — ${s.reviewCount} reviews` : ''}`}
-    >
+    <ScoreLink props={props} className={`score score--${tone}`} title={`${s.outlet}${s.reviewCount ? ` — ${s.reviewCount} reviews` : ''}`}>
       <b>{formatScoreValue(s)}<small>{scoreSuffix(s)}</small></b>
       <span>{s.outlet}</span>
-    </button>
+    </ScoreLink>
   );
 }
 
 function ScoreRow({ s, details }: { s: CriticScore; details: AlbumDetails }) {
   const n = normalizeScore(s);
   const open = usePreview((p) => p.open);
+  const { tone, props } = scoreAction(s, details, open);
   return (
-    <button type="button" className="srow" onClick={() => open(scorePreview(s, details))} aria-haspopup="dialog">
+    <ScoreLink props={props} className="srow">
       <span className="srow__top">
-        <span className="srow__outlet">{s.outlet}<ChevronRight size={14} aria-hidden /></span>
-        <b className={`srow__val srow__val--${scoreTone(n)}`}>{formatScoreValue(s)}<small>{scoreSuffix(s)}</small></b>
+        <span className="srow__outlet">{s.outlet}{props.as === 'a' ? <ExternalLink size={13} aria-hidden /> : <ChevronRight size={14} aria-hidden />}</span>
+        <b className={`srow__val srow__val--${tone}`}>{formatScoreValue(s)}<small>{scoreSuffix(s)}</small></b>
       </span>
-      <span className="srow__bar"><i className={`srow__fill srow__fill--${scoreTone(n)}`} style={{ width: `${n}%` }} /></span>
+      <span className="srow__bar"><i className={`srow__fill srow__fill--${tone}`} style={{ width: `${n}%` }} /></span>
       {s.reviewCount ? <span className="srow__meta">{s.reviewCount.toLocaleString('en-US')} reviews</span> : null}
-    </button>
+    </ScoreLink>
   );
 }
 

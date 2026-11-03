@@ -19,3 +19,11 @@ describe('scorePreview', () => {
     expect(p.quote).toBeUndefined();
   });
 });
+
+describe('scoreHasText', () => {
+  it('is true with a same-outlet excerpt, false for a bare number', async () => {
+    const { scoreHasText } = await import('./previews');
+    expect(scoreHasText({ outlet: 'The Guardian', score: 4, scale: 5, url: 'u' }, details)).toBe(true);
+    expect(scoreHasText({ outlet: 'Pitchfork', score: 8, scale: 10, url: 'u' }, details)).toBe(false);
+  });
+});

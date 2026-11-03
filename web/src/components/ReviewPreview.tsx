@@ -6,7 +6,7 @@ import { browseApi } from '../browseApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { hostOf } from '../lib/format';
 import { highlightSegments } from '../lib/reviewContext';
-import { formatScoreValue, normalizeScore, scoreSuffix, scoreTone } from '../lib/scores';
+import { formatScoreValue, normalizeScore, scoreSuffix } from '../lib/scores';
 import { usePreview, type PreviewItem } from '../store/preview';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])';
@@ -107,6 +107,7 @@ function Summary({ item, onOpenOriginal }: { item: PreviewItem; onOpenOriginal()
   const s = item.score;
   const n = s ? normalizeScore(s) : 0;
   const ctx = item.context;
+  const tone = item.quote || (ctx && ctx.sentences.length > 0) ? 'text' : 'notext';
   const attr = item.attribution ?? (ctx && ctx.sentences.length > 0 ? { source: ctx.source, url: ctx.url } : undefined);
   return (
     <>
@@ -116,8 +117,8 @@ function Summary({ item, onOpenOriginal }: { item: PreviewItem; onOpenOriginal()
 
       {s && (
         <div className="pv__score" aria-label={`Score ${formatScoreValue(s)} out of ${s.scale}`}>
-          <b className={`pv__val pv__val--${scoreTone(n)}`}>{formatScoreValue(s)}<small>{s.scale >= 100 ? ' / 100' : ` ${scoreSuffix(s)}`}</small></b>
-          <span className="srow__bar"><i className={`srow__fill srow__fill--${scoreTone(n)}`} style={{ width: `${n}%` }} /></span>
+          <b className={`pv__val pv__val--${tone}`}>{formatScoreValue(s)}<small>{s.scale >= 100 ? ' / 100' : ` ${scoreSuffix(s)}`}</small></b>
+          <span className="srow__bar"><i className={`srow__fill srow__fill--${tone}`} style={{ width: `${n}%` }} /></span>
           <span className="pv__meta">{s.reviewCount ? `${s.reviewCount.toLocaleString('en-US')} ratings · ` : ''}normalised {Math.round(n)}/100</span>
         </div>
       )}
