@@ -11,7 +11,7 @@ export function Sidebar() {
   const toggle = useUi((s) => s.toggleSidebar);
   return (
     <nav className={`side${collapsed ? ' side--collapsed' : ''}`} aria-label="Library">
-      <div className="side__brand"><Logo size={26} /><span className="side__word">rune</span></div>
+      <div className="side__brand"><Logo size={40} /><span className="side__word">rune</span></div>
       <div className="side__group">
         <NavLink to="/" end className={item} title="Home"><Home size={18} /><span>Home</span></NavLink>
         <NavLink to="/albums" className={item} title="Albums" end={false}><Disc3 size={18} /><span>Albums</span></NavLink>
