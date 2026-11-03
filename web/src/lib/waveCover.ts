@@ -126,14 +126,15 @@ export function coverField(kind: GenKind, t: number, w: number, h: number, into 
   return into;
 }
 
-/** How strongly a kind's ASCII header lights cell (x, y) at t (0..1). The wave is asciiWaveAt. */
+/** How strongly a kind's ASCII header lights cell (x, y) at t (0..1). The wave is asciiWaveAt; the bands of the
+    others are wide enough that each sea is about as busy as the wave's. */
 export function asciiAt(kind: GenKind, x: number, y: number, t: number): number {
   const line = (d: number, wdt: number) => Math.exp(-((d / wdt) ** 2));
   if (kind === 'wave') return asciiWaveAt(x, y, t);
   if (kind === 'ripple') {
     const r = Math.hypot((x - 0.62) * 2.6, y - 0.5);
-    return line(frac(r * 2.6 - 0.3 * t) - 0.5, 0.11) * (1 - smooth(0.7, 1.6, r));
+    return line(frac(r * 2.6 - 0.3 * t) - 0.5, 0.26) * (1 - smooth(1.3, 2.6, r));
   }
-  if (kind === 'aurora') return line(frac(2.4 * x + 0.12 * Math.sin(TAU * y + 0.4 * t) + 0.04 * t) - 0.5, 0.09) * (1 - 0.45 * y);
-  return line(frac(1.7 * x + 0.9 * y - 0.11 * t) - 0.5, 0.1);
+  if (kind === 'aurora') return line(frac(2.4 * x + 0.12 * Math.sin(TAU * y + 0.4 * t) + 0.04 * t) - 0.5, 0.28) * (1 - 0.2 * y);
+  return line(frac(1.7 * x + 0.9 * y - 0.11 * t) - 0.5, 0.25);
 }
