@@ -34,14 +34,7 @@ export function Ambient() {
         npOpen ? null : (
           <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={page ?? colour} />}</Suspense>
         )
-      ) : (
-        <>
-          <i className="ambient__l ambient__l--blue" />
-          <i className="ambient__l ambient__l--purple" />
-          <i className="ambient__l ambient__l--slate" />
-          <i className="ambient__l ambient__l--green" />
-        </>
-      )}
+      ) : null}
     </div>
   );
 }

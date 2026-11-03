@@ -14,12 +14,16 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'cycle' | 'blue' | 'purple' | 'slate' | 'green' | 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-cycle' | 'dither-album';
-export const AMBIENTS: Ambient[] = ['cycle', 'blue', 'purple', 'slate', 'green', 'off'];
+export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-cycle' | 'dither-album';
+/** Non-Dither choices: only Off (plain dark) is left; the old gradient backdrops were removed. */
+export const AMBIENTS: Ambient[] = ['off'];
+/** The removed gradient backdrops, mapped to the nearest Dither colour for anyone who still has one saved. */
+const RETIRED_AMBIENT: Record<string, Ambient> = { cycle: 'dither-cycle', blue: 'dither-blue', purple: 'dither-purple', slate: 'dither-blue', green: 'dither-green' };
+const upgradeAmbient = (v: unknown): unknown => (typeof v === 'string' && v in RETIRED_AMBIENT ? RETIRED_AMBIENT[v] : v);
 /** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
 export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-cycle', 'dither-album'];
 export const AMBIENT_LABEL: Record<Ambient, string> = {
-  cycle: 'Cycle', blue: 'Blue', purple: 'Purple', slate: 'Slate', green: 'Green', off: 'Off',
+  off: 'Off',
   dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album',
 };
 const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
@@ -33,8 +37,11 @@ function loadAmbient(): Ambient {
   try {
     let q = new URLSearchParams(location.search).get('ambient');
     if (q === 'dither-red') q = 'dither';
+    q = upgradeAmbient(q) as string | null;
     if (isAmbient(q)) { ambientFromUrl = true; localStorage.setItem('rune.ambient', q); return q; }
-    v = localStorage.getItem('rune.ambient');
+    const raw = localStorage.getItem('rune.ambient');
+    v = upgradeAmbient(raw);
+    if (v !== raw && isAmbient(v)) localStorage.setItem('rune.ambient', v);
   } catch { /* storage blocked */ }
   return isAmbient(v) ? v : 'dither';
 }
@@ -59,7 +66,7 @@ const PAGE_BG: Partial<Record<Ambient, string>> = { off: '#0f1013' };
 function applyAmbient(a: Ambient) {
   if (typeof document === 'undefined') return; // node (unit tests): nothing to paint
   document.documentElement.dataset.ambient = a;
-  const bg = a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#00161c';
+  const bg = a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#000000';
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute('content', bg);
 }
 
@@ -129,12 +136,16 @@ async function syncAmbient(dir: 'pull' | 'push', a?: Ambient): Promise<void> {
     }
     const res = await fetch('/api/settings/ambient');
     if (!res.ok) return;
-    const { ambient } = (await res.json()) as { ambient: unknown };
+    const { ambient: shared } = (await res.json()) as { ambient: unknown };
+    const ambient = upgradeAmbient(shared);
+    // the server still holds a retired gradient choice: store its Dither replacement for every device
+    if (ambient !== shared && isAmbient(ambient)) void syncAmbient('push', ambient);
     if (!isAmbient(ambient)) {
       // nothing shared yet: offer this device's choice, but only one it actually picked (not the default)
       let picked: string | null = null;
       try { picked = localStorage.getItem('rune.ambient'); } catch { /* storage blocked */ }
-      if (isAmbient(picked)) void syncAmbient('push', picked);
+      const mine = upgradeAmbient(picked);
+      if (isAmbient(mine)) void syncAmbient('push', mine);
       return;
     }
     if (ambient === useUi.getState().ambient) return;

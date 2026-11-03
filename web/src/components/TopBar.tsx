@@ -89,8 +89,8 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
             <VolumeLevel />
             <MenuItem icon={<Copy size={16} />} onClick={() => { close(); nav('/duplicates'); }}>Duplicates…</MenuItem>
             <MenuItem icon={<Activity size={16} />} onClick={() => { close(); nav('/settings'); }}>Server status…</MenuItem>
-            <div className="popover__title">Ambient colours</div>
-            {[...AMBIENTS, ...DITHER_AMBIENTS].map((a) => (
+            <div className="popover__title">Background</div>
+            {[...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
               <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>
                 <i className={`ambdot ambdot--${a}`} />
                 <span>{AMBIENT_LABEL[a]}</span>
