@@ -29,14 +29,32 @@ function useBackdropPalette(): DitherPalette {
 }
 
 /**
- * The in-app mark: three dots in the backdrop's colour that pop up one after another and fade, like a "working"
- * indicator. Static with reduced motion. (The old static mark is still at web/public/icons/mark.svg.)
+ * The in-app mark: four dots on the corners of a square, in the backdrop's colour. One diagonal pair at a time floats
+ * across to swap corners (bowing apart so they pass each other), then the other pair. Static with reduced motion.
+ * (The old static mark is still at web/public/icons/mark.svg.)
  */
 export function Logo({ size = 28 }: { size?: number }) {
   const pal = useBackdropPalette();
+  // dot centres sit on a square 48% of the box wide; a pair travels the diagonal and bows 12% apart mid-way
+  const diag = size * 0.48 * Math.SQRT2;
+  const vars = {
+    width: size,
+    height: size,
+    ['--dot-c' as string]: css(pal.light),
+    ['--dot-d' as string]: `${size * 0.2}px`,
+    ['--dot-L' as string]: `${diag}px`,
+    ['--dot-o' as string]: `${size * 0.12}px`,
+  };
+  const pair = (cls: string) => (
+    <span className={`dotlogo__pair ${cls}`}>
+      <b className="dotlogo__x dotlogo__x--1"><i className="dotlogo__y dotlogo__y--1" /></b>
+      <b className="dotlogo__x dotlogo__x--2"><i className="dotlogo__y dotlogo__y--2" /></b>
+    </span>
+  );
   return (
-    <span className="dotlogo" style={{ width: size, height: size, ['--dot-c' as string]: css(pal.light), ['--dot-m' as string]: css(pal.mid) }} aria-hidden>
-      <i /><i /><i />
+    <span className="dotlogo" style={vars} aria-hidden>
+      {pair('dotlogo__pair--a')}
+      {pair('dotlogo__pair--b')}
     </span>
   );
 }
