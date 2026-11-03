@@ -279,3 +279,8 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .dotpick .muted { font-size: 12.5px; }
 .ambientpick__item:hover { background: color-mix(in srgb, #fff 6%, transparent); color: var(--text); }
 .ambientpick__item.is-current { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--text); }
+.keyspick { margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
+.keyspick__list { list-style: none; margin: 0; padding: 12px 0 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 18px; font-size: 13.5px; }
+.keyspick__list li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.keyspick__list kbd { flex: none; min-width: 26px; text-align: center; font: 600 11.5px var(--sans); color: var(--text-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; background: var(--surface); }
+.keyspick__list span { color: var(--text-2); }

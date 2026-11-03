@@ -1,6 +1,7 @@
 import { clientLog } from '../clientLog';
 import { create } from 'zustand';
 import type { DitherPalette, DotSize } from '../lib/dither';
+import { validAlbumKey } from '../lib/keys';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -79,6 +80,9 @@ interface UiStore {
   pagePalette: DitherPalette | null;
   setPagePalette(p: DitherPalette | null): void;
   sidebarCollapsed: boolean;
+  /** Key that opens the playing song's album ('' = off). Per device: keyboards differ. */
+  albumKey: string;
+  setAlbumKey(k: string): void;
   queueOpen: boolean;
   nowPlayingOpen: boolean;
   notice: { id: number; text: string } | null;
@@ -109,6 +113,12 @@ export const useUi = create<UiStore>((set) => ({
   pagePalette: null,
   setPagePalette: (pagePalette) => set({ pagePalette }),
   sidebarCollapsed: load('rune.sidebar', false),
+  albumKey: validAlbumKey(load<unknown>('rune.albumKey', undefined)),
+  setAlbumKey: (k) => {
+    const albumKey = validAlbumKey(k);
+    save('rune.albumKey', albumKey);
+    set({ albumKey });
+  },
   queueOpen: false,
   nowPlayingOpen: false,
   notice: null,

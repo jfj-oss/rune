@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Check, Database, HardDrive, Palette, Plug, RefreshCw, Server } from 'lucide-react';
+import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server } from 'lucide-react';
 import { Empty } from '../components/Rows';
 import { http, isMock } from '../api';
 import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { LibraryTabs } from './Albums';
 import { formatBytes, formatListening, formatStamp } from '../lib/discover';
+import { ALBUM_KEY_CHOICES, FIXED_KEYS } from '../lib/keys';
 import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
 
 interface SpotifyUsage {
@@ -83,6 +84,33 @@ function AmbientPicker() {
   );
 }
 
+/** The single-key shortcuts, plus the one key the user picks for "go to the playing album". */
+function KeyboardCard() {
+  const albumKey = useUi((s) => s.albumKey);
+  const setAlbumKey = useUi((s) => s.setAlbumKey);
+  return (
+    <section className="statuscard keyspick">
+      <h2 className="statuscard__head"><Keyboard size={17} /> Keyboard</h2>
+      <p className="muted">Work anywhere in rune, except while typing. The album key is saved on this device.</p>
+      <div className="dotpick">
+        <div><b>Go to the playing album</b><span className="muted">Keys rune already uses are left out</span></div>
+        <label className="select">
+          <span>Key</span>
+          <select value={albumKey} onChange={(e) => setAlbumKey(e.target.value)} aria-label="Key for the playing album">
+            <option value="">Off</option>
+            {ALBUM_KEY_CHOICES.map((k) => <option key={k} value={k}>{k.toUpperCase()}</option>)}
+          </select>
+        </label>
+      </div>
+      <ul className="keyspick__list">
+        {FIXED_KEYS.map((k) => (
+          <li key={k.key}><kbd>{k.label}</kbd><span>{k.does}</span></li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const OPTIONAL_JOB_LABEL: Record<string, string> = { matching: 'Metadata matching', details: 'Album details', loudness: 'Loudness analysis' };
 
 export default function Settings() {
@@ -96,7 +124,7 @@ export default function Settings() {
       <header className="libhead">
         <div>
           <h1 className="pagehead__title">Settings</h1>
-          <p className="pagehead__sub">Background and server status</p>
+          <p className="pagehead__sub">Background, keyboard and server status</p>
         </div>
         <div className="libhead__actions">
           <button className="btn btn--sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
@@ -106,6 +134,7 @@ export default function Settings() {
       </header>
 
       <AmbientPicker />
+      <KeyboardCard />
 
       {q.isError ? (
         <Empty title="Could not reach the rune server" icon={<Server size={28} />}>

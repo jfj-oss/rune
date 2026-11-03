@@ -1,5 +1,8 @@
 import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { encId } from '../lib/format';
 import { usePlayer } from '../store/player';
+import { useUi } from '../store/ui';
 import { shownVolume, useVolumeHold } from '../store/volumeHold';
 
 /** Typing places keep the space bar for themselves. */
@@ -19,9 +22,22 @@ const VOLUME_STEP = 5;
 /** Sends at most one volume change per this many ms while a key is held (Spotify rate limits). */
 const VOLUME_SEND_MS = 150;
 
-/** Space = play / pause, E / R = volume down / up, 1 / 2 / 3 = previous / restart / next, anywhere on the page (not while typing). */
+/**
+ * Space = play / pause, E / R = volume down / up, 1 / 2 / 3 = previous / restart / next, Z = Home,
+ * X = Playlists, and the key chosen in Settings (A by default) = the playing song's album.
+ * Anywhere on the page, not while typing.
+ */
 export function KeyboardShortcuts() {
+  const navigate = useNavigate();
   useEffect(() => {
+    /** Leave the full-screen player and queue so the page that opens is visible. */
+    const go = (path: string) => {
+      const ui = useUi.getState();
+      ui.setNowPlayingOpen(false);
+      ui.setQueueOpen(false);
+      navigate(path);
+    };
+
     // the volume being aimed at: held keys step from it, not from the (lagging) reported volume
     let target: number | null = null;
     let lastKey = 0;
@@ -59,6 +75,20 @@ export function KeyboardShortcuts() {
 
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target);
+      const albumKey = useUi.getState().albumKey;
+      if (plain && (k === 'z' || k === 'x' || (albumKey && k === albumKey))) {
+        e.preventDefault();
+        if (e.repeat) return;
+        if (k === 'z') go('/');
+        else if (k === 'x') go('/playlists');
+        else {
+          const { state } = usePlayer.getState();
+          const album = state.queue[state.index]?.album;
+          if (album?.id && album.id !== 'sp:unknown') go(`/album/${encId(album.id)}`);
+        }
+        return;
+      }
       if ((k === 'e' || k === 'r') && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
         e.preventDefault();
         stepVolume(k === 'r' ? 1 : -1);
@@ -90,6 +120,6 @@ export function KeyboardShortcuts() {
       window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up, true);
     };
-  }, []);
+  }, [navigate]);
   return null;
 }
