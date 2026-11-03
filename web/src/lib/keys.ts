@@ -8,6 +8,7 @@ export const FIXED_KEYS: { key: string; label: string; does: string }[] = [
   { key: '3', label: '3', does: 'Next song' },
   { key: 'z', label: 'Z', does: 'Home' },
   { key: 'x', label: 'X', does: 'Playlists' },
+  { key: 'f', label: 'F', does: 'Shuffle-play the open playlist' },
   { key: '/', label: '/', does: 'Search' },
 ];
 

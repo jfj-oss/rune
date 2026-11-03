@@ -4,6 +4,7 @@ import { ArrowDownWideNarrow, Check, Copy, Download, GripVertical, HardDrive, Li
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PlaylistHotkey } from '../components/PlaylistHotkey';
+import { keyCapture } from '../lib/keys';
 import { api, coverSrc } from '../api';
 import { Cover } from '../components/Cover';
 import { Dialog } from '../components/Dialog';
@@ -59,6 +60,21 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const bgSrc = d.imageUrl ?? (d.tracks[0] ? coverSrc(d.tracks[0].album, 200) : undefined);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // F = shuffle-play this playlist (not while typing or while a hotkey button is listening)
+  const playRef = useRef(play);
+  playRef.current = play;
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'f' || e.metaKey || e.ctrlKey || e.altKey || e.repeat || keyCapture.active) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      e.preventDefault();
+      void playRef.current(d.id, { shuffle: true });
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [d.id]);
+
   const duplicate = async () => {
     const copy = await actions.duplicate(d.id);
     if (copy) nav(`/playlist/${encId(copy.id)}`);
@@ -108,7 +124,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
             </div>
             <div className="ahero__actions">
               <button className="btn btn--primary" onClick={() => void play(d.id)}><Play size={18} fill="currentColor" /> Play</button>
-              <button className="btn" onClick={() => void play(d.id, { shuffle: true })}><Shuffle size={17} /> Shuffle</button>
+              <button className="btn" onClick={() => void play(d.id, { shuffle: true })} title="Shuffle (F)"><Shuffle size={17} /> Shuffle</button>
               <button className="btn" onClick={() => void enqueue(d.id)}><Plus size={18} /> Queue</button>
               {canSort && (
                 <button className="btn" onClick={() => setOrder(order === 'added' ? 'playlist' : 'added')} title="Change the track order">
