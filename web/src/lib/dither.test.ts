@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   bayer, blueNoise, CYCLE_FADE, CYCLE_HOLD, CYCLE_ORDER, DITHER_PALETTES, calmFor, ditherLevel, dotSize, field, paletteAt,
-  densities, MASK, toneCurve,
+  densities, MASK, toneCurve, mixAt, modulatorsAt, currentAt, EVOLVE,
 } from './dither';
 
 describe('bayer', () => {
@@ -226,5 +226,65 @@ describe('paletteFromColour', () => {
     expect(Math.abs(grey.light[0]! - grey.light[2]!)).toBeLessThan(40);
     expect(paletteFromColour('nonsense')).toBeNull();
     expect(parseCssColour('rgb(1, 2, 3)')).toEqual([1, 2, 3]);
+  });
+});
+
+describe('evolution schedule', () => {
+  const sum = (m: number[]) => m.reduce((a, b) => a + b, 0);
+  it('starts as pure drift and holds it for the first minute', () => {
+    expect(mixAt(0)).toEqual([1, 0, 0, 0]);
+    expect(mixAt(-5)).toEqual([1, 0, 0, 0]);
+    expect(mixAt(EVOLVE.firstEnd - 40)).toEqual([1, 0, 0, 0]);
+  });
+  it('weights always sum to 1 and never jump (smooth crossfades)', () => {
+    let prev = mixAt(0);
+    for (let t = 0.5; t < 6000; t += 0.5) {
+      const m = mixAt(t);
+      expect(sum(m)).toBeCloseTo(1, 9);
+      for (const w of m) expect(w).toBeGreaterThanOrEqual(0);
+      // a 20 s+ smoothstep fade moves at most 1.5 / 20 = 7.5 % of the weight per second
+      for (let i = 0; i < 4; i++) expect(Math.abs(m[i]! - prev[i]!)).toBeLessThan(0.08 * 0.5 + 0.002);
+      prev = m;
+    }
+  });
+  it('visits every character, never two crossfades at once, and is deterministic', () => {
+    const seen = new Set<number>();
+    for (let t = 0; t < 6000; t += 5) {
+      const m = mixAt(t);
+      expect(m.filter((w) => w > 0).length).toBeLessThanOrEqual(2);
+      m.forEach((w, i) => { if (w > 0.999) seen.add(i); });
+    }
+    expect([...seen].sort()).toEqual([0, 1, 2, 3]);
+    expect(mixAt(1234.5)).toEqual(mixAt(1234.5));
+  });
+  it('is not a fixed loop: segment lengths vary', () => {
+    const changes: number[] = [];
+    let cur = -1;
+    for (let t = 0; t < 4000; t += 1) { const k = mixAt(t).findIndex((w) => w > 0.999); if (k >= 0 && k !== cur) { changes.push(t); cur = k; } }
+    const gaps = changes.slice(1).map((v, i) => v - changes[i]!);
+    expect(new Set(gaps).size).toBeGreaterThan(3);
+    expect(Math.min(...gaps)).toBeGreaterThan(60);
+  });
+  it('modulators and currents stay small and smooth', () => {
+    let prev = modulatorsAt(0);
+    for (let t = 1; t < 3000; t++) {
+      const m = modulatorsAt(t);
+      expect(Math.abs(m.ang)).toBeLessThan(0.7);
+      expect(m.zoom).toBeGreaterThan(0.84);
+      expect(m.zoom).toBeLessThan(1.16);
+      expect(m.time - prev.time).toBeGreaterThan(0.6); // the warped clock never runs backwards or stalls
+      expect(m.time - prev.time).toBeLessThan(1.4);
+      prev = m;
+      const c = currentAt(t);
+      expect(c.amp).toBeGreaterThanOrEqual(0);
+      expect(c.amp).toBeLessThanOrEqual(0.23);
+      expect(Math.hypot(c.dx, c.dy)).toBeCloseTo(1, 9);
+    }
+  });
+  it('currents are occasional and fade in and out', () => {
+    let on = 0, off = 0;
+    for (let k = 0; k < 40; k++) { const mid = currentAt((k + 0.5) * 95).amp; if (mid > 0.05) on++; else off++; expect(currentAt(k * 95 + 0.01).amp).toBeLessThan(0.001); }
+    expect(on).toBeGreaterThan(5);
+    expect(off).toBeGreaterThan(3);
   });
 });

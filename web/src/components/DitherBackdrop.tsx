@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   blueNoise, calmFor, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
-  WAVE, waveAt, wavePeakExponent, type DitherColour, type DitherPalette,
+  WAVE, waveAt, wavePeakExponent, mixAt, modulatorsAt, currentAt, type DitherColour, type DitherPalette,
 } from '../lib/dither';
 import { backdropFrameMs } from '../lib/frameRate';
 import { currentItem, usePlayer } from '../store/player';
@@ -26,6 +26,11 @@ function noise(): Uint8Array {
 
 const VERT = `attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }`;
 
+/** Shape numbers of the non-drift characters (shader constants; tuned for similar coverage to drift). */
+const TIDE = { k1: 13, k2: 8.5, gain: 1.2, lo: 0.36, hi: 0.96 };
+const RIPPLE = { k: 21, norm: 1.0, gain: 1.15, lo: 0.1, hi: 0.8 };
+const AURORA = { k1: 11, k2: 17, gain: 1.3, lo: 0.2, hi: 0.72, floor: 0.15 };
+
 const g = (n: number) => (Number.isInteger(n) ? n.toFixed(1) : String(n));
 const poolGlsl = POOLS.map((b) =>
   `f += ${g(b.w)} * pool(w, vec2(${g(b.bx)} * u_aspect + ${g(b.ax)} * u_aspect * sin(t * ${g(b.wx)} + ${g(b.px)}), ` +
@@ -48,6 +53,9 @@ uniform float u_wave;   // new-song wave: how far the shapes have swelled out, 0
 uniform float u_calm;   // share of dots kept (the phone's fine grain is sparser)
 uniform float u_wexp;   // field exponent at the wave's peak (wavePeakExponent)
 uniform sampler2D u_noise;
+uniform vec4 u_mix;     // weights of the field characters: drift, tide, ripple, aurora (sum 1; see mixAt)
+uniform vec3 u_mod;     // flow angle, zoom, warped clock (modulatorsAt)
+uniform vec4 u_cur;     // travelling current: direction xy, position, strength (currentAt)
 
 float hash2(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -68,11 +76,53 @@ void main() {
   vec2 w = q + ${g(WARP.amp)} * (vec2(
     vnoise(vec2(q.x * ${g(WARP.freq)} + t * ${g(WARP.speed)}, q.y * ${g(WARP.freq)})),
     vnoise(vec2(q.x * ${g(WARP.freq)} + 7.1, q.y * ${g(WARP.freq)} - t * ${g(WARP.speed * 0.8)}))) - 0.5);
-  float f = 0.0;
+  float fdr = 0.0, f2 = 0.0; // weighted sum of squares: an energy-preserving crossfade (coverage does not dip midway)
+  if (u_mix.x > 0.0) {
+    float f = 0.0;
   ${poolGlsl}
-  float xn = w.x / u_aspect;
-  float d;
-  ${ribbonGlsl}
+    float xn = w.x / u_aspect;
+    float d;
+    ${ribbonGlsl}
+    fdr = f;
+    f2 += u_mix.x * f * f;
+  }
+  if (u_mix.x < 1.0) {
+    // the other characters share a rotated, zoomed frame around the screen centre, a stronger version of the
+    // same slow warp, and one travelling current
+    float tt = u_mod.z;
+    vec2 c = vec2(0.5 * u_aspect, 0.5);
+    float ca = cos(u_mod.x), sa = sin(u_mod.x);
+    vec2 r0 = (q + 2.2 * (w - q) - c) / (u_rs * u_mod.y);
+    vec2 p = vec2(ca * r0.x - sa * r0.y, sa * r0.x + ca * r0.y);
+    float cd = dot(q - c, u_cur.xy) - u_cur.z;
+    float cur = u_cur.w * exp(-cd * cd / 0.03);
+    if (u_mix.y > 0.0) { // tide: two layers of broad horizontal swells, warped by a little noise
+      float s1 = 0.5 + 0.5 * sin(p.y * ${g(TIDE.k1)} + tt * 0.11 + 1.1 * sin(p.x * 1.3 + tt * 0.04) + 2.0 * vnoise(vec2(p.x * 0.9, tt * 0.02)));
+      float s2 = 0.5 + 0.5 * sin(p.y * ${g(TIDE.k2)} - tt * 0.07 + 0.9 * sin(p.x * 0.8 - tt * 0.03 + 2.0));
+      float ft = ${g(TIDE.gain)} * smoothstep(${g(TIDE.lo)}, ${g(TIDE.hi)}, 0.6 * s1 + 0.4 * s2) + cur;
+      f2 += u_mix.y * ft * ft;
+    }
+    if (u_mix.z > 0.0) { // ripple: rings from two slowly wandering centres, fading with distance, interfering
+      vec2 c1 = vec2(0.15 * sin(tt * 0.013), 0.1 + 0.12 * cos(tt * 0.017));
+      vec2 c2 = vec2(0.55 * sin(tt * 0.011 + 2.0) - 0.2, 0.2 * cos(tt * 0.014 + 1.0));
+      float r1 = length(p - c1), r2 = length(p - c2);
+      float a1 = smoothstep(0.4, 1.0, 0.5 + 0.5 * sin(r1 * ${g(RIPPLE.k)} - tt * 0.42));
+      float a2 = smoothstep(0.4, 1.0, 0.5 + 0.5 * sin(r2 * ${g(RIPPLE.k * 0.8)} - tt * 0.34 + 1.7));
+      float v = (a1 * exp(-r1 * r1 * 1.6) + 0.8 * a2 * exp(-r2 * r2 * 2.4)) * ${g(RIPPLE.norm)};
+      float fr = ${g(RIPPLE.gain)} * smoothstep(${g(RIPPLE.lo)}, ${g(RIPPLE.hi)}, v) + cur;
+      f2 += u_mix.z * fr * fr;
+    }
+    if (u_mix.w > 0.0) { // aurora: tall curtains that sway, brighter near the top
+      float sway = 0.7 * sin(p.y * 2.1 + tt * 0.06) + 0.35 * sin(p.y * 4.3 - tt * 0.05 + 1.0) + 1.2 * vnoise(vec2(p.x * 0.7, p.y * 0.8 + tt * 0.015));
+      float c1 = 0.5 + 0.5 * sin(p.x * ${g(AURORA.k1)} + sway + tt * 0.045);
+      float c2 = 0.5 + 0.5 * sin(p.x * ${g(AURORA.k2)} - sway * 0.7 - tt * 0.035 + 2.0);
+      float shimmer = 0.82 + 0.18 * vnoise(vec2(p.x * 9.0, p.y * 1.4 - tt * 0.07));
+      float top = ${g(AURORA.floor)} + (1.0 - ${g(AURORA.floor)}) * (1.0 - smoothstep(-0.55, 0.65, p.y));
+      float fa = ${g(AURORA.gain)} * smoothstep(${g(AURORA.lo)}, ${g(AURORA.hi)}, 0.6 * c1 + 0.4 * c2) * shimmer * top + cur;
+      f2 += u_mix.w * fa * fa;
+    }
+  }
+  float f = u_mix.x >= 1.0 ? fdr : sqrt(f2); // pure drift stays bit-identical to the original field
   // new-song wave: the shapes already on screen swell outwards (lifting the field fills their faint edges
   // first) and draw back in. A gentle ripple rides the growing edge; its phase follows the swell itself
   // (out while growing, back while shrinking), so it never jumps or flickers.
@@ -136,6 +186,7 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     const u = (n: string) => gl.getUniformLocation(prog, n);
     const uRes = u('u_res'), uAspect = u('u_aspect'), uT = u('u_t'), uMid = u('u_mid'), uLight = u('u_light'), uRs = u('u_rs');
+    const uMix = u('u_mix'), uMod = u('u_mod'), uCur = u('u_cur');
     const uWave = u('u_wave'), uWexp = u('u_wexp'), uCalm = u('u_calm');
     gl.uniform1i(u('u_noise'), 0);
     return {
@@ -150,6 +201,10 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
       },
       draw(t, pal, wave = NO_WAVE) {
         gl.uniform1f(uT, t);
+        const m = mixAt(t), md = modulatorsAt(t), cu = currentAt(t);
+        gl.uniform4f(uMix, m[0], m[1], m[2], m[3]);
+        gl.uniform3f(uMod, md.ang, md.zoom, md.time);
+        gl.uniform4f(uCur, cu.dx, cu.dy, cu.pos, cu.amp);
         gl.uniform1f(uWave, wave.amt);
         gl.uniform3f(uMid, pal.mid[0], pal.mid[1], pal.mid[2]);
         gl.uniform3f(uLight, pal.light[0], pal.light[1], pal.light[2]);

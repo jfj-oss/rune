@@ -372,3 +372,91 @@ export function paletteFromColour(css: string): DitherPalette | null {
 export function mixPalette(a: DitherPalette, b: DitherPalette, k: number): DitherPalette {
   return { light: lerpRgb(a.light, b.light, k), mid: lerpRgb(a.mid, b.mid, k) };
 }
+
+/* ---------- evolution ----------
+   The animation is not one fixed pattern: the field slowly wanders between four characters, each a different
+   field function in the shader. Drift is today's look (and where every session starts), Tide is broad rolling
+   horizontal bands, Ripple is soft interfering rings around wandering centres, Aurora is tall swaying curtains.
+   Which one is shown is a set of weights computed here (pure, deterministic in t) and handed to the shader;
+   the weights glide through long crossfades, so there is never a cut. Order and timing come from a seeded
+   random sequence, so it does not read as a loop. Alongside, a few slow modulators (flow direction, zoom, speed,
+   an occasional travelling current) keep each character from looking the same every time it returns. */
+
+/** 0 drift, 1 tide, 2 ripple, 3 aurora. */
+export type Character = 0 | 1 | 2 | 3;
+export const CHARACTERS = ['drift', 'tide', 'ripple', 'aurora'] as const;
+export type Mix = [number, number, number, number];
+
+interface Segment { char: Character; /** centre of the crossfade into the next segment (s) */ end: number; /** length of that crossfade (s) */ fade: number }
+const plan: Segment[] = [];
+let planRng: (() => number) | null = null;
+let bag: Character[] = [];
+let lastChar: Character = 0;
+export const EVOLVE = { firstEnd: 75, holdMin: 80, holdSpread: 60, fadeMin: 20, fadeSpread: 20, seed: 20261103 };
+
+function nextChar(): Character {
+  const r = planRng!;
+  if (!bag.length) {
+    bag = [0, 1, 2, 3];
+    for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [bag[i], bag[j]] = [bag[j]!, bag[i]!]; }
+    // never the same character twice running across bag boundaries
+    if (bag[bag.length - 1] === lastChar) { const k = Math.floor(r() * (bag.length - 1)); [bag[k], bag[bag.length - 1]] = [bag[bag.length - 1]!, bag[k]!]; }
+  }
+  lastChar = bag.pop()!;
+  return lastChar;
+}
+function extendPlan(t: number) {
+  if (!planRng) {
+    planRng = rng(EVOLVE.seed);
+    lastChar = 0;
+    plan.push({ char: 0, end: EVOLVE.firstEnd, fade: EVOLVE.fadeMin + planRng() * EVOLVE.fadeSpread });
+  }
+  const r = planRng;
+  // keep one segment beyond t
+  while (plan[plan.length - 1]!.end - plan[plan.length - 1]!.fade / 2 <= t) {
+    const prev = plan[plan.length - 1]!;
+    plan.push({ char: nextChar(), end: prev.end + EVOLVE.holdMin + r() * EVOLVE.holdSpread, fade: EVOLVE.fadeMin + r() * EVOLVE.fadeSpread });
+  }
+}
+
+/** Weights (sum 1) of the four characters at time t seconds. Starts as pure drift; crossfades are smoothstepped. */
+export function mixAt(t: number): Mix {
+  const m: Mix = [0, 0, 0, 0];
+  if (!(t > 0)) { m[0] = 1; return m; }
+  extendPlan(t);
+  // segments whose fade starts after t are not reached: find the first fade that has not finished
+  let lo = 0, hi = plan.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; const s = plan[mid]!; if (s.end + s.fade / 2 > t) hi = mid; else lo = mid + 1; }
+  const s = plan[lo]!;
+  const from = s.end - s.fade / 2;
+  if (t < from) { m[s.char] = 1; return m; }
+  const k = smoothstep(0, 1, (t - from) / s.fade);
+  m[s.char] = 1 - k;
+  const next = plan[lo + 1]?.char ?? s.char;
+  m[next] = (m[next] ?? 0) + k;
+  return m;
+}
+
+/** Slow modulators for the non-drift characters. `ang` rotates the flow, `zoom` scales feature size,
+    `time` is a warped clock (speed varies about +-25%). All smooth sums of slow sines. */
+export function modulatorsAt(t: number): { ang: number; zoom: number; time: number } {
+  return {
+    ang: 0.45 * Math.sin(t / 97 + 0.7) + 0.2 * Math.sin(t / 41 + 2.1),
+    zoom: 1 + 0.1 * Math.sin(t / 61 + 1) + 0.05 * Math.sin(t / 29),
+    time: t + 8 * Math.sin(t / 47) + 2 * Math.sin(t / 23 + 1),
+  };
+}
+
+/** An occasional "current": a soft band that travels across the field once every ~95 s (not every time).
+    Returns the unit direction, the band's position along it (screen heights from the centre) and its strength. */
+export const CURRENT = { period: 95, strength: 0.22 };
+export function currentAt(t: number): { dx: number; dy: number; pos: number; amp: number } {
+  const p = t / CURRENT.period;
+  const k = Math.floor(p), f = p - k;
+  const h = hash2(k * 1.7 + 3.1, 5.3);
+  const h2 = hash2(k * 2.9 + 1.3, 8.1);
+  const a = h * Math.PI * 2;
+  const on = smoothstep(0.35, 0.55, h2); // some periods have no current at all
+  const env = Math.sin(Math.PI * f);
+  return { dx: Math.cos(a), dy: Math.sin(a), pos: -0.75 + 1.5 * f, amp: CURRENT.strength * on * env * env };
+}
