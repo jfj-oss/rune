@@ -220,9 +220,8 @@
 .dotlogo__pair--b { transform: rotate(-45deg); --pair-delay: 1.3s; }
 /* each pair lies along its own x axis: dot 1 at the left end of the diagonal, dot 2 at the right */
 .dotlogo__x {
-  --s: calc(var(--dot-d) * var(--gs, 1));
+  --s: var(--dot-d);
   position: absolute; top: 50%; left: 50%; width: var(--s); height: var(--s); margin: calc(var(--s) / -2);
-  opacity: var(--ga, 1);
   /* hard acceleration, then a small overshoot past the corner that settles back */
   animation: dotlogo-x1 2.6s cubic-bezier(0.72, 0, 0.18, 1.14) infinite;
 }
@@ -230,11 +229,17 @@
 .dotlogo__x--2 { translate: calc(var(--dot-L) / 2) 0; animation-name: dotlogo-x2; }
 .dotlogo__y {
   display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--dot-c);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--dot-c) 45%, transparent); transition: background 1.2s ease, box-shadow 1.2s ease;
+  box-shadow: 0 0 3px color-mix(in srgb, var(--dot-c) 30%, transparent); transition: background 1.2s ease, box-shadow 1.2s ease;
   animation: dotlogo-y1 2.6s infinite, dotlogo-pop 2.6s infinite;
 }
 .dotlogo__y--2 { animation-name: dotlogo-y2, dotlogo-pop; }
-.dotlogo__ghost .dotlogo__y { box-shadow: none; }
+/* trail pixels: tiny squares, only there while the pair is in flight */
+.dotlogo__ghost { --s: var(--dot-px); }
+.dotlogo__ghost .dotlogo__y { border-radius: 0; box-shadow: none; translate: var(--jx) var(--jy); opacity: 0; }
+.dotlogo__ghost--mid .dotlogo__y { background: var(--dot-m); filter: brightness(1.6); }
+.dotlogo__ghost .dotlogo__y--1 { animation-name: dotlogo-y1, dotlogo-trail; }
+.dotlogo__ghost .dotlogo__y--2 { animation-name: dotlogo-y2, dotlogo-trail; }
+@keyframes dotlogo-trail { 0% { opacity: 0; } 5%, 33% { opacity: var(--ga); } 41%, 100% { opacity: 0; } }
 .dotlogo__x, .dotlogo__y { animation-delay: calc(var(--pair-delay) + var(--lag, 0ms)); }
 /* along the diagonal during the first 40% of the loop, then rest (the dots are alike, so the jump back is invisible) */
 @keyframes dotlogo-x1 { 0% { transform: translateX(0); } 40%, 100% { transform: translateX(var(--dot-L)); } }

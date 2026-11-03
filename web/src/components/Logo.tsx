@@ -4,12 +4,18 @@ import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type Dit
 import { currentItem, usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 
-/** The dot itself, then its trail: later, smaller, fainter. */
+/** The dot itself, then its trail: tiny square "dither" pixels running the same path a little later, scattered
+    around it (jx/jy in px, along/across the path), fainter the further back, alternating the light and mid tone. */
 const TRAIL = [
-  { lag: 0, size: 1, alpha: 1 },
-  { lag: 45, size: 0.86, alpha: 0.42 },
-  { lag: 90, size: 0.72, alpha: 0.24 },
-  { lag: 135, size: 0.58, alpha: 0.12 },
+  { lag: 0, alpha: 1, jx: 0.0, jy: 0.0, mid: false },
+  { lag: 28, alpha: 0.85, jx: -0.76, jy: -2.09, mid: false },
+  { lag: 50, alpha: 0.7, jx: 1.14, jy: 1.71, mid: true },
+  { lag: 74, alpha: 0.6, jx: -1.52, jy: 0.38, mid: false },
+  { lag: 98, alpha: 0.48, jx: 0.57, jy: -2.66, mid: true },
+  { lag: 124, alpha: 0.38, jx: -0.38, jy: 2.47, mid: false },
+  { lag: 150, alpha: 0.28, jx: 1.33, jy: -0.76, mid: true },
+  { lag: 178, alpha: 0.2, jx: -1.14, jy: 1.52, mid: false },
+  { lag: 206, alpha: 0.12, jx: 0.38, jy: -1.71, mid: true },
 ];
 
 const css = (c: Rgb) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;
@@ -43,20 +49,22 @@ function useBackdropPalette(): DitherPalette {
  */
 export function Logo({ size = 28 }: { size?: number }) {
   const pal = useBackdropPalette();
-  // dot centres sit on a square 48% of the box wide; a pair travels the diagonal and bows 12% apart mid-way
-  const diag = size * 0.48 * Math.SQRT2;
+  // dot centres sit on a square 36% of the box wide; a pair travels the diagonal and bows apart mid-way
+  const diag = size * 0.36 * Math.SQRT2;
   const vars = {
     width: size,
     height: size,
     ['--dot-c' as string]: css(pal.light),
-    ['--dot-d' as string]: `${size * 0.2}px`,
+    ['--dot-m' as string]: css(pal.mid),
+    ['--dot-d' as string]: `${size * 0.11}px`,
+    ['--dot-px' as string]: `${Math.max(1, size * 0.05)}px`,
     ['--dot-L' as string]: `${diag}px`,
-    ['--dot-o' as string]: `${size * 0.12}px`,
+    ['--dot-o' as string]: `${size * 0.095}px`,
   };
   // each dot is followed by fading, shrinking copies running the same path a little later: its trail
   const dot = (n: 1 | 2) =>
     TRAIL.map((t, k) => (
-      <b key={`${n}-${k}`} className={`dotlogo__x dotlogo__x--${n}${k ? ' dotlogo__ghost' : ''}`} style={{ ['--lag' as string]: `${t.lag}ms`, ['--gs' as string]: t.size, ['--ga' as string]: t.alpha }}>
+      <b key={`${n}-${k}`} className={`dotlogo__x dotlogo__x--${n}${k ? ` dotlogo__ghost${t.mid ? ' dotlogo__ghost--mid' : ''}` : ''}`} style={{ ['--lag' as string]: `${t.lag}ms`, ['--ga' as string]: t.alpha, ['--jx' as string]: `${t.jx}px`, ['--jy' as string]: `${n === 1 ? t.jy : -t.jy}px` }}>
         <i className={`dotlogo__y dotlogo__y--${n}`} />
       </b>
     )).reverse();
