@@ -139,7 +139,7 @@ void main() {
   float dM = min(1.0 - dL, pow(tau, 0.6) * ${g(MASK.mid)} * u_calm);
 
   // byte b encodes the threshold (b + 0.5) / 256, never 0 or 1, so pure black / pure light stay clean
-  float th = (texture2D(u_noise, gl_FragCoord.xy / ${NOISE_N}.0).r * 255.0 + 0.5) / 256.0;
+  float th = (texture2D(u_noise, (floor(mod(gl_FragCoord.xy, ${NOISE_N}.0)) + 0.5) / ${NOISE_N}.0).r * 255.0 + 0.5) / 256.0;
   float lvl = th < dL ? 2.0 : (th < dL + dM ? 1.0 : 0.0);
   vec3 col = lvl < 0.5 ? vec3(0.0) : (lvl < 1.5 ? u_mid : u_light);
   gl_FragColor = vec4(col / 255.0, 1.0);
