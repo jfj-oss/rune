@@ -158,7 +158,7 @@
 .np__topright { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
 .np__body { position: relative; z-index: 1; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* the player fills the first screen; reviews and about sit below it */
-.np__main { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 540px); gap: 64px; align-content: center; align-items: center; padding: 8px 72px 32px; }
+.np__main { min-height: 100%; display: grid; grid-template-columns: minmax(0, min(60vh, 50vw)) minmax(380px, 540px); justify-content: center; gap: 64px; align-content: center; align-items: center; padding: 8px 72px 32px; }
 .np__more { width: min(860px, calc(100% - 48px)); margin: 8px auto 48px; padding: 8px 28px 26px; border-radius: 16px; background: rgba(0, 0, 0, 0.62); border: 1px solid color-mix(in srgb, #fff 9%, transparent); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); display: flex; flex-direction: column; gap: 10px; }
 .np__more .np__sec { margin-top: 18px; gap: 14px; }
 .np__more .prose { color: var(--text); }
@@ -166,7 +166,7 @@
 /* Dither backdrop: black under the canvas, a soft scrim so the controls stay readable */
 .np__bg--dither { background: #000; }
 .np__bg--dither .np__bgwash { background: radial-gradient(ellipse at 70% 45%, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.2) 70%); }
-.np__art { justify-self: end; width: min(60vh, 50vw); }
+.np__art { width: 100%; }
 .np__cover { width: 100%; box-shadow: var(--shadow-hero); border-radius: 10px; }
 .np__panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .np__title { font-family: var(--serif); font-weight: 600; font-size: 34px; line-height: 1.15; letter-spacing: -0.01em; text-wrap: balance; }

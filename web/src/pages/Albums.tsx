@@ -99,8 +99,8 @@ function YearList({ current, onPick }: { current?: number; onPick(v?: string): v
   );
 }
 
-/** Small find-in-albums box: matches album titles, artists and song titles (server-side), kept in `?q=`. */
-function AlbumSearch({ value, onChange }: { value: string; onChange(v: string): void }) {
+/** Small find box (debounced). Albums: matches titles, artists and songs server-side; Playlists: names. */
+export function LibSearch({ value, onChange, label = 'Find in albums' }: { value: string; onChange(v: string): void; label?: string }) {
   const [text, setText] = useState(value);
   const ref = useRef<HTMLInputElement>(null);
   // follow outside changes (back/forward, cleared filters)
@@ -117,8 +117,8 @@ function AlbumSearch({ value, onChange }: { value: string; onChange(v: string): 
         ref={ref}
         type="search"
         value={text}
-        placeholder="Find in albums"
-        aria-label="Find in albums"
+        placeholder={label}
+        aria-label={label}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Escape' && text) { e.stopPropagation(); setText(''); onChange(''); } }}
       />
@@ -177,7 +177,7 @@ export default function Albums() {
             </button>
           ))}
         </div>
-        <AlbumSearch value={text} onChange={(v) => set('q', v || undefined)} />
+        <LibSearch value={text} onChange={(v) => set('q', v || undefined)} />
         <FacetFilters label={label} year={year} onPick={set} />
         {chips.map(([k, v]) => (
           <button key={k} className="chip chip--removable" onClick={() => set(k)} aria-label={`Remove ${k} filter`}>{k}: {v}<X size={12} /></button>
