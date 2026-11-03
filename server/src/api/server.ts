@@ -209,7 +209,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       })
     : undefined;
   spotify?.registerRoutes(app);
-  const spotifyListeners = new Map<Zone, () => void>();
+  /** One live subscription per zone id; the zone object can be replaced (Connect ↔ go-librespot). */
+  const spotifyListeners = new Map<Zone, { zone: PlaybackZone; off: () => void }>();
   /**
    * Background Spotify work (syncs, linking, discovery warm-ups) is deferred when the
    * rolling daily budget is low or used up. A user command is never deferred.
@@ -351,15 +352,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
    *  e.g. the next song of a playlist, must reach every open rune page). */
   function watchSpotifyZone(id: Zone): PlaybackZone | undefined {
     const z = spotify?.zones.get(id);
-    if (z && !spotifyListeners.has(id)) {
-      spotifyListeners.set(
-        id,
-        z.onChange((state) => {
-          recordHistory(state);
-          broadcast({ type: 'player', state: sanitize(state) });
-        }),
-      );
-    }
+    if (!z) return undefined;
+    const watched = spotifyListeners.get(id);
+    if (watched?.zone === z) return z;
+    watched?.off();
+    const off = z.onChange((state) => {
+      recordHistory(state);
+      broadcast({ type: 'player', state: sanitize(state) });
+    });
+    spotifyListeners.set(id, { zone: z, off });
     return z;
   }
 
@@ -1107,7 +1108,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     peaks.close();
     iradio.close();
     await settleJobs();
-    for (const off of spotifyListeners.values()) off();
+    for (const watched of spotifyListeners.values()) watched.off();
     await spotify?.zones.close();
     spotify?.close();
     await pc?.close();

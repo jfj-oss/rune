@@ -36,6 +36,12 @@ export interface CommandRunner {
   spawnDetached(command: string, args: string[]): void;
 }
 
+/** Just enough of fetch to ask go-librespot whether it is up (tests inject a fake). */
+export type LibrespotProbe = (
+  url: string,
+  init?: { signal?: AbortSignal },
+) => Promise<{ status: number }>;
+
 export interface PcSpotifyOptions {
   runner?: CommandRunner;
   /** Clock for debounce (tests inject one; the default follows fake timers). */
@@ -45,7 +51,13 @@ export interface PcSpotifyOptions {
   /** Where spotify-minimize.js is written (defaults to the rune data dir). */
   dataDir?: string;
   log?: (message: string, err?: unknown) => void;
+  /** go-librespot's local API; when it is up, the broken flatpak must not be launched. */
+  librespotUrl?: string;
+  /** Injected in tests so no request reaches 127.0.0.1:3678. */
+  librespotProbe?: LibrespotProbe;
 }
+
+const defaultLibrespotProbe: LibrespotProbe = (url, init) => fetch(url, init);
 
 export interface PcSpotifyStatus {
   running: boolean;
@@ -86,14 +98,30 @@ const defaultRunner: CommandRunner = {
   },
 };
 
-export function createPcSpotify(cfg: Pick<Config, 'dataDir'>, opts: PcSpotifyOptions = {}): PcSpotify {
+export function createPcSpotify(
+  cfg: Pick<Config, 'dataDir'> & Partial<Pick<Config, 'librespotUrl'>>,
+  opts: PcSpotifyOptions = {},
+): PcSpotify {
   const runner = opts.runner ?? defaultRunner;
   const now = opts.now ?? Date.now;
   const schedule = opts.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const dataDir = opts.dataDir ?? cfg.dataDir;
   const log = opts.log ?? (() => undefined);
+  const librespotUrl = (opts.librespotUrl ?? cfg.librespotUrl ?? '').replace(/\/+$/, '');
+  const probe = opts.librespotProbe ?? defaultLibrespotProbe;
   /** Last launch attempt: a second start within a minute must not launch a second copy. */
   let lastStartAt = 0;
+
+  /** go-librespot is already the PC's Spotify speaker: no flatpak needed. */
+  const librespotUp = async (): Promise<boolean> => {
+    if (!librespotUrl) return false;
+    try {
+      const res = await probe(`${librespotUrl}/status`, { signal: AbortSignal.timeout(1_500) });
+      return res.status === 200;
+    } catch {
+      return false;
+    }
+  };
 
   const isRunning = async (): Promise<boolean> => {
     try {
@@ -147,6 +175,10 @@ export function createPcSpotify(cfg: Pick<Config, 'dataDir'>, opts: PcSpotifyOpt
     },
 
     async start() {
+      if (await librespotUp()) {
+        // The daemon already answers; starting the flatpak would add a second, silent device.
+        return { started: false, running: true };
+      }
       if (await isRunning()) return { started: false, running: true };
 
       const at = now();

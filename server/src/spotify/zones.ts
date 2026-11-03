@@ -17,6 +17,12 @@ import {
   mapTrack,
   spotifyTrackId,
 } from './map.js';
+import {
+  fetchLibrespotStatus,
+  LibrespotZone,
+  type LibrespotFetch,
+  type LibrespotSocketFactory,
+} from './librespot.js';
 
 /** Subset of SpotifyApi used by zones (a fake is injected in tests). */
 export interface SpotifyZoneApi {
@@ -47,7 +53,15 @@ export interface ConnectZoneOptions {
   /** Spotify's circuit breaker: while this is in the future, the loop must not call Spotify. */
   blockedUntil?: () => number | null;
   now?: () => number;
+  /** go-librespot's local API. Empty/undefined disables the local zone (Connect zones as before). */
+  librespotUrl?: string;
+  /** Injected in tests so no request ever reaches 127.0.0.1:3678. */
+  librespotFetch?: LibrespotFetch;
+  librespotSocket?: LibrespotSocketFactory;
 }
+
+/** How long go-librespot's /status answer is reused before asking again. */
+const LIBRESPOT_DETECT_MS = 60_000;
 
 /** How long a just-played zone ignores /me/player still naming the previous device. */
 const CLAIM_MS = 5000;
@@ -793,21 +807,31 @@ export interface SpotifyZoneInfo {
   kind: 'spotify';
 }
 
+/** A Connect device run either by Spotify itself or by go-librespot on this PC. */
+export type SpotifyZone = SpotifyConnectZone | LibrespotZone;
+
 export class SpotifyZones {
-  private readonly zones = new Map<string, SpotifyConnectZone>();
+  private readonly zones = new Map<string, SpotifyZone>();
 
   private readonly api: SpotifyZoneApi;
+  private readonly now: () => number;
+  /** device_id reported by go-librespot's /status, null when unreachable or unset. */
+  private librespotDeviceId: string | null = null;
+  private librespotCheckedAt = Number.NEGATIVE_INFINITY;
+  private detecting: Promise<void> | null = null;
 
   constructor(
     api: SpotifyZoneApi,
     private readonly opts: ConnectZoneOptions = {},
   ) {
     // /me/player describes the whole account, so every zone polling it can share one answer.
-    this.api = sharedPlaybackReads(api, opts.now ?? Date.now);
+    this.now = opts.now ?? Date.now;
+    this.api = sharedPlaybackReads(api, this.now);
   }
 
   /** Devices for GET /zones; shapes merge cleanly with the PC/browser zones. */
   async listZones(): Promise<SpotifyZoneInfo[]> {
+    await this.detectLibrespot();
     const devices = await this.api.devices();
     const out: SpotifyZoneInfo[] = [];
     for (const device of devices) {
@@ -818,18 +842,58 @@ export class SpotifyZones {
     return out;
   }
 
-  ensureZone(deviceId: string, name: string): SpotifyConnectZone {
+  /**
+   * Pick the local websocket zone for the device go-librespot reports, and a
+   * Connect zone for every other device. Replaces a zone if go-librespot's
+   * availability changed since it was created.
+   */
+  ensureZone(deviceId: string, name: string): SpotifyZone {
     const id = `spotify:${deviceId}`;
-    let zone = this.zones.get(id);
-    if (!zone) {
-      zone = new SpotifyConnectZone(this.api, deviceId, name, this.opts);
-      this.zones.set(id, zone);
+    const wantsLibrespot = !!this.opts.librespotUrl && deviceId === this.librespotDeviceId;
+    const existing = this.zones.get(id);
+    if (existing) {
+      if ((existing instanceof LibrespotZone) === wantsLibrespot) return existing;
+      void existing.close();
+      this.zones.delete(id);
     }
+    const zone: SpotifyZone = wantsLibrespot
+      ? new LibrespotZone(deviceId, name, {
+          baseUrl: this.opts.librespotUrl!,
+          fetch: this.opts.librespotFetch,
+          socket: this.opts.librespotSocket,
+          knownTracks: this.opts.knownTracks,
+          now: this.now,
+        })
+      : new SpotifyConnectZone(this.api, deviceId, name, this.opts);
+    this.zones.set(id, zone);
     return zone;
   }
 
-  get(zoneId: Zone): SpotifyConnectZone | undefined {
+  get(zoneId: Zone): SpotifyZone | undefined {
     return this.zones.get(zoneId);
+  }
+
+  /** Ask go-librespot who it is; cached for a minute so an unreachable daemon is not hot-looped. */
+  private async detectLibrespot(): Promise<void> {
+    if (!this.opts.librespotUrl) return;
+    if (this.now() - this.librespotCheckedAt < LIBRESPOT_DETECT_MS) return;
+    if (this.detecting) return this.detecting;
+    this.detecting = (async () => {
+      try {
+        const status = await fetchLibrespotStatus(
+          this.opts.librespotUrl!,
+          this.opts.librespotFetch,
+        );
+        this.librespotDeviceId = status?.device_id ?? null;
+      } catch {
+        // unreachable: fall back to a Connect zone exactly as before
+        this.librespotDeviceId = null;
+      } finally {
+        this.librespotCheckedAt = this.now();
+        this.detecting = null;
+      }
+    })();
+    return this.detecting;
   }
 
   /** A client connected: every zone polls at once again and returns to the watched schedule. */

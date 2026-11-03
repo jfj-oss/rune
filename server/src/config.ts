@@ -29,6 +29,10 @@ export interface Config {
    *  the Spotify desktop app on the same machine). GET /api/zones matches it so the
    *  UI can route Spotify tracks to the PC's Spotify app. */
   pcSpotifyDevice?: string;
+  /** go-librespot's local HTTP/websocket API (default http://127.0.0.1:3678).
+   *  The device it reports is driven locally instead of through the Spotify Web API.
+   *  An empty string disables that and leaves plain Connect zones. */
+  librespotUrl?: string;
 }
 
 export function loadConfig(): Config {
@@ -42,6 +46,7 @@ export function loadConfig(): Config {
     userAgent: 'Liner/0.1 ( personal music player, self-hosted )',
     normalize: 'album',
     pcSpotifyDevice: 'HORSE',
+    librespotUrl: 'http://127.0.0.1:3678',
     ...user,
   };
   // Overrides for running a second, silent instance (tests / smoke checks).
