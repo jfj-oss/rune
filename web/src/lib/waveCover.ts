@@ -57,3 +57,18 @@ export function opposite(c: Rgb): Rgb {
 }
 
 export const oppositePalette = (p: DitherPalette): DitherPalette => ({ light: opposite(p.light), mid: opposite(p.mid) });
+
+/**
+ * Sparse ASCII sea for the header behind a wave playlist: three slow wave lines across the box. Returns, per cell,
+ * how strongly a wave passes there (0..1). x, y in 0..1, t seconds.
+ */
+export function asciiWaveAt(x: number, y: number, t: number): number {
+  let f = 0;
+  for (let i = 0; i < 3; i++) {
+    const base = 0.25 + i * 0.25;
+    const c = base + 0.09 * Math.sin(TAU * (0.8 + i * 0.35) * x + (0.55 - i * 0.12) * t + i * 2.1) + 0.04 * Math.sin(TAU * 2.1 * x - 0.4 * t + i);
+    const d = (y - c) / (0.07 + 0.02 * i);
+    f = Math.max(f, Math.exp(-d * d));
+  }
+  return f;
+}

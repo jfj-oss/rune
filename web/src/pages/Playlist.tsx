@@ -5,6 +5,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PlaylistHotkey } from '../components/PlaylistHotkey';
 import { keyCapture } from '../lib/keys';
+import { WAVE_COVER_IDS } from '../lib/waveCover';
+import { AsciiWaves } from '../components/AsciiWaves';
 import { api, coverSrc } from '../api';
 import { Cover } from '../components/Cover';
 import { Dialog } from '../components/Dialog';
@@ -59,6 +61,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const mixed = isMixed(d.tracks);
   const bgSrc = d.imageUrl ?? (d.tracks[0] ? coverSrc(d.tracks[0].album, 200) : undefined);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const waveCover = WAVE_COVER_IDS.has(d.id);
 
   // F = shuffle-play this playlist (not while typing or while a hotkey button is listening)
   const playRef = useRef(play);
@@ -88,7 +91,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
     <div className={`page page--album page--playlist${rune ? ' page--rune' : ''}`}>
       <section className="ahero">
         <div className={`ahero__bg${liked ? ' ahero__bg--liked' : ''}`} aria-hidden>
-          {!liked && bgSrc && <img src={bgSrc} alt="" referrerPolicy="no-referrer" />}
+          {waveCover ? <AsciiWaves /> : !liked && bgSrc && <img src={bgSrc} alt="" referrerPolicy="no-referrer" />}
           <div className="ahero__wash" />
         </div>
         <MobileBack />
