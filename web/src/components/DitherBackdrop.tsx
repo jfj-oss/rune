@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { publishBackdrop } from '../lib/backdropShown';
 import {
   blueNoise, calmFor, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
   WAVE, waveAt, wavePeakExponent, mixAt, modulatorsAt, currentAt, type DitherColour, type DitherPalette,
@@ -273,7 +274,8 @@ const resolve = (c: BackdropColour, t: number): DitherPalette => (typeof c === '
 /** Seconds for the dots to blend into a new colour (the next album's). */
 const COLOUR_BLEND_S = 1.4;
 
-export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
+/** `main`: the page's own backdrop (not Now Playing's), whose colour the logo follows. */
+export function DitherBackdrop({ colour, main = false }: { colour: BackdropColour; main?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const colourRef = useRef(colour);
   colourRef.current = colour;
@@ -334,6 +336,7 @@ export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
       lastPaint = now;
       shown = shown ? mixPalette(shown, want, k) : want;
       r.draw(t, shown, still() ? NO_WAVE : currentWave());
+      if (main) publishBackdrop(shown);
     };
     redraw.current = paint;
 
@@ -387,10 +390,11 @@ export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
       canvas.removeEventListener('webglcontextlost', lost);
       canvas.removeEventListener('webglcontextrestored', restored);
       redraw.current = () => {};
+      if (main) publishBackdrop(null);
       r.dispose();
       canvas.remove();
     };
-  }, [gen]);
+  }, [gen, main]);
 
   // colour change while static (reduced motion / fallback) needs a repaint; the animated loop picks it up itself
   useEffect(() => { redraw.current(); }, [colour]);

@@ -16,7 +16,7 @@ function AlbumDither() {
   const tint = useCoverColor(album);
   const page = useUi((s) => s.pagePalette);
   const colour: BackdropColour = page ?? (album && paletteFromColour(tint)) ?? 'purple';
-  return <DitherBackdrop colour={colour} />;
+  return <DitherBackdrop colour={colour} main />;
 }
 
 /** Ambient background: stacked fixed gradient layers where only opacity is animated (compositor only),
@@ -32,7 +32,7 @@ export function Ambient() {
     <div className="ambient" aria-hidden="true">
       {colour ? (
         npOpen ? null : (
-          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={page ?? colour} />}</Suspense>
+          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={page ?? colour} main />}</Suspense>
         )
       ) : null}
     </div>

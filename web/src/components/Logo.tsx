@@ -4,6 +4,7 @@ import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type Dit
 import { currentItem, usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { brightness, ditherLevels } from '../lib/dotLogo';
+import { backdropShown, onBackdrop } from '../lib/backdropShown';
 
 
 const BLACK = [0, 0, 0] as const;
@@ -62,7 +63,8 @@ export function Logo({ size = 28 }: { size?: number }) {
     const draw = (ms: number) => {
       brightness(ms, w, w, field);
       ditherLevels(field, w, w, levels);
-      const { mid, light } = palRef.current;
+      // the backdrop's own colour on this very frame when it is showing (so the cycle and blends match exactly)
+      const { mid, light } = backdropShown() ?? palRef.current;
       const d = img.data;
       for (let i = 0; i < levels.length; i++) {
         const l = levels[i]!, o = i * 4;
@@ -83,10 +85,13 @@ export function Logo({ size = 28 }: { size?: number }) {
     };
     redraw.current = () => { if (!raf) draw(reduce.matches ? 0 : performance.now() - born); };
     start();
+    // when still (reduced motion), repaint as the backdrop's colour changes
+    const offBackdrop = onBackdrop(() => redraw.current());
     document.addEventListener('visibilitychange', start);
     reduce.addEventListener('change', start);
     return () => {
       cancelAnimationFrame(raf);
+      offBackdrop();
       document.removeEventListener('visibilitychange', start);
       reduce.removeEventListener('change', start);
       redraw.current = () => {};
