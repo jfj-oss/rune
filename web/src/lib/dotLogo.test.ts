@@ -5,15 +5,15 @@ const corners = (ms: number) => ballsAt(ms).map((b) => `${b.x.toFixed(2)},${b.y.
 
 describe('dot logo motion', () => {
   it('rests on the four corners and swaps a pair without changing the picture', () => {
-    expect(corners(0)).toEqual(corners(LOOP_MS * 0.45));
-    expect(corners(0)).toEqual(corners(LOOP_MS * 0.95));
+    expect(corners(0)).toEqual(corners(LOOP_MS * 0.485));
+    expect(corners(0)).toEqual(corners(LOOP_MS * 0.985));
     expect(new Set(corners(0)).size).toBe(4);
   });
   it('moves only one pair at a time', () => {
     const rest = ballsAt(0), midA = ballsAt(LOOP_MS * 0.2), midB = ballsAt(LOOP_MS * 0.7);
     const moved = (a: typeof rest, b: typeof rest) => a.map((p, i) => Math.hypot(p.x - b[i]!.x, p.y - b[i]!.y) > 0.01);
     expect(moved(rest, midA)).toEqual([true, true, false, false]);
-    expect(moved(ballsAt(LOOP_MS * 0.45), midB)).toEqual([false, false, true, true]);
+    expect(moved(ballsAt(LOOP_MS * 0.485), midB)).toEqual([false, false, true, true]);
   });
   it('eases with a small overshoot', () => {
     const e = cubicBezier(0.72, 0, 0.18, 1.14);
