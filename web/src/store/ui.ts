@@ -1,7 +1,7 @@
 import { clientLog } from '../clientLog';
 import { create } from 'zustand';
 import type { DitherPalette, DotSize } from '../lib/dither';
-import { validAlbumKey } from '../lib/keys';
+import { cleanPlaylistKeys, validAlbumKey, type PlaylistKeys } from '../lib/keys';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -83,6 +83,10 @@ interface UiStore {
   /** Key that opens the playing song's album ('' = off). Per device: keyboards differ. */
   albumKey: string;
   setAlbumKey(k: string): void;
+  /** Keys that open a playlist, key -> playlist (per device, like the album key). */
+  playlistKeys: PlaylistKeys;
+  /** Give playlist `id` the key `k` (any key it had before is freed); k = '' removes its key. */
+  setPlaylistKey(id: string, name: string, k: string): void;
   queueOpen: boolean;
   nowPlayingOpen: boolean;
   notice: { id: number; text: string } | null;
@@ -119,6 +123,14 @@ export const useUi = create<UiStore>((set) => ({
     save('rune.albumKey', albumKey);
     set({ albumKey });
   },
+  playlistKeys: cleanPlaylistKeys(load<unknown>('rune.playlistKeys', {})),
+  setPlaylistKey: (id, name, k) => set((s) => {
+    const next: PlaylistKeys = {};
+    for (const [key, p] of Object.entries(s.playlistKeys)) if (p.id !== id) next[key] = p;
+    if (k) next[k] = { id, name };
+    save('rune.playlistKeys', next);
+    return { playlistKeys: next };
+  }),
   queueOpen: false,
   nowPlayingOpen: false,
   notice: null,

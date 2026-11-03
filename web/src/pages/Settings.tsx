@@ -6,7 +6,10 @@ import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { LibraryTabs } from './Albums';
 import { formatBytes, formatListening, formatStamp } from '../lib/discover';
+import { Link } from 'react-router-dom';
+import { X } from 'lucide-react';
 import { ALBUM_KEY_CHOICES, FIXED_KEYS } from '../lib/keys';
+import { encId } from '../lib/format';
 import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
 
 interface SpotifyUsage {
@@ -88,17 +91,20 @@ function AmbientPicker() {
 function KeyboardCard() {
   const albumKey = useUi((s) => s.albumKey);
   const setAlbumKey = useUi((s) => s.setAlbumKey);
+  const playlistKeys = useUi((s) => s.playlistKeys);
+  const setPlaylistKey = useUi((s) => s.setPlaylistKey);
+  const plEntries = Object.entries(playlistKeys).sort(([a], [b]) => a.localeCompare(b));
   return (
     <section className="statuscard keyspick">
       <h2 className="statuscard__head"><Keyboard size={17} /> Keyboard</h2>
-      <p className="muted">Work anywhere in rune, except while typing. The album key is saved on this device.</p>
+      <p className="muted">Work anywhere in rune, except while typing. The album and playlist keys are saved on this device.</p>
       <div className="dotpick">
         <div><b>Go to the playing album</b><span className="muted">Keys rune already uses are left out</span></div>
         <label className="select">
           <span>Key</span>
           <select value={albumKey} onChange={(e) => setAlbumKey(e.target.value)} aria-label="Key for the playing album">
             <option value="">Off</option>
-            {ALBUM_KEY_CHOICES.map((k) => <option key={k} value={k}>{k.toUpperCase()}</option>)}
+            {ALBUM_KEY_CHOICES.filter((k) => !playlistKeys[k]).map((k) => <option key={k} value={k}>{k.toUpperCase()}</option>)}
           </select>
         </label>
       </div>
@@ -106,7 +112,15 @@ function KeyboardCard() {
         {FIXED_KEYS.map((k) => (
           <li key={k.key}><kbd>{k.label}</kbd><span>{k.does}</span></li>
         ))}
+        {plEntries.map(([k, p]) => (
+          <li key={k}>
+            <kbd>{k.toUpperCase()}</kbd>
+            <Link to={`/playlist/${encId(p.id)}`} className="link">{p.name}</Link>
+            <button className="btn-icon keyspick__rm" aria-label={`Remove the hotkey for ${p.name}`} title="Remove" onClick={() => setPlaylistKey(p.id, p.name, '')}><X size={14} /></button>
+          </li>
+        ))}
       </ul>
+      <p className="muted keyspick__hint">Give a playlist its own key with the Hotkey button on the playlist’s page.</p>
     </section>
   );
 }

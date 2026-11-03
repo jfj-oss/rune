@@ -23,3 +23,34 @@ export function validAlbumKey(v: unknown): string {
   if (v === '') return '';
   return typeof v === 'string' && ALBUM_KEY_CHOICES.includes(v) ? v : DEFAULT_ALBUM_KEY;
 }
+
+/** A key assigned to open a playlist. */
+export interface PlaylistKey { id: string; name: string }
+export type PlaylistKeys = Record<string, PlaylistKey>;
+
+/** Letters and digits a playlist hotkey may use. */
+export const isKeyChoice = (k: string): boolean => /^[a-z0-9]$/.test(k);
+
+/** Who already has key `k` (null = free): a built-in shortcut, the album key, or another playlist. */
+export function keyOwner(k: string, albumKey: string, playlists: PlaylistKeys, forId?: string): string | null {
+  const fixed = FIXED_KEYS.find((f) => f.key === k);
+  if (fixed) return fixed.does;
+  if (albumKey && k === albumKey) return 'Go to the playing album';
+  const p = playlists[k];
+  if (p && p.id !== forId) return `the playlist “${p.name}”`;
+  return null;
+}
+
+/** Keep only well-formed entries from storage. */
+export function cleanPlaylistKeys(v: unknown): PlaylistKeys {
+  const out: PlaylistKeys = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const [k, p] of Object.entries(v as Record<string, unknown>)) {
+    const e = p as Partial<PlaylistKey> | null;
+    if (isKeyChoice(k) && !FIXED_KEYS.some((f) => f.key === k) && e && typeof e.id === 'string' && typeof e.name === 'string') out[k] = { id: e.id, name: e.name };
+  }
+  return out;
+}
+
+/** While a hotkey button is listening for a key, the global shortcuts stand aside. */
+export const keyCapture = { active: false };

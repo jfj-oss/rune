@@ -284,3 +284,7 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .keyspick__list li { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .keyspick__list kbd { flex: none; min-width: 26px; text-align: center; font: 600 11.5px var(--sans); color: var(--text-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; background: var(--surface); }
 .keyspick__list span { color: var(--text-2); }
+.keyspick__list a { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.keyspick__rm { margin-left: auto; opacity: 0.6; }
+.keyspick__rm:hover { opacity: 1; }
+.keyspick__hint { font-size: 12.5px; margin: 0; }

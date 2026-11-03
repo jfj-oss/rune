@@ -125,3 +125,8 @@
   .tlist__row { grid-template-columns: 44px minmax(0, 1fr) 44px; height: 64px; }
   .tlist__row .badge { display: none; }
 }
+.hotkeybtn { display: inline-flex; align-items: center; gap: 4px; }
+.hotkeybtn kbd { font: 600 11.5px var(--sans); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; margin-left: 2px; }
+.hotkeybtn .is-listening { border-color: var(--accent, #fff); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #fff) 22%, transparent); }
+.hotkeybtn__clear { width: 32px; height: 32px; opacity: 0.7; }
+.hotkeybtn__clear:hover { opacity: 1; }

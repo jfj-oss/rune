@@ -3,6 +3,7 @@ import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/rea
 import { ArrowDownWideNarrow, Check, Copy, Download, GripVertical, HardDrive, ListEnd, ListOrdered, ListPlus, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { PlaylistHotkey } from '../components/PlaylistHotkey';
 import { api, coverSrc } from '../api';
 import { Cover } from '../components/Cover';
 import { Dialog } from '../components/Dialog';
@@ -115,6 +116,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                 </button>
               )}
               {!rune && <button className="btn" onClick={() => void duplicate()}><Copy size={16} /> Duplicate as rune playlist</button>}
+              <PlaylistHotkey id={d.id} name={d.name} />
               <Popover
                 placement="bottom-start"
                 trigger={({ toggle }) => <button className="btn btn--icon" aria-label="More actions" onClick={toggle}><MoreHorizontal size={20} /></button>}

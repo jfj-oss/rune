@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { encId } from '../lib/format';
+import { keyCapture } from '../lib/keys';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { shownVolume, useVolumeHold } from '../store/volumeHold';
@@ -24,7 +25,8 @@ const VOLUME_SEND_MS = 150;
 
 /**
  * Space = play / pause, E / R = volume down / up, 1 / 2 / 3 = previous / restart / next, Z = Home,
- * X = Playlists, and the key chosen in Settings (A by default) = the playing song's album.
+ * X = Playlists, the key chosen in Settings (A by default) = the playing song's album, and any playlist hotkeys
+ * (set on the playlist's page).
  * Anywhere on the page, not while typing.
  */
 export function KeyboardShortcuts() {
@@ -75,8 +77,15 @@ export function KeyboardShortcuts() {
 
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
+      if (keyCapture.active) return; // a hotkey button is listening for the key
       const plain = !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target);
-      const albumKey = useUi.getState().albumKey;
+      const { albumKey, playlistKeys } = useUi.getState();
+      const pl = plain ? playlistKeys[k] : undefined;
+      if (pl) {
+        e.preventDefault();
+        if (!e.repeat) go(`/playlist/${encId(pl.id)}`);
+        return;
+      }
       if (plain && (k === 'z' || k === 'x' || (albumKey && k === albumKey))) {
         e.preventDefault();
         if (e.repeat) return;
