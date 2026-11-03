@@ -288,7 +288,7 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
 
   app.get('/api/stream/:trackId', async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
-    const query = request.query as { fmt?: string; kbps?: string; t?: string; live?: string };
+    const query = request.query as { fmt?: string; kbps?: string; t?: string; live?: string; wait?: string };
     const offsetMs = Math.max(0, Number.parseInt(query.t ?? '0', 10) || 0);
 
     const fmtRaw = (query.fmt ?? 'orig').toLowerCase();
@@ -339,6 +339,13 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
         // Fully cached: byte ranges, instant start, normal seeking.
         if (request.method !== 'HEAD') warmNext();
         return serveFile(request.method, request.headers.range, reply, cachePath, loudnessHeaders);
+      }
+      if (query.wait === '1') {
+        // iOS Safari will not play an <audio> source without byte ranges: wait for the
+        // finished file (warm-ahead usually has it ready before the track is reached).
+        const file = await cachedTranscode(cfg, track, outFmt, kbps);
+        if (request.method !== 'HEAD') warmNext();
+        if (file) return serveFile(request.method, request.headers.range, reply, file, loudnessHeaders);
       }
       if (request.method !== 'HEAD') {
         // Not ready: answer now with a live stream and build the cache in parallel.

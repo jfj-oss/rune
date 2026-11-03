@@ -44,9 +44,12 @@ function pickFormat(): { fmt: string; kbps: number } {
   return { fmt: 'orig', kbps: 256 };
 }
 
+const ON_IOS = typeof navigator !== 'undefined' && detectIOS(navigator.userAgent, navigator.maxTouchPoints) !== null;
+
 function streamSrc(track: Track, fmt: { fmt: string; kbps: number }, tMs?: number): string {
   if (isLiveTrack(track)) return `/api/radio/${encodeURIComponent(track.id)}/stream`;
-  const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}`;
+  // iOS needs a ranged file, so it waits for the cache instead of taking a live stream.
+  const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}${ON_IOS ? '&wait=1' : ''}`;
   // Live transcoded streams have no length and cannot be range-seeked, so seeking
   // reloads with t=<ms> and the server slices from there.
   return tMs && tMs > 0 ? `${base}&t=${Math.round(tMs)}` : base;
@@ -60,7 +63,6 @@ function audioContextCtor(): AudioContextCtor | null {
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
 
-const ON_IOS = typeof navigator !== 'undefined' && detectIOS(navigator.userAgent, navigator.maxTouchPoints) !== null;
 
 export class AudioEngine implements Engine {
   /** The element that is making (or about to make) sound. */

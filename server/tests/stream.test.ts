@@ -375,6 +375,16 @@ describe('GET /api/stream transcoding', () => {
     expect(part.headers['content-range']).toBe(`bytes 0-1/${size}`);
   });
 
+  it('wait=1 (iOS) waits for the cache and serves a ranged file, never a live stream', async () => {
+    const cachePath = transcodeOutputPath(cfg, trackRow('l:cue'), 'aac', 96)!;
+    expect(existsSync(cachePath)).toBe(false);
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=aac&kbps=96&wait=1', headers: { range: 'bytes=0-1' } });
+    expect(res.statusCode).toBe(206);
+    expect(res.headers['x-rune-live']).toBeUndefined();
+    expect(res.headers['accept-ranges']).toBe('bytes');
+    expect(existsSync(cachePath)).toBe(true);
+  });
+
   it('seeks inside transcoded streams with ?t=', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=flac&t=1500' });
     expect(res.statusCode).toBe(200);
