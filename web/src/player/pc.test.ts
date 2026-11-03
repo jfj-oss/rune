@@ -79,7 +79,7 @@ describe('PcBackend', () => {
   it('refuses Spotify when the Spotify app is not on the PC', async () => {
     const { pc } = make(false);
     live = pc;
-    await expect(pc.send(play([S(1)]), [S(1)])).rejects.toThrow(/Open the Spotify app on the PC/);
+    await expect(pc.send(play([S(1)]), [S(1)])).rejects.toThrow(/rune starts Spotify on the PC/);
   });
 
   it('mixed queue: one queue, local → mpv, Spotify → the app, switching on track end', async () => {

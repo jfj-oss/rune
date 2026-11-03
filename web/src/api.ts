@@ -87,6 +87,16 @@ export const api = {
     if (isMock) return (await mock()).mockApi.zones();
     return http('/zones');
   },
+  /** Is the Spotify desktop app (flatpak) currently running on the PC? */
+  async pcSpotifyStatus(): Promise<{ running: boolean }> {
+    if (isMock) return { running: false };
+    return http('/pc/spotify/status');
+  },
+  /** Start the Spotify app on the PC (the server debounces repeated calls). */
+  async pcSpotifyStart(): Promise<{ started: boolean; running: boolean }> {
+    if (isMock) return { started: false, running: false };
+    return http('/pc/spotify/start', { method: 'POST' });
+  },
   /** Spotify devices hidden from the "Play on" list (by name, for every rune page). */
   async hiddenZones(): Promise<string[]> {
     if (isMock) return [];

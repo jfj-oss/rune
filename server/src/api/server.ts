@@ -11,7 +11,14 @@ import type { Config } from '../config.js';
 import type { PlaybackZone } from '../modules.js';
 import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
-import { createPcZone, registerStreamRoutes, type PcZone } from '../play/index.js';
+import {
+  createPcSpotify,
+  createPcZone,
+  registerPcSpotifyRoutes,
+  registerStreamRoutes,
+  type PcSpotifyOptions,
+  type PcZone,
+} from '../play/index.js';
 import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
 import { HttpError } from '../spotify/fetch.js';
 import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
@@ -69,6 +76,8 @@ export interface AppOptions {
   watch?: boolean;
   /** Nightly database backups + retention (default false; main.ts enables). */
   backups?: boolean;
+  /** Inject the flatpak/qdbus runner behind the on-demand Spotify start route (tests). */
+  pcSpotify?: PcSpotifyOptions;
   webDist?: string;
 }
 
@@ -156,6 +165,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
   // ---------- zones
   const pc: PcZone | undefined = opts.pcZone === false ? undefined : await createPcZone(db, cfg);
+  // "Linux PC speakers" can host Spotify by starting the desktop app on demand.
+  // Creating it does nothing; the app only launches from POST /api/pc/spotify/start.
+  const pcSpotify = createPcSpotify(cfg, {
+    log: (message, err) => app.log.warn({ err }, message),
+    ...opts.pcSpotify,
+  });
   const history = createHistory(db);
   const lastState = new Map<Zone, PlayerState>();
   const recordHistory = (state: PlayerState) => {
@@ -959,6 +974,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         setState(HIDDEN_ZONES_KEY, JSON.stringify([...names]));
         return [...names];
       });
+
+      // On-demand Spotify app for the pc zone: the UI calls this only when the user
+      // actually sends Spotify tracks to the PC speakers (never from GET /zones).
+      registerPcSpotifyRoutes(r, pcSpotify);
 
       r.get<{ Params: { zone: string } }>('/player/:zone', async (req, reply) => {
         const z = await zoneFor(req.params.zone);

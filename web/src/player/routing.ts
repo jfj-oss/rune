@@ -16,14 +16,16 @@ export const pcHasSpotify = (z: ZoneLike): boolean => typeof z !== 'string' && z
 /** Can a zone play an item of this source? */
 export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boolean {
   const kind = kindOf(zone);
-  if (kind === 'pc') return source === 'local' || source === 'radio' || pcHasSpotify(zone);
+  // The pc zone can host every source: local/radio through mpv, and Spotify through
+  // the desktop app — which rune starts on demand (see player/pcStart.ts).
+  if (kind === 'pc') return true;
   if (kind === 'browser') return source === 'local' || source === 'radio' || caps.sdk;
   return source === 'spotify'; // Spotify Connect device
 }
 
 /** The actionable text for "this zone can't play <source>". */
 export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource): string {
-  if (zone.kind === 'pc' && source === 'spotify') return 'Open the Spotify app on the PC to play Spotify through the Linux speakers';
+  if (zone.kind === 'pc' && source === 'spotify') return 'rune starts Spotify on the PC for this';
   if (source === 'radio') return `${zone.name} can’t play internet radio — use the PC or this browser`;
   return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
 }

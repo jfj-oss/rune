@@ -20,9 +20,9 @@ const ZONES: ZoneInfo[] = [
 const SDK = { sdk: true }, NO_SDK = { sdk: false };
 
 describe('zoneCanPlay', () => {
-  it('pc is local-only, Connect is spotify-only, browser is local + (spotify via SDK)', () => {
+  it('pc can host any source (it starts Spotify on demand), Connect is spotify-only, browser is local + (spotify via SDK)', () => {
     expect(zoneCanPlay('pc', 'local', SDK)).toBe(true);
-    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(false);
+    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(true); // rune starts the desktop app
     expect(zoneCanPlay('spotify', 'spotify', NO_SDK)).toBe(true);
     expect(zoneCanPlay('spotify', 'local', SDK)).toBe(false);
     expect(zoneCanPlay('browser', 'local', NO_SDK)).toBe(true);
@@ -55,12 +55,12 @@ describe('internet radio', () => {
 
 describe('routeItems', () => {
   it('asks when the start item cannot play', () => {
-    const r = routeItems('pc', [t('sp:1', 'spotify')], 0, SDK);
+    const r = routeItems('browser', [t('sp:1', 'spotify')], 0, NO_SDK);
     expect(r).toEqual({ ok: false, reason: 'start', need: 'spotify' });
   });
   it('drops unplayable items and re-bases the start index', () => {
     const items = [t('l:1', 'local'), t('sp:1', 'spotify'), t('l:2', 'local')];
-    const r = routeItems('pc', items, 2, SDK);
+    const r = routeItems('browser', items, 2, NO_SDK);
     expect(r.ok && r.items.map((i) => i.track.id)).toEqual(['l:1', 'l:2']);
     expect(r.ok && r.startIndex).toBe(1);
     expect(r.ok && r.dropped).toBe(1);
@@ -76,11 +76,11 @@ describe('routeItems', () => {
 });
 
 describe('playableZones', () => {
-  it('lists the browser first (labelled), then Connect devices, only when the SDK works', () => {
+  it('lists the browser first (labelled), then Connect devices, then the PC (it starts Spotify itself)', () => {
     const o = playableZones(ZONES, 'spotify', SDK);
-    expect(o.map((x) => x.zone.id)).toEqual(['browser', 'spotify:phone']);
+    expect(o.map((x) => x.zone.id)).toEqual(['browser', 'spotify:phone', 'pc']);
     expect(o[0]!.label).toBe('This Mac (Spotify)');
-    expect(playableZones(ZONES, 'spotify', NO_SDK).map((x) => x.zone.id)).toEqual(['spotify:phone']);
+    expect(playableZones(ZONES, 'spotify', NO_SDK).map((x) => x.zone.id)).toEqual(['spotify:phone', 'pc']);
   });
   it('local tracks: pc + browser', () => {
     expect(playableZones(ZONES, 'local', SDK).map((x) => x.zone.id)).toEqual(['browser', 'pc']);
@@ -121,11 +121,11 @@ describe('sdkSupportedFor', () => {
 
 describe('pc zone with the PC’s Spotify app', () => {
   const PC: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'abc123', spotifyDeviceName: 'HORSE' };
-  it('plays Spotify only when the app is there', () => {
+  it('plays Spotify with the app there, and rune starts it when it is missing', () => {
     expect(zoneCanPlay(PC, 'spotify', NO_SDK)).toBe(true);
     expect(zoneCanPlay(PC, 'local', NO_SDK)).toBe(true);
-    expect(zoneCanPlay({ ...PC, spotifyDeviceId: undefined }, 'spotify', SDK)).toBe(false);
-    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(false);
+    expect(zoneCanPlay({ ...PC, spotifyDeviceId: undefined }, 'spotify', SDK)).toBe(true);
+    expect(zoneCanPlay('pc', 'spotify', SDK)).toBe(true);
   });
   it('keeps a mixed list intact on the hybrid pc zone', () => {
     const r = routeItems(PC, [t('l:1', 'local'), t('sp:1', 'spotify')], 1, NO_SDK);
@@ -136,8 +136,8 @@ describe('pc zone with the PC’s Spotify app', () => {
     expect(withoutPcDevice(zones).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
     expect(playableZones(withoutPcDevice(zones), 'spotify', NO_SDK).map((o) => o.zone.id)).toEqual(['spotify:phone', 'pc']);
   });
-  it('gives an actionable message when the app is missing', () => {
-    expect(cantPlayMessage({ kind: 'pc', name: 'Linux PC speakers' }, 'spotify')).toBe('Open the Spotify app on the PC to play Spotify through the Linux speakers');
+  it('explains that rune starts the app (no manual “open Spotify” instruction)', () => {
+    expect(cantPlayMessage({ kind: 'pc', name: 'Linux PC speakers' }, 'spotify')).toBe('rune starts Spotify on the PC for this');
     expect(cantPlayMessage({ kind: 'spotify', name: 'iPhone' }, 'local')).toContain('iPhone');
   });
 });

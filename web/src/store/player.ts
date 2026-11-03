@@ -8,6 +8,7 @@ import { AudioEngine, MockEngine } from '../player/engine';
 import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
 import { PcBackend, type PcDevice } from '../player/pc';
+import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
 import { RemoteBackend, zoneTransport } from '../player/remote';
 import { cantPlayMessage, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
 import { emptyState, livePosition, type Backend } from '../player/types';
@@ -137,6 +138,30 @@ export const usePlayer = create<PlayerStore>((set, get) => {
     unsub = b.subscribe((s) => { set({ state: s }); recordPlayed(s, rec); });
     set({ state: b.state, zone: b.zone });
   };
+
+  /**
+   * Spotify tracks are headed for the pc zone but the PC's Spotify app is closed:
+   * ask the server to start it and wait for its Connect device. Returns the refreshed
+   * pc zone (so the caller can carry on as if it had been there), or null when the
+   * app never appeared — in which case no playback has been touched.
+   */
+  async function ensurePcSpotify(items: PlayItem[], z: ZoneInfo): Promise<ZoneInfo | null> {
+    if (isMock || !needsPcSpotify(z, items)) return z; // mock playback runs in this tab
+    return startPcSpotifyAndWait({
+      start: () => api.pcSpotifyStart(),
+      readZones: async () => {
+        const zones = tidyZones(await api.zones());
+        // never drop the zone we are playing on
+        const cur = get().zones.find((x) => x.id === get().zone);
+        const merged = cur && !zones.some((x) => x.id === cur.id) ? [...zones, cur] : zones;
+        set({ zones: merged });
+        syncPcDevice(merged);
+        return merged;
+      },
+      toast: (m) => useUi.getState().toast(m),
+    });
+  }
+
   return {
     zones: FALLBACK_ZONES,
     zone: 'pc',
@@ -171,14 +196,14 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async setZone(id, opts) {
       try {
-      const z = get().zones.find((x) => x.id === id);
+      let z = get().zones.find((x) => x.id === id);
       if (!z || id === get().zone) return;
       const handoff = opts?.handoff !== false;
       if (handoff) { useSpotify.getState().remember('spotify', undefined); useSpotify.getState().remember('local', undefined); }
       saveLocal('rune.zone', id);
       const prev = backends.get(get().zone);
-      const b = backendFor(z);
       if (!handoff) {
+        const b = backendFor(z);
         if (prev && prev !== b && (prev.state.status === 'playing' || prev.state.status === 'loading')) await prev.send({ type: 'pause' }).catch(() => undefined);
         attach(b);
         await b.refresh();
@@ -186,7 +211,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       }
       // Hand playback over (like Roon's "transfer zone"): same queue, same track, same
       // position, same play/pause state — then stop the old zone.
-      if (prev && prev !== b) {
+      if (prev) {
         try {
           await prev.refresh();
         } catch {
@@ -196,28 +221,40 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         const active = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
         if (active) {
           const items: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
-          const caps = capsFrom(useSpotify.getState());
-          const playable = items.filter((i) => zoneCanPlay(z, i.track.source, caps));
-          const current = items[s.index]!;
-          const notice = (m: string) => useUi.getState().toast(m);
-          if (!zoneCanPlay(z, current.track.source, caps)) {
-            notice(`${cantPlayMessage(z, current.track.source)} — the music stays where it is`);
-          } else {
-            const startIndex = playable.indexOf(current);
-            const positionMs = livePosition(s);
-            const paused = s.status === 'paused';
-            if (s.status === 'playing') await prev.send({ type: 'pause' }).catch(() => undefined);
-            attach(b);
-            await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
-            if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
-            // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
-            if (s.volume > 0 && Math.abs(b.state.volume - s.volume) > 1) await b.send({ type: 'volume', volume: s.volume }).catch(() => undefined);
-            if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${z.name})`);
-            else if (z.kind === 'pc' && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
-            return;
+          // Spotify + Linux PC speakers: rune starts the desktop app first, then this
+          // handoff proceeds exactly as if its Connect device had been there already.
+          if (needsPcSpotify(z, items)) {
+            const pc = await ensurePcSpotify(items, z);
+            if (!pc) return; // timed out: the music stays where it is
+            z = pc;
+          }
+          const target = z;
+          const b = backendFor(target);
+          if (prev !== b) {
+            const caps = capsFrom(useSpotify.getState());
+            const playable = items.filter((i) => zoneCanPlay(target, i.track.source, caps));
+            const current = items[s.index]!;
+            const notice = (m: string) => useUi.getState().toast(m);
+            if (!zoneCanPlay(target, current.track.source, caps)) {
+              notice(`${cantPlayMessage(target, current.track.source)} — the music stays where it is`);
+            } else {
+              const startIndex = playable.indexOf(current);
+              const positionMs = livePosition(s);
+              const paused = s.status === 'paused';
+              if (s.status === 'playing') await prev.send({ type: 'pause' }).catch(() => undefined);
+              attach(b);
+              await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
+              if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
+              // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
+              if (s.volume > 0 && Math.abs(b.state.volume - s.volume) > 1) await b.send({ type: 'volume', volume: s.volume }).catch(() => undefined);
+              if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${target.name})`);
+              else if (target.kind === 'pc' && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
+              return;
+            }
           }
         }
       }
+      const b = backendFor(z);
       attach(b);
       await b.refresh();
       } catch (e) {
@@ -229,7 +266,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       try {
         if (!items.length) return;
         const st = get();
-        const z = st.zones.find((x) => x.id === st.zone);
+        let z = st.zones.find((x) => x.id === st.zone);
         if (!z || !backends.get(z.id)) return;
         let list = items;
         let start = startIndex;
@@ -240,6 +277,12 @@ export const usePlayer = create<PlayerStore>((set, get) => {
             [list[i], list[j]] = [list[j] as PlayItem, list[i] as PlayItem];
           }
           start = 0;
+        }
+        // Sending Spotify tracks to the PC speakers: start the app and wait for it.
+        if (needsPcSpotify(z, list)) {
+          const pc = await ensurePcSpotify(list, z);
+          if (!pc) return; // timed out: nothing was paused or moved
+          z = pc;
         }
         const route = routeItems(z, list, start, capsFrom(useSpotify.getState()));
         if (!route.ok) {
@@ -257,8 +300,15 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async playOn(zoneId, req, remember = true) {
       try {
-        const z = get().zones.find((x) => x.id === zoneId);
+        let z = get().zones.find((x) => x.id === zoneId);
         if (!z) return;
+        // Chosen from the "Play on…" sheet: starting Spotify is still only a step of
+        // actually sending Spotify tracks to the PC speakers.
+        if (needsPcSpotify(z, req.items)) {
+          const pc = await ensurePcSpotify(req.items, z);
+          if (!pc) return; // timed out: the music stays where it is
+          z = pc;
+        }
         const caps = capsFrom(useSpotify.getState());
         const route = routeItems(z, req.items, req.startIndex, { sdk: caps.sdk });
         if (!route.ok) return;
@@ -276,9 +326,15 @@ export const usePlayer = create<PlayerStore>((set, get) => {
     async enqueueItems(items, next, opts) {
       try {
         const st = get();
-        const z = st.zones.find((x) => x.id === st.zone);
+        let z = st.zones.find((x) => x.id === st.zone);
         const b = z && backends.get(z.id);
         if (!z || !b || !items.length) return;
+        // Queueing Spotify tracks on the PC speakers needs the app too.
+        if (needsPcSpotify(z, items)) {
+          const pc = await ensurePcSpotify(items, z);
+          if (!pc) return; // timed out: the queue and playback stay where they are
+          z = pc;
+        }
         const caps = capsFrom(useSpotify.getState());
         const ok = items.filter((i) => zoneCanPlay(z, i.track.source, caps));
         if (!ok.length) {

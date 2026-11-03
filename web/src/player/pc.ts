@@ -123,7 +123,7 @@ export class PcBackend implements Backend {
 
   private async start(cmd: Extract<ExtCommand, { type: 'play' }>, items: PlayItem[]) {
     const target = modeFor(items);
-    if (target !== 'pc' && !this.device) throw new Error('Open the Spotify app on the PC to play Spotify through the Linux speakers');
+    if (target !== 'pc' && !this.device) throw new Error('rune starts Spotify on the PC for this');
     const volume = this.state.volume;
     await this.switchTo(target);
     const c = this.ensure(target)!;
@@ -134,7 +134,7 @@ export class PcBackend implements Backend {
   private async enqueue(cmd: Extract<ExtCommand, { type: 'enqueue' }>, items: PlayItem[]) {
     if (!items.length) return;
     const need = modeFor(items);
-    if (need !== 'pc' && !this.device) throw new Error('Open the Spotify app on the PC to play Spotify through the Linux speakers');
+    if (need !== 'pc' && !this.device) throw new Error('rune starts Spotify on the PC for this');
     const s = this.state;
     const live = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
     if (!live) {

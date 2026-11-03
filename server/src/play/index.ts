@@ -13,3 +13,11 @@ export * from './queue.js';
 export * from './rows.js';
 export { buildFileOptions, type FileOptionInput } from './file-options.js';
 export { levelingLabel } from './signal-path.js';
+export {
+  createPcSpotify,
+  registerPcSpotifyRoutes,
+  type CommandRunner,
+  type CommandResult,
+  type PcSpotify,
+  type PcSpotifyOptions,
+} from './pcSpotify.js';
