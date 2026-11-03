@@ -171,6 +171,8 @@
 .np__panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .np__title { font-family: var(--serif); font-weight: 600; font-size: 34px; line-height: 1.15; letter-spacing: -0.01em; text-wrap: balance; }
 .np__sub { font-size: 16px; color: var(--text-2); margin-top: -6px; }
+/* Title and artist line sit centred over the centred transport. */
+.np__title, .np__sub, .np__reason { text-align: center; }
 .seek--np { margin-top: 10px; }
 .np__transport { padding: 6px 0 2px; }
 .np__vol { display: flex; justify-content: center; padding-top: 4px; }
@@ -200,5 +202,6 @@
   .np__bg--dither .np__bgwash { background: linear-gradient(180deg, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.55)); }
   .np__art { width: min(100%, 46dvh); align-self: center; justify-self: auto; margin-top: 8px; }
   .np__title { font-size: 25px; text-align: left; }
-  .np__sub { font-size: 15px; }
+  .np__sub { font-size: 15px; text-align: left; }
+  .np__reason { text-align: left; }
 }
