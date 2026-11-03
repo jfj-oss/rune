@@ -1,11 +1,56 @@
 import { useQuery } from '@tanstack/react-query';
 import { Activity, Check, Database, HardDrive, Palette, Plug, RefreshCw, Server } from 'lucide-react';
 import { Empty } from '../components/Rows';
+import { http, isMock } from '../api';
 import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { LibraryTabs } from './Albums';
 import { formatBytes, formatListening, formatStamp } from '../lib/discover';
 import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
+
+interface SpotifyUsage {
+  blockedUntil: number | null;
+  budget?: { daily: number; used24h: number; level: 'normal' | 'tight' | 'low' | 'out' };
+}
+
+const BUDGET_NOTE: Record<string, string> = {
+  normal: '',
+  tight: ' · checking less often',
+  low: ' · background syncs paused',
+  out: ' · budget used up, background paused',
+};
+
+/** Requests sent to Spotify in the last 24 h against rune's own daily budget, and any Spotify lockout. */
+function SpotifyUsageRow() {
+  const q = useQuery({
+    queryKey: ['spotify-usage'],
+    queryFn: () => http<SpotifyUsage>('/spotify/usage'),
+    enabled: !isMock,
+    refetchInterval: 60_000,
+  });
+  const u = q.data;
+  if (!u) return null;
+  if (u.blockedUntil && u.blockedUntil > Date.now()) {
+    const at = new Date(u.blockedUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return (
+      <div className="statusrow">
+        <span className="statusrow__k">Spotify limit</span>
+        <span className="statusrow__v status--bad">Locked out by Spotify until {at}</span>
+      </div>
+    );
+  }
+  if (!u.budget) return null;
+  const { used24h, daily, level } = u.budget;
+  const tone = level === 'normal' ? 'status--ok' : level === 'tight' ? 'status--warn' : 'status--bad';
+  return (
+    <div className="statusrow">
+      <span className="statusrow__k">Spotify requests</span>
+      <span className={`statusrow__v ${tone}`}>
+        {used24h.toLocaleString('en-US')} / {daily.toLocaleString('en-US')} in 24 h{BUDGET_NOTE[level] ?? ''}
+      </span>
+    </div>
+  );
+}
 
 /** Background picker (the desktop top-bar menu has the same list); shared by every device. */
 function AmbientPicker() {
@@ -107,6 +152,7 @@ export default function Settings() {
                 <span className="statusrow__k">Spotify</span>
                 <span className={`statusrow__v ${h.spotify.connected ? 'status--ok' : 'status--warn'}`}>{h.spotify.connected ? 'Connected' : 'Not connected'}</span>
               </div>
+              {h.spotify.connected ? <SpotifyUsageRow /> : null}
             </section>
 
             <section className="statuscard">
