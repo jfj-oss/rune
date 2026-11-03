@@ -213,3 +213,14 @@
 /* inside the blurred queue drawer a menu's own blur has nothing to sample, so its glass shows the rows
    through the text: give menus there a solid background */
 .drawer .pop__panel, .qrow .pop__panel { background: #1b1c22; }
+/* the mark: three dots popping up in turn, in the backdrop's colour */
+.dotlogo { display: inline-flex; align-items: center; justify-content: center; gap: 12%; flex: none; }
+.dotlogo i { width: 22%; aspect-ratio: 1; border-radius: 50%; background: var(--dot-c); box-shadow: 0 0 6px color-mix(in srgb, var(--dot-c) 45%, transparent); transition: background 1.2s ease, box-shadow 1.2s ease; animation: dotlogo 1.8s ease-in-out infinite; }
+.dotlogo i:nth-child(2) { animation-delay: 0.2s; }
+.dotlogo i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dotlogo {
+  0%, 100% { transform: scale(0.35); opacity: 0.35; background: var(--dot-m); }
+  25% { transform: scale(1); opacity: 1; background: var(--dot-c); }
+  55% { transform: scale(0.8); opacity: 0.85; }
+}
+@media (prefers-reduced-motion: reduce) { .dotlogo i { animation: none; } }
