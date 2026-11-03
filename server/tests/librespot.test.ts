@@ -315,6 +315,23 @@ describe('LibrespotZone playback', () => {
     await zone.close();
   });
 
+  it('stops after three songs in a row fail instead of running through the whole queue', async () => {
+    const { zone, http, sockets } = makeZone();
+    await zone.command({ type: 'play', trackIds: ['sp:t1', 'sp:t2', 'sp:t3', 'sp:t4', 'sp:t5'] });
+    const err = (n: number) =>
+      sockets.last.emit('playback_error', { uri: `spotify:track:t${n}`, stage: 'load', kind: 'rejected', unplayable: true });
+    err(1);
+    await vi.waitFor(() => expect(http.playUris()).toHaveLength(2));
+    err(2);
+    await vi.waitFor(() => expect(http.playUris()).toHaveLength(3));
+    err(3);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(http.playUris()).toEqual(['spotify:track:t1', 'spotify:track:t2', 'spotify:track:t3']);
+    expect(zone.state().status).toBe('stopped');
+    expect(zone.state().index).toBe(2);
+    await zone.close();
+  });
+
   it('removes entries, including the playing one', async () => {
     const { zone, http } = makeZone();
     await zone.command({ type: 'play', trackIds: ['sp:t1', 'sp:t2', 'sp:t3'] });

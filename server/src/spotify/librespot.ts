@@ -79,6 +79,8 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 30_000;
 /** A stopped event right after an explicit play/stop belongs to the old context. */
 const END_SUPPRESS_MS = 1_500;
+/** this many songs failing to load in a row stops playback instead of skipping on */
+const MAX_FAIL_STREAK = 3;
 const POSITION_TICK_MS = 1_000;
 const EMPTY_ALBUM = { id: 'sp:unknown', title: '', coverUrl: undefined } as const;
 
@@ -251,6 +253,8 @@ export class LibrespotZone implements PlaybackZone {
   private closed = false;
   private suppressEndsUntil = 0;
   private endHandled = false;
+  /** songs in a row that failed to load; a run of them means the account or connection is refused, not one bad song */
+  private failStreak = 0;
 
   constructor(deviceId: string, name: string, opts: LibrespotZoneOptions) {
     this.deviceId = deviceId;
@@ -603,6 +607,16 @@ export class LibrespotZone implements PlaybackZone {
         // a song Spotify won't play here (restricted, no format, refused key) is skipped like a finished one
         if (this.matchesCurrent(data.uri) && (data.unplayable === true || data.stage === 'load')) {
           this.endHandled = true;
+          this.failStreak += 1;
+          if (this.failStreak >= MAX_FAIL_STREAK) {
+            // stop instead of racing through the whole queue without playing anything
+            this.failStreak = 0;
+            this.positionMs = 0;
+            this.positionAt = this.now();
+            this.status = 'stopped';
+            this.publish();
+            break;
+          }
           void this.advance();
         }
         break;
@@ -678,6 +692,7 @@ export class LibrespotZone implements PlaybackZone {
   }
 
   private onPlaying(data: Record<string, unknown>): void {
+    this.failStreak = 0;
     const uri = typeof data.uri === 'string' ? data.uri : undefined;
     if (uri) {
       this.currentUri = uri;
