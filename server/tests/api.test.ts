@@ -706,6 +706,32 @@ describe('POST /api/albums/:id/match', () => {
 
 // ---------------------------------------------------------------- websocket
 
+describe('/api/settings/hotkeys', () => {
+  it('is empty at first, then returns what was saved', async () => {
+    const empty = await app.inject({ method: 'GET', url: '/api/settings/hotkeys' });
+    expect(empty.json()).toEqual({ hotkeys: null });
+    const hotkeys = { albumKey: 'q', playlistKeys: { m: { id: 'pl:sp:abc', name: 'MUDs' } } };
+    const saved = await app.inject({ method: 'POST', url: '/api/settings/hotkeys', payload: { hotkeys } });
+    expect(saved.statusCode).toBe(200);
+    const back = await app.inject({ method: 'GET', url: '/api/settings/hotkeys' });
+    expect(back.json()).toEqual({ hotkeys });
+  });
+
+  it('rejects malformed values and keeps the saved ones', async () => {
+    for (const hotkeys of [null, { albumKey: 'Q', playlistKeys: {} }, { albumKey: '', playlistKeys: { mm: { id: 'x', name: 'y' } } }, { albumKey: '', playlistKeys: { m: { id: 1, name: 'y' } } }, { albumKey: '', playlistKeys: [] }]) {
+      const res = await app.inject({ method: 'POST', url: '/api/settings/hotkeys', payload: { hotkeys } });
+      expect(res.statusCode).toBe(400);
+    }
+    const back = await app.inject({ method: 'GET', url: '/api/settings/hotkeys' });
+    expect(back.json().hotkeys.albumKey).toBe('q');
+  });
+
+  it('allows the album key to be off', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/settings/hotkeys', payload: { hotkeys: { albumKey: '', playlistKeys: {} } } });
+    expect(res.json()).toEqual({ hotkeys: { albumKey: '', playlistKeys: {} } });
+  });
+});
+
 describe('GET /api/ws', () => {
   let wsBase: string | null = null;
   const wsUrl = async (): Promise<string> => {

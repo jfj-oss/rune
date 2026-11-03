@@ -131,6 +131,26 @@ function clockTime(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+export interface Hotkeys { albumKey: string; playlistKeys: Record<string, { id: string; name: string }> }
+
+/** A well-formed hotkeys value (album key '' = off; letters/digits only; at most 36 playlist keys), else null. */
+export function parseHotkeys(v: unknown): Hotkeys | null {
+  if (!v || typeof v !== 'object') return null;
+  const { albumKey, playlistKeys } = v as { albumKey?: unknown; playlistKeys?: unknown };
+  if (typeof albumKey !== 'string' || !/^[a-z0-9]?$/.test(albumKey)) return null;
+  if (!playlistKeys || typeof playlistKeys !== 'object' || Array.isArray(playlistKeys)) return null;
+  const out: Hotkeys['playlistKeys'] = {};
+  const entries = Object.entries(playlistKeys as Record<string, unknown>);
+  if (entries.length > 36) return null;
+  for (const [k, p] of entries) {
+    const e = p as { id?: unknown; name?: unknown } | null;
+    if (!/^[a-z0-9]$/.test(k) || !e || typeof e.id !== 'string' || typeof e.name !== 'string') return null;
+    if (!e.id || e.id.length > 200 || e.name.length > 300) return null;
+    out[k] = { id: e.id, name: e.name };
+  }
+  return { albumKey, playlistKeys: out };
+}
+
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<BuiltApp> {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   registerJsonCompression(app);
@@ -885,6 +905,17 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         if (d !== 'fine' && d !== 'classic') return reply.code(400).send({ error: 'dots must be fine or classic' });
         setState('ui.dots', d);
         return { dots: d };
+      });
+
+      // Hotkeys (album key + playlist keys), shared too: browsers that clear site data on exit would lose them.
+      r.get('/settings/hotkeys', async () => {
+        try { return { hotkeys: parseHotkeys(JSON.parse(getState('ui.hotkeys') ?? 'null')) }; } catch { return { hotkeys: null }; }
+      });
+      r.post<{ Body: { hotkeys?: unknown } }>('/settings/hotkeys', async (req, reply) => {
+        const h = parseHotkeys(req.body?.hotkeys);
+        if (!h) return reply.code(400).send({ error: 'hotkeys { albumKey, playlistKeys } required' });
+        setState('ui.hotkeys', JSON.stringify(h));
+        return { hotkeys: h };
       });
 
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {

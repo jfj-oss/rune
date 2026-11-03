@@ -122,6 +122,7 @@ export const useUi = create<UiStore>((set) => ({
     const albumKey = validAlbumKey(k);
     save('rune.albumKey', albumKey);
     set({ albumKey });
+    void syncHotkeys('push');
   },
   playlistKeys: cleanPlaylistKeys(load<unknown>('rune.playlistKeys', {})),
   setPlaylistKey: (id, name, k) => set((s) => {
@@ -129,6 +130,7 @@ export const useUi = create<UiStore>((set) => ({
     for (const [key, p] of Object.entries(s.playlistKeys)) if (p.id !== id) next[key] = p;
     if (k) next[k] = { id, name };
     save('rune.playlistKeys', next);
+    queueMicrotask(() => void syncHotkeys('push'));
     return { playlistKeys: next };
   }),
   queueOpen: false,
@@ -202,3 +204,32 @@ async function syncDots(dir: 'pull' | 'push', d?: DotSize): Promise<void> {
   } catch { /* offline: keep the local choice */ }
 }
 if (typeof window !== 'undefined' && !dotsFromUrl) void syncDots('pull');
+
+/** Hotkeys live on the server too (`ui.hotkeys`): Brave here clears site data on exit, which wiped them. */
+async function syncHotkeys(dir: 'pull' | 'push'): Promise<void> {
+  try {
+    const { isMock } = await import('../api');
+    if (isMock) return;
+    if (dir === 'push') {
+      const { albumKey, playlistKeys } = useUi.getState();
+      await fetch('/api/settings/hotkeys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hotkeys: { albumKey, playlistKeys } }) });
+      return;
+    }
+    const res = await fetch('/api/settings/hotkeys');
+    if (!res.ok) return;
+    const { hotkeys } = (await res.json()) as { hotkeys: { albumKey?: unknown; playlistKeys?: unknown } | null };
+    if (!hotkeys) {
+      // nothing shared yet: offer this device's keys, if it has any of its own
+      let mine = false;
+      try { mine = localStorage.getItem('rune.albumKey') !== null || localStorage.getItem('rune.playlistKeys') !== null; } catch { /* storage blocked */ }
+      if (mine) void syncHotkeys('push');
+      return;
+    }
+    const albumKey = validAlbumKey(hotkeys.albumKey);
+    const playlistKeys = cleanPlaylistKeys(hotkeys.playlistKeys);
+    save('rune.albumKey', albumKey);
+    save('rune.playlistKeys', playlistKeys);
+    useUi.setState({ albumKey, playlistKeys });
+  } catch { /* offline: keep the local keys */ }
+}
+if (typeof window !== 'undefined') void syncHotkeys('pull');

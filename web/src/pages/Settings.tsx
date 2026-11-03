@@ -97,7 +97,7 @@ function KeyboardCard() {
   return (
     <section className="statuscard keyspick">
       <h2 className="statuscard__head"><Keyboard size={17} /> Keyboard</h2>
-      <p className="muted">Work anywhere in rune, except while typing. The album and playlist keys are saved on this device.</p>
+      <p className="muted">Work anywhere in rune, except while typing. The album and playlist keys are shared by all your devices.</p>
       <div className="dotpick">
         <div><b>Go to the playing album</b><span className="muted">Keys rune already uses are left out</span></div>
         <label className="select">
