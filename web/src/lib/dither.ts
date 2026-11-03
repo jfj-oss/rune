@@ -17,7 +17,7 @@ export const DITHER_PALETTES: Record<DitherHue, DitherPalette> = {
   green: { light: hex('#22924c'), mid: hex('#0e3519') },
   olive: { light: hex('#a39642'), mid: hex('#464020') },
   lime: { light: hex('#a2a646'), mid: hex('#454721') },
-  teal: { light: hex('#005d63'), mid: hex('#002d31') },
+  teal: { light: hex('#00604c'), mid: hex('#002f26') },
 };
 
 /** Cycle order and timing: ~2 min round trip, each colour holds 20 s then eases into the next over 10 s. */
