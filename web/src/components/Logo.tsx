@@ -3,7 +3,7 @@ import { useCoverColor } from '../hooks/useCoverColor';
 import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type DitherPalette } from '../lib/dither';
 import { currentItem, usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
-import { brightness, ditherLevels } from '../lib/dotLogo';
+import { brightness, ditherLevels, logoDot } from '../lib/dotLogo';
 
 
 /** The palette the Dither backdrop is showing: its hue, the album page's colour, the playing album's, or the cycle. */
@@ -30,12 +30,13 @@ function useBackdropPalette(): DitherPalette {
 
 /**
  * The in-app mark: four balls on a square; one diagonal pair at a time swaps corners with a trail behind it. The whole
- * picture is drawn as a soft brightness field and ordered-dithered into very fine dots (one device pixel each) in the
- * backdrop's tones, so it is made of the same grain as the backdrop. Still with reduced motion; paused when hidden.
+ * picture is drawn as a soft brightness field and dithered exactly like the backdrop (its dot size, blue-noise
+ * thresholds and light / mid shares), so it is made of the same grain. Still with reduced motion; paused when hidden.
  * (The old static mark is still at web/public/icons/mark.svg.)
  */
 export function Logo({ size = 28 }: { size?: number }) {
   const pal = useBackdropPalette();
+  const grain = useUi((s) => s.dots);
   const palRef = useRef(pal);
   palRef.current = pal;
   const ref = useRef<HTMLCanvasElement>(null);
@@ -45,9 +46,12 @@ export function Logo({ size = 28 }: { size?: number }) {
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
-    const w = size * dpr;
+    // the backdrop's own grain: one cell per backdrop dot, scaled up crisply
+    const dpr = window.devicePixelRatio || 1;
+    const dot = logoDot(dpr, grain);
+    const w = Math.max(8, Math.round((size * dpr) / dot));
     canvas.width = canvas.height = w;
+    canvas.style.width = canvas.style.height = `${(w * dot) / dpr}px`;
     const img = ctx.createImageData(w, w);
     const field = new Float32Array(w * w), levels = new Uint8Array(w * w);
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -84,7 +88,7 @@ export function Logo({ size = 28 }: { size?: number }) {
       reduce.removeEventListener('change', start);
       redraw.current = () => {};
     };
-  }, [size]);
+  }, [size, grain]);
 
   // a new colour shows at once even when the animation is still (reduced motion)
   useEffect(() => { redraw.current(); }, [pal]);

@@ -24,12 +24,16 @@ describe('dot logo motion', () => {
 });
 
 describe('dot logo dither', () => {
-  it('is see-through away from the balls and lit at their centres', () => {
-    const w = 60;
+  it('is see-through away from the balls and a speckle of light over mid on them, like the backdrop', () => {
+    const w = 40;
     const lv = ditherLevels(brightness(0, w, w), w, w);
     expect(lv[0]).toBe(0);
     const b = ballsAt(0)[0]!;
-    expect(lv[Math.floor(b.y * w) * w + Math.floor(b.x * w)]).toBe(2);
-    expect(new Set(lv)).toEqual(new Set([0, 1, 2]));
+    const r = Math.floor(b.r * w * 0.5);
+    const around: number[] = [];
+    for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) around.push(lv[(Math.floor(b.y * w) + y) * w + Math.floor(b.x * w) + x]!);
+    expect(around).toContain(2);
+    expect(around).toContain(1);
+    expect(around.filter((l) => l === 2).length).toBeLessThan(around.length / 2);
   });
 });

@@ -399,7 +399,7 @@ export const EVOLVE = { firstEnd: 75, holdMin: 80, holdSpread: 60, fadeMin: 20, 
 function nextChar(): Character {
   const r = planRng!;
   if (!bag.length) {
-    bag = [0, 1, 2, 3];
+    bag = [1, 2, 3]; // drift (0), the original pools, is no longer in the rotation: only the wave characters
     for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [bag[i], bag[j]] = [bag[j]!, bag[i]!]; }
     // never the same character twice running across bag boundaries
     if (bag[bag.length - 1] === lastChar) { const k = Math.floor(r() * (bag.length - 1)); [bag[k], bag[bag.length - 1]] = [bag[bag.length - 1]!, bag[k]!]; }
@@ -410,8 +410,8 @@ function nextChar(): Character {
 function extendPlan(t: number) {
   if (!planRng) {
     planRng = rng(EVOLVE.seed);
-    lastChar = 0;
-    plan.push({ char: 0, end: EVOLVE.firstEnd, fade: EVOLVE.fadeMin + planRng() * EVOLVE.fadeSpread });
+    lastChar = 1;
+    plan.push({ char: 1, end: EVOLVE.firstEnd, fade: EVOLVE.fadeMin + planRng() * EVOLVE.fadeSpread });
   }
   const r = planRng;
   // keep one segment beyond t
@@ -421,10 +421,11 @@ function extendPlan(t: number) {
   }
 }
 
-/** Weights (sum 1) of the four characters at time t seconds. Starts as pure drift; crossfades are smoothstepped. */
+/** Weights (sum 1) of the four characters at time t seconds. Starts as pure tide and moves between tide, ripple and
+    aurora (drift is out of the rotation); crossfades are smoothstepped. */
 export function mixAt(t: number): Mix {
   const m: Mix = [0, 0, 0, 0];
-  if (!(t > 0)) { m[0] = 1; return m; }
+  if (!(t > 0)) { m[1] = 1; return m; }
   extendPlan(t);
   // segments whose fade starts after t are not reached: find the first fade that has not finished
   let lo = 0, hi = plan.length - 1;

@@ -2,7 +2,7 @@
    swapping corners, drawn as a soft brightness field (balls + motion trails) and then ordered-dithered into very fine
    dots in the backdrop's tones. DOM-free so it can be unit-tested. */
 
-import { bayer } from './dither';
+import { blueNoise, densities, ditherLevel, type DotSize } from './dither';
 
 /** One loop: pair A swaps in the first 40%, pair B from 50% to 90%. */
 export const LOOP_MS = 1800;
@@ -97,16 +97,27 @@ export function brightness(ms: number, w: number, h: number, into = new Float32A
   return into;
 }
 
-const BAYER = bayer(8);
+/** The backdrop's dot size in device pixels (see dotSize in lib/dither): fine ~1.5 CSS px, classic ~2. */
+export function logoDot(dpr: number, grain: DotSize): number {
+  return grain === 'fine' ? Math.max(1, Math.floor(1.5 * dpr + 0.01)) : Math.max(2, Math.round(2 * dpr));
+}
 
-/** Ordered dither into levels: 0 = see-through (the backdrop shows), 1 = mid tone, 2 = light tone. */
-export function ditherLevels(field: Float32Array, w: number, h: number, into = new Uint8Array(w * h)): Uint8Array {
+const NOISE_N = 64;
+let rank: Uint16Array | null = null;
+
+/**
+ * Dither the field exactly like the backdrop: blue-noise thresholds and the backdrop's light / mid shares, so even the
+ * brightest ball is a speckle of light dots over mid ones. Levels: 0 = see-through (where the backdrop would be
+ * black), 1 = mid tone, 2 = light tone. `ox`/`oy` shift the noise so neighbouring logos do not repeat each other.
+ */
+export function ditherLevels(field: Float32Array, w: number, h: number, into = new Uint8Array(w * h), ox = 0, oy = 0): Uint8Array {
+  rank ??= blueNoise(NOISE_N);
+  const N = NOISE_N * NOISE_N;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = y * w + x;
-    const v = Math.min(1, field[i]!) * 2;
-    const base = Math.min(1, Math.floor(v));
-    const th = (BAYER[(y & 7) * 8 + (x & 7)]! + 0.5) / 64;
-    into[i] = Math.min(2, base + (v - base > th ? 1 : 0));
+    const [dL, dM] = densities(Math.min(1, field[i]!));
+    const th = (rank[((y + oy) % NOISE_N) * NOISE_N + ((x + ox) % NOISE_N)]! + 0.5) / N;
+    into[i] = ditherLevel(dL, dM, th);
   }
   return into;
 }

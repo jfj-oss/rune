@@ -232,10 +232,10 @@ describe('paletteFromColour', () => {
 
 describe('evolution schedule', () => {
   const sum = (m: number[]) => m.reduce((a, b) => a + b, 0);
-  it('starts as pure drift and holds it for the first minute', () => {
-    expect(mixAt(0)).toEqual([1, 0, 0, 0]);
-    expect(mixAt(-5)).toEqual([1, 0, 0, 0]);
-    expect(mixAt(EVOLVE.firstEnd - 40)).toEqual([1, 0, 0, 0]);
+  it('starts as pure tide and holds it for the first minute', () => {
+    expect(mixAt(0)).toEqual([0, 1, 0, 0]);
+    expect(mixAt(-5)).toEqual([0, 1, 0, 0]);
+    expect(mixAt(EVOLVE.firstEnd - 40)).toEqual([0, 1, 0, 0]);
   });
   it('weights always sum to 1 and never jump (smooth crossfades)', () => {
     let prev = mixAt(0);
@@ -248,14 +248,15 @@ describe('evolution schedule', () => {
       prev = m;
     }
   });
-  it('visits every character, never two crossfades at once, and is deterministic', () => {
+  it('visits every wave character but never drift, never two crossfades at once, and is deterministic', () => {
     const seen = new Set<number>();
     for (let t = 0; t < 6000; t += 5) {
       const m = mixAt(t);
       expect(m.filter((w) => w > 0).length).toBeLessThanOrEqual(2);
       m.forEach((w, i) => { if (w > 0.999) seen.add(i); });
     }
-    expect([...seen].sort()).toEqual([0, 1, 2, 3]);
+    expect([...seen].sort()).toEqual([1, 2, 3]);
+    for (let t = 0; t < 6000; t += 5) expect(mixAt(t)[0]).toBe(0);
     expect(mixAt(1234.5)).toEqual(mixAt(1234.5));
   });
   it('is not a fixed loop: segment lengths vary', () => {
