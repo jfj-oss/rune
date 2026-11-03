@@ -249,6 +249,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   private startedRev = 0;
   private readonly listeners = new Set<(s: PlayerState) => void>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private pendingVolume: { volume: number; device: string | undefined } | null = null;
+  private volumeSending: Promise<void> | null = null;
   private inFlight: Promise<void> | null = null;
   private closed = false;
   private claimUntil = 0;
@@ -383,13 +385,29 @@ export class SpotifyConnectZone implements PlaybackZone {
         throw new Error(
           'Spotify Connect does not support removing individual queue items: Spotify has no Web API for it.',
         );
-      case 'volume':
-        await this.api.setVolume(cmd.volume, device);
+      case 'volume': {
         // Spotify keeps reporting the previous level for a moment: don't bounce back to it.
         this.volumeHold = { volume: Math.round(cmd.volume), until: this.now() + VOLUME_HOLD_MS };
         this.snapshot = { ...this.snapshot, volume: this.volumeHold.volume };
         for (const cb of this.listeners) cb(this.snapshot);
-        return this.refresh();
+        // A slider drag sends many levels: send one at a time and only the newest one waiting, and don't
+        // re-read the player afterwards (the level is already shown; the next scheduled poll confirms it).
+        this.pendingVolume = { volume: cmd.volume, device };
+        if (!this.volumeSending) {
+          this.volumeSending = (async () => {
+            while (this.pendingVolume) {
+              const next = this.pendingVolume;
+              this.pendingVolume = null;
+              await this.api.setVolume(next.volume, next.device);
+            }
+          })().finally(() => {
+            this.volumeSending = null;
+            this.pendingVolume = null;
+          });
+        }
+        await this.volumeSending;
+        return this.snapshot;
+      }
       case 'shuffle':
         await this.api.setShuffle(cmd.on, device);
         this.toggleHold = { ...this.toggleHold, shuffle: cmd.on, until: this.now() + VOLUME_HOLD_MS };

@@ -171,6 +171,21 @@ describe('Spotify Connect zones', () => {
     expect(zone.state().volume).toBe(42);
   });
 
+  it('a fast volume drag sends only the newest level and no extra player reads', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { now: () => 1000 });
+    const reads = () => api.currentPlaybackCalls;
+    const before = reads();
+    await Promise.all([10, 20, 30, 40, 50].map((volume) => zone.command({ type: 'volume', volume })));
+    const sent = callsOf(api, 'setVolume').map((c) => c.args[0]);
+    expect(sent[0]).toBe(10);
+    expect(sent.at(-1)).toBe(50);
+    expect(sent.length).toBeLessThanOrEqual(2);
+    expect(reads()).toBe(before);
+    expect(zone.state().volume).toBe(50);
+  });
+
   it('rejects local track ids with a clear error and no call', async () => {
     const api = new FakeZoneApi();
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
