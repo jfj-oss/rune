@@ -6,6 +6,8 @@ import { useUi } from '../store/ui';
 import { brightness, ditherLevels } from '../lib/dotLogo';
 
 
+const BLACK = [0, 0, 0] as const;
+
 /** The palette the Dither backdrop is showing: its hue, the album page's colour, the playing album's, or the cycle. */
 function useBackdropPalette(): DitherPalette {
   const ambient = useUi((s) => s.ambient);
@@ -63,8 +65,9 @@ export function Logo({ size = 28 }: { size?: number }) {
       const d = img.data;
       for (let i = 0; i < levels.length; i++) {
         const l = levels[i]!, o = i * 4;
-        const c = l === 2 ? light : mid;
-        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = l ? 255 : 0;
+        // inside a ball or its trail the gaps between dots are black, like the backdrop; outside, see-through
+        const c = l === 2 ? light : l === 1 ? mid : BLACK;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = l || field[i]! > 0.015 ? 255 : 0;
       }
       ctx.putImageData(img, 0, 0);
     };
