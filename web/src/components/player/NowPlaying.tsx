@@ -23,6 +23,9 @@ import { Cover } from '../Cover';
 import { SourceLink } from '../Rows';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
 
+/** Songs listed under Up next; the list scrolls inside its own box. */
+const UP_NEXT_MAX = 100;
+
 const DitherBackdrop = lazy(() => import('../DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
 
 /** Backdrop colour: the cover's own colour, else the user's Dither pick, else purple. */
@@ -124,7 +127,7 @@ export function NowPlaying() {
   const d = details.data;
   const hasReview = !!d && (!!d.reception || d.scores.length > 0 || d.quotes.length > 0);
   const bio = artistInfo.data?.bio;
-  const upNext = queue.slice(index + 1, index + 4);
+  const upNext = queue.slice(index + 1, index + 1 + UP_NEXT_MAX);
   const title = meta?.title ?? cur?.track.title ?? 'Nothing playing';
 
   return (
@@ -201,7 +204,7 @@ export function NowPlaying() {
 
           {upNext.length > 0 && (
             <section className="np__sec">
-              <h2 className="eyebrow">Up next</h2>
+              <h2 className="eyebrow">Up next{queue.length - index - 1 > 3 ? <span className="np__nextcount"> · {queue.length - index - 1}</span> : null}</h2>
               <ul className="np__next">
                 {upNext.map((q, i) => {
                   const qLive = isLiveTrack(q.track);
