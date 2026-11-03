@@ -77,7 +77,12 @@ const defaultRun = (command: string, args: string[]): Promise<CommandResult> =>
 const defaultRunner: CommandRunner = {
   run: defaultRun,
   spawnDetached(command, args) {
-    spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
+    // rune.service uses KillMode=control-group: a plain child would be killed with every rune
+    // restart. systemd-run starts it as its own transient user unit, outside rune's cgroup.
+    const unit = `rune-spotify-${Date.now()}`;
+    const child = spawn('systemd-run', ['--user', '--collect', '--quiet', `--unit=${unit}`, '--', command, ...args], { detached: true, stdio: 'ignore' });
+    child.on('error', () => spawn(command, args, { detached: true, stdio: 'ignore' }).unref());
+    child.unref();
   },
 };
 
