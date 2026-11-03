@@ -1,6 +1,6 @@
 import type { Album, AlbumDetails, Artist } from '@liner/shared';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { Copy, ListEnd, MoreHorizontal, Play, Plus, Radio, Shuffle, Wrench } from 'lucide-react';
+import { Copy, ListEnd, MoreHorizontal, Play, Plus, Radio, Shuffle, Star, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api, coverSrc } from '../api';
@@ -18,9 +18,11 @@ import { SaveButton } from '../components/SaveButton';
 import { Cover } from '../components/Cover';
 import { AddToPlaylistItem } from '../components/AddToPlaylist';
 import { MenuItem, Popover } from '../components/Popover';
-import { Empty, HScroll, SectionHead, SourceLink } from '../components/Rows';
+import { Empty, HScroll, QuietNote, SectionHead, SourceLink } from '../components/Rows';
 import { discoverApi } from '../discoverApi';
+import { useCoverColor } from '../hooks/useCoverColor';
 import { useScrollRoot } from '../hooks/scrollRoot';
+import { paletteFromColour } from '../lib/dither';
 import { albumItems, usePlay } from '../hooks/usePlay';
 import { encId, formatTotalLength, plural } from '../lib/format';
 import type { AlbumEditions } from '../lib/discover';
@@ -64,6 +66,26 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
   const openPreview = usePreview((s) => s.open);
   const [fixing, setFixing] = useState(false);
   const d = details.data;
+
+  // the dither dots take this album's cover colour while the page is open (and blend back when it closes)
+  const tint = useCoverColor(album);
+  const setPagePalette = useUi((s) => s.setPagePalette);
+  useEffect(() => {
+    if (!tint.startsWith('rgb')) return; // still the hash fallback: wait for the real cover colour
+    setPagePalette(paletteFromColour(tint));
+  }, [tint, setPagePalette]);
+  useEffect(() => () => setPagePalette(null), [setPagePalette]);
+
+  // the tab strip is clear glass until it sticks to the top, so the hero fades into the page without an edge
+  const sentinel = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const r = root.current, el = sentinel.current;
+    if (!r || !el) return;
+    const obs = new IntersectionObserver(([e]) => setStuck(!!e && !e.isIntersecting && e.boundingClientRect.top < (e.rootBounds?.top ?? 0) + 2), { root: r, threshold: 0 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [root, album.id]);
   const loadingDetails = details.isLoading;
 
   const totalMs = album.tracks.reduce((n, t) => n + t.durationMs, 0);
@@ -169,7 +191,8 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
         </div>
       </section>
 
-      <nav className="atabs" aria-label="Album sections">
+      <div className="atabs__sentinel" ref={sentinel} aria-hidden />
+      <nav className={`atabs${stuck ? ' is-stuck' : ''}`} aria-label="Album sections">
         <div className="atabs__in" role="tablist">
           {tabs.map((t) => (
             <button key={t.id} role="tab" aria-selected={active === t.id} className={active === t.id ? 'is-active' : ''} onClick={() => go(t.id)}>{t.label}</button>
@@ -194,7 +217,7 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
         )}
 
         {!loadingDetails && !aboutLoading && !hasReview && !hasAbout && (
-          <section className="asec asec--quiet"><p className="muted">No reviews found for this album.</p></section>
+          <section className="asec asec--quiet"><QuietNote icon={<Star size={17} />}>No reviews found for this album.</QuietNote></section>
         )}
 
         {d && hasReview && (

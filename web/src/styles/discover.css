@@ -23,7 +23,7 @@ a.pcard:hover { background: var(--surface-2); border-color: color-mix(in srgb, v
 .personhero { display: flex; align-items: center; gap: 26px; margin: 6px 0 12px; min-width: 0; }
 .personhero__photo { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; flex: none; border: 1px solid color-mix(in srgb, #fff 12%, transparent); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45); }
 .personhero__txt { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.personhero__name { font-size: clamp(30px, 4vw, 44px); line-height: 1.05; font-weight: 700; letter-spacing: -0.025em; text-wrap: balance; }
+.personhero__name { font-family: var(--serif); font-size: clamp(32px, 4.2vw, 48px); line-height: 1.08; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
 .personhero__meta { font-size: 13.5px; color: var(--text-2); }
 .personhero__roles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .personhero__role { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; background: color-mix(in srgb, #fff 7%, transparent); border: 1px solid var(--line); font-size: 12.5px; color: var(--text); }
@@ -274,5 +274,8 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .ambientpick__list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .ambientpick__item { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); font-size: 13.5px; color: var(--text-2); text-align: left; }
 .ambientpick__item span { flex: 1; }
+.dotpick { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--line); }
+.dotpick > div:first-child { display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.dotpick .muted { font-size: 12.5px; }
 .ambientpick__item:hover { background: color-mix(in srgb, #fff 6%, transparent); color: var(--text); }
 .ambientpick__item.is-current { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); color: var(--text); }

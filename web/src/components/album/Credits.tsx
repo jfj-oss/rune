@@ -7,13 +7,13 @@ import { formatTrackRefs, groupCredits } from '../../lib/credits';
 import { encId, initials } from '../../lib/format';
 
 /** Initials tile; big avatars (artist pages, grids, search) also try the artist's photo on top. */
-export function Avatar({ name, id, size = 44, photo = size >= 90 }: { name: string; id: string; size?: number; photo?: boolean }) {
+export function Avatar({ name, id, size = 44, photo = size >= 90, onPhoto }: { name: string; id: string; size?: number; photo?: boolean; onPhoto?: (shown: boolean) => void }) {
   const [img, setImg] = useState<'loading' | 'ok' | 'err'>('loading');
   return (
     <span className="avatar" style={{ width: size, height: size, background: tileGradient(id), fontSize: size * 0.36 }} aria-hidden data-photo={img}>
       {initials(name)}
       {photo && !isMock && img !== 'err' && (
-        <img className="avatar__img" src={`/api/artist-image/${encodeURIComponent(id)}`} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => setImg('ok')} onError={() => setImg('err')} />
+        <img className="avatar__img" src={`/api/artist-image/${encodeURIComponent(id)}`} alt="" loading="lazy" decoding="async" draggable={false} onLoad={() => { setImg('ok'); onPhoto?.(true); }} onError={() => { setImg('err'); onPhoto?.(false); }} />
       )}
     </span>
   );

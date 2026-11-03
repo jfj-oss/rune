@@ -20,14 +20,19 @@
 .card { min-width: 0; }
 .card__art { position: relative; border-radius: var(--r); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4); transition: transform 180ms ease, box-shadow 180ms ease; }
 .card__artlink { display: block; border-radius: var(--r); }
-.card:hover .card__art { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.55); }
+.card__art { will-change: auto; }
+/* lift + a soft glow in the cover's own colour (--glow is set on first hover, see lib/coverGlow); hover-capable pointers only */
+@media (hover: hover) and (pointer: fine) {
+  .card:hover .card__art { transform: translateY(-4px) scale(1.012); box-shadow: 0 16px 34px rgba(0, 0, 0, 0.55), 0 10px 42px -6px var(--glow, rgba(255, 255, 255, 0.12)); }
+}
 .card__badge { position: absolute; left: 8px; bottom: 8px; opacity: 0; transition: opacity var(--t); pointer-events: none; }
 .card:hover .card__badge, .card:focus-within .card__badge { opacity: 1; }
 .card__play { position: absolute; right: 8px; bottom: 8px; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #12101f; opacity: 0; transform: translateY(6px); transition: opacity var(--t), transform var(--t), background var(--t); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); }
 .card__play svg { margin-left: 2px; }
 .card:hover .card__play, .card__play:focus-visible { opacity: 1; transform: none; }
 .card__play:hover { background: var(--accent-2); }
-@media (hover: none) { .card__badge { opacity: 1; top: 8px; bottom: auto; } .card__play { display: none; } .card:hover .card__art { transform: none; } }
+@media (hover: none) { .card__badge { opacity: 1; top: 8px; bottom: auto; } .card__play { display: none; } }
+@media (prefers-reduced-motion: reduce) { .card:hover .card__art { transform: none !important; } }
 .card__title { display: block; margin-top: 11px; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card__title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .card__sub { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }

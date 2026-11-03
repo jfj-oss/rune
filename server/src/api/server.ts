@@ -816,6 +816,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { ambient: a };
       });
 
+      // Dither dot size ("fine" | "classic"), shared the same way.
+      r.get('/settings/dots', async () => ({ dots: getState('ui.dots') ?? null }));
+      r.post<{ Body: { dots?: unknown } }>('/settings/dots', async (req, reply) => {
+        const d = req.body?.dots;
+        if (d !== 'fine' && d !== 'classic') return reply.code(400).send({ error: 'dots must be fine or classic' });
+        setState('ui.dots', d);
+        return { dots: d };
+      });
+
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
         // Spotify artists (search results, playlist artists): add their Spotify discography.

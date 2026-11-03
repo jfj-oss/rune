@@ -46,6 +46,18 @@ export function Shell({ children }: { children: ReactNode }) {
     if (y) requestAnimationFrame(() => { el.scrollTop = y; });
   }, [loc.key]);
 
+  // a gentle fade + 4 px rise when the route changes (skipped on first load and with reduced motion). Plain Web Animations
+  // on the page element: nothing re-mounts, no layout change, and Now Playing / the drawers sit outside <main>.
+  const firstRoute = useRef(true);
+  useLayoutEffect(() => {
+    if (firstRoute.current) { firstRoute.current = false; return; }
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    main.current?.firstElementChild?.animate?.(
+      [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+    );
+  }, [loc.pathname]);
+
   useEffect(() => {
     setQueue(false);
     setNp(false);

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { MoreHorizontal, Play, Radio, Shuffle } from 'lucide-react';
+import { useState } from 'react';
+import { BookOpen, MoreHorizontal, Play, Radio, Shuffle } from 'lucide-react';
 import { useParams, Link } from 'react-router-dom';
 import { api, coverSrc } from '../api';
 import { AlbumCard, CardSkeleton } from '../components/AlbumCard';
@@ -9,7 +10,7 @@ import { Prose } from '../components/album/Reception';
 import { Cover } from '../components/Cover';
 import { PlayStats } from '../components/discover/PlayStats';
 import { MobileBack } from '../components/MobileBack';
-import { Empty, SectionHead, SourceLink } from '../components/Rows';
+import { Empty, QuietNote, SectionHead, SourceLink } from '../components/Rows';
 import { discoverApi } from '../discoverApi';
 import { usePlay } from '../hooks/usePlay';
 import { groupDiscography } from '../lib/discover';
@@ -33,6 +34,9 @@ export default function ArtistPage() {
     staleTime: 5 * 60_000,
   });
   const { playAlbums } = usePlay();
+  // the photo only counts once it has really loaded (banner or round avatar); until then / if it fails, the covers mosaic shows
+  const [banner, setBanner] = useState<{ src: string; ok: boolean } | null>(null);
+  const [avatarPhotoOf, setAvatarPhotoOf] = useState<string | null>(null);
   const openPreview = usePreview((s) => s.open);
   if (q.isError) return <div className="page"><Empty title="Artist not found" /></div>;
   const a = q.data;
@@ -41,7 +45,9 @@ export default function ArtistPage() {
   const bio = a.bio ?? info.data?.bio;
   const heroImage = a.imageUrl ?? info.data?.imageUrl;
   const credit = info.data?.imageCredit;
-  const mosaic = a.albums.concat(a.appearsOn).slice(0, 6);
+  const mosaic = [...new Map(a.albums.concat(a.appearsOn).map((x) => [x.id, x])).values()].slice(0, 4);
+  const bannerOk = !!heroImage && banner?.src === heroImage && banner.ok;
+  const hasPhoto = bannerOk || avatarPhotoOf === a.id;
   const ids = a.albums.map((x) => x.id);
   const hasLocal = a.albums.some((x) => x.source === 'local');
   const sections = groupDiscography(discog.data?.releaseGroups ?? []);
@@ -52,19 +58,25 @@ export default function ArtistPage() {
     <div className="page page--artist">
       <section className="arthero">
         <div className="arthero__bg" aria-hidden>
-          {heroImage ? <img className="arthero__img" src={heroImage} alt="" /> : (
-            <div className="arthero__mosaic">{mosaic.map((m) => <img key={m.id} src={coverSrc(m, 200)} alt="" />)}</div>
+          {mosaic.length > 0 && (
+            <div className={`arthero__mosaic arthero__mosaic--${mosaic.length}${bannerOk ? ' is-out' : ''}`}>{mosaic.map((m) => <img key={m.id} src={coverSrc(m, 200)} alt="" />)}</div>
           )}
-          <div className="arthero__wash" />
+          {heroImage && (
+            <img
+              className={`arthero__img${bannerOk ? ' is-in' : ''}`} src={heroImage} alt=""
+              onLoad={() => setBanner({ src: heroImage, ok: true })} onError={() => setBanner({ src: heroImage, ok: false })}
+            />
+          )}
+          <div className={`arthero__wash${bannerOk ? '' : ' arthero__wash--covers'}`} />
         </div>
         <MobileBack />
         <div className="arthero__inner">
-          <Avatar name={a.name} id={a.id} size={96} />
+          <Avatar key={a.id} name={a.name} id={a.id} size={96} onPhoto={(shown) => setAvatarPhotoOf(shown ? a.id : null)} />
           <div>
             <span className="eyebrow">Artist</span>
             <h1 className="arthero__name">{a.name}</h1>
             <p className="arthero__meta">{plural(a.albums.length, 'album')}{a.appearsOn.length ? ` · appears on ${a.appearsOn.length}` : ''}</p>
-            {heroImage && credit ? (
+            {hasPhoto && credit ? (
               <p className="arthero__credit">
                 Photo: {credit.author ? <a href={credit.url} target="_blank" rel="noopener noreferrer">{credit.author}</a> : 'Unknown'}
                 {credit.license ? ` · ${credit.license}` : ''}
@@ -102,7 +114,7 @@ export default function ArtistPage() {
             </div>
           </section>
         ) : (
-          <section className="asec asec--quiet"><p className="muted">No biography found for this artist.</p></section>
+          <section className="asec asec--quiet"><QuietNote icon={<BookOpen size={17} />}>No biography found for this artist.</QuietNote></section>
         )}
 
         <section className="asec">

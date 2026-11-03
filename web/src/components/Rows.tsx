@@ -35,6 +35,11 @@ export function Empty({ title, children, icon }: { title: string; children?: Rea
   );
 }
 
+/** A small, quiet inline "nothing here" note (biography / reviews missing): not an error, just calm. */
+export function QuietNote({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
+  return <p className="quietnote">{icon}<span>{children}</span></p>;
+}
+
 /** "From Wikipedia ›": with `onPreview` it opens the in-app preview instead of leaving rune. */
 export function SourceLink({ source, url, prefix = 'From', onPreview }: { source: string; url: string; prefix?: string; onPreview?: () => void }) {
   return (

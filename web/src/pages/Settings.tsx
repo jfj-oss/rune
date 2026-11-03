@@ -6,7 +6,7 @@ import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { LibraryTabs } from './Albums';
 import { formatBytes, formatListening, formatStamp } from '../lib/discover';
-import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
+import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
 
 interface SpotifyUsage {
   blockedUntil: number | null;
@@ -56,6 +56,8 @@ function SpotifyUsageRow() {
 function AmbientPicker() {
   const ambient = useUi((s) => s.ambient);
   const setAmbient = useUi((s) => s.setAmbient);
+  const dots = useUi((s) => s.dots);
+  const setDots = useUi((s) => s.setDots);
   return (
     <section className="statuscard ambientpick">
       <h2 className="statuscard__head"><Palette size={17} /> Background</h2>
@@ -68,6 +70,14 @@ function AmbientPicker() {
             {ambient === a && <Check size={15} />}
           </button>
         ))}
+      </div>
+      <div className="dotpick">
+        <div><b>Dot size</b><span className="muted">Grain of the Dither backgrounds</span></div>
+        <div className="seg" role="radiogroup" aria-label="Dot size">
+          {DOT_SIZES.map((d) => (
+            <button key={d} role="radio" aria-checked={dots === d} className={dots === d ? 'is-active' : ''} onClick={() => setDots(d)}>{DOT_LABEL[d]}</button>
+          ))}
+        </div>
       </div>
     </section>
   );

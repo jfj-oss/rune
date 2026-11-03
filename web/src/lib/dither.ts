@@ -170,13 +170,23 @@ export function ditherLevel(dL: number, dM: number, threshold: number): 0 | 1 | 
   return threshold < dL ? 2 : threshold < dL + dM ? 1 : 0;
 }
 
-/** Device-pixel size of one dither dot: ~2 CSS px, always an integer number of device pixels, grown on huge screens
-    so the canvas never exceeds `maxPixels`. */
-export function dotSize(cssW: number, cssH: number, dpr: number, coarse = 0, maxPixels = 600_000): number {
-  let dot = Math.max(2, Math.round((2 + coarse) * dpr));
-  while ((cssW * dpr / dot) * (cssH * dpr / dot) > maxPixels) dot++;
+/** Dot grain: `fine` (default) is ~1.5 CSS px, `classic` the original ~2 CSS px. */
+export type DotSize = 'fine' | 'classic';
+
+/** Device-pixel size of one dither dot, always an integer number of device pixels, grown on huge screens so the
+    canvas never exceeds `maxPixels`. Classic: ~2 CSS px. Fine: ~1.5 CSS px (1 px at dpr 1, 3 at dpr 2, 4 at dpr 3),
+    with a higher pixel budget (one cheap fragment pass; the adaptive `coarse` step still backs off on slow devices). */
+export function dotSize(cssW: number, cssH: number, dpr: number, coarse = 0, maxPixels?: number, grain: DotSize = 'classic'): number {
+  const fine = grain === 'fine';
+  const cap = maxPixels ?? (fine ? 2_200_000 : 600_000);
+  let dot = fine ? Math.max(1, Math.floor((1.5 + coarse) * dpr + 0.01)) : Math.max(2, Math.round((2 + coarse) * dpr));
+  while ((cssW * dpr / dot) * (cssH * dpr / dot) > cap) dot++;
   return dot;
 }
+
+/** Share of the strong-colour / mid-tone dots kept: the phone's fine grain is a little sparser so it reads as
+    calm texture rather than noise. */
+export const calmFor = (grain: DotSize, phone: boolean): number => (grain === 'fine' && phone ? 0.84 : 1);
 
 /* ---------- shape field ----------
    The same numbers drive the WebGL shader (generated GLSL in components/DitherBackdrop) and the CPU fallback below.

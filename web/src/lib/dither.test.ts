@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bayer, blueNoise, CYCLE_FADE, CYCLE_HOLD, CYCLE_ORDER, DITHER_PALETTES, ditherLevel, dotSize, field, paletteAt,
+  bayer, blueNoise, CYCLE_FADE, CYCLE_HOLD, CYCLE_ORDER, DITHER_PALETTES, calmFor, ditherLevel, dotSize, field, paletteAt,
   densities, MASK, toneCurve,
 } from './dither';
 
@@ -113,6 +113,16 @@ describe('dotSize', () => {
     expect(dotSize(1600, 1000, 1, 1)).toBe(3);
     const d = dotSize(3840, 2160, 2);
     expect((3840 * 2 / d) * (2160 * 2 / d)).toBeLessThanOrEqual(600_000);
+  });
+  it('fine grain is smaller than classic and respects its pixel budget', () => {
+    expect(dotSize(1280, 800, 1, 0, undefined, 'fine')).toBe(1);
+    expect(dotSize(1280, 800, 2, 0, undefined, 'fine')).toBe(3);
+    expect(dotSize(390, 844, 3, 0, undefined, 'fine')).toBe(4);
+    expect(dotSize(390, 844, 3, 1, undefined, 'fine')).toBeGreaterThan(4);
+    const d = dotSize(3840, 2160, 2, 0, undefined, 'fine');
+    expect((3840 * 2 / d) * (2160 * 2 / d)).toBeLessThanOrEqual(2_200_000);
+    expect(calmFor('fine', true)).toBeLessThan(1);
+    expect(calmFor('classic', true)).toBe(1);
   });
 });
 

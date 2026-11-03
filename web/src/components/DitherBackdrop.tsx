@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  blueNoise, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
+  blueNoise, calmFor, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
   WAVE, waveAt, wavePeakExponent, type DitherColour, type DitherPalette,
 } from '../lib/dither';
 import { backdropFrameMs } from '../lib/frameRate';
@@ -45,6 +45,7 @@ uniform float u_t;
 uniform vec3 u_mid;
 uniform vec3 u_light;
 uniform float u_wave;   // new-song wave: how far the shapes have swelled out, 0..1 (waveAt)
+uniform float u_calm;   // share of dots kept (the phone's fine grain is sparser)
 uniform float u_wexp;   // field exponent at the wave's peak (wavePeakExponent)
 uniform sampler2D u_noise;
 
@@ -84,8 +85,8 @@ void main() {
   float mot = ${g(MOTTLE.base)} + ${g(MOTTLE.amp)} * vnoise(vec2(q.x * ${g(MOTTLE.freq)} + t * ${g(MOTTLE.speed)}, q.y * ${g(MOTTLE.freq)}));
 
   float tau = pow(smoothstep(${g(TONE.lo)}, ${g(TONE.hi)}, f), ${g(TONE.gamma)});
-  float dL = pow(tau, 1.6) * ${g(MASK.light)} * min(1.0, mot);
-  float dM = min(1.0 - dL, pow(tau, 0.6) * ${g(MASK.mid)});
+  float dL = pow(tau, 1.6) * ${g(MASK.light)} * min(1.0, mot) * u_calm;
+  float dM = min(1.0 - dL, pow(tau, 0.6) * ${g(MASK.mid)} * u_calm);
 
   // byte b encodes the threshold (b + 0.5) / 256, never 0 or 1, so pure black / pure light stay clean
   float th = (texture2D(u_noise, gl_FragCoord.xy / ${NOISE_N}.0).r * 255.0 + 0.5) / 256.0;
@@ -96,7 +97,7 @@ void main() {
 
 interface Wave { amt: number; dir: number; t: number }
 const NO_WAVE: Wave = { amt: 0, dir: 1, t: 0 };
-interface Renderer { draw(t: number, pal: DitherPalette, wave?: Wave): void; resize(w: number, h: number): void; dispose(): void }
+interface Renderer { draw(t: number, pal: DitherPalette, wave?: Wave): void; resize(w: number, h: number, calm?: number): void; dispose(): void }
 
 function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const s = gl.createShader(type)!;
@@ -135,12 +136,13 @@ function webglRenderer(canvas: HTMLCanvasElement): Renderer | null {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     const u = (n: string) => gl.getUniformLocation(prog, n);
     const uRes = u('u_res'), uAspect = u('u_aspect'), uT = u('u_t'), uMid = u('u_mid'), uLight = u('u_light'), uRs = u('u_rs');
-    const uWave = u('u_wave'), uWexp = u('u_wexp');
+    const uWave = u('u_wave'), uWexp = u('u_wexp'), uCalm = u('u_calm');
     gl.uniform1i(u('u_noise'), 0);
     return {
-      resize(w, h) {
+      resize(w, h, calm = 1) {
         canvas.width = w; canvas.height = h;
         gl.viewport(0, 0, w, h);
+        gl.uniform1f(uCalm, calm);
         gl.uniform2f(uRes, w, h);
         gl.uniform1f(uAspect, w / h);
         gl.uniform1f(uRs, radiusScale(w / h));
@@ -169,8 +171,9 @@ function canvas2dRenderer(canvas: HTMLCanvasElement): Renderer | null {
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) return null;
   const th = noise();
+  let k = 1;
   return {
-    resize(w, h) { canvas.width = w; canvas.height = h; },
+    resize(w, h, calm = 1) { canvas.width = w; canvas.height = h; k = calm; },
     draw(t, pal) {
       const w = canvas.width, h = canvas.height, aspect = w / h;
       const img = ctx.createImageData(w, h);
@@ -181,7 +184,8 @@ function canvas2dRenderer(canvas: HTMLCanvasElement): Renderer | null {
         const ty = ((h - 1 - y) % NOISE_N) * NOISE_N;
         for (let x = 0; x < w; x++) {
           const uu = (x + 0.5) / w;
-          const [dL, dM] = densities(toneCurve(field(uu * aspect, v, aspect, t)), mottle(uu * aspect, v, t));
+          const [dL0, dM0] = densities(toneCurve(field(uu * aspect, v, aspect, t)), mottle(uu * aspect, v, t));
+          const dL = dL0 * k, dM = Math.min(1 - dL, dM0 * k);
           const lvl = ditherLevel(dL, dM, (th[ty + (x % NOISE_N)]! + 0.5) / 256);
           const c = lvl === 0 ? null : lvl === 1 ? pal.mid : pal.light;
           const i = (y * w + x) * 4;
@@ -237,12 +241,17 @@ export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
     // the 2D fallback is CPU-bound: draw it chunkier and never animate it
     let coarse = animated ? 0 : 1;
+    let grain = useUi.getState().dots;
+    const phone = window.matchMedia('(max-width: 899px)');
     let raf = 0, last = -Infinity, prev = 0, slow = 0, frames = 0;
     // 30 fps only while something is happening; ~12 fps is plenty for the slow drift.
     let playing = usePlayer.getState().state.status === 'playing';
     let nowPlayingOpen = useUi.getState().nowPlayingOpen;
     const offPlaying = usePlayer.subscribe((s) => { playing = s.state.status === 'playing'; });
-    const offUi = useUi.subscribe((s) => { nowPlayingOpen = s.nowPlayingOpen; });
+    const offUi = useUi.subscribe((s) => {
+      nowPlayingOpen = s.nowPlayingOpen;
+      if (s.dots !== grain) { grain = s.dots; size(); redraw.current(); } // Settings → Dot size
+    });
     // `?dither-t=40` starts the animation 40 s in (for screenshots/review of a given moment)
     let t0 = performance.now() - (Number(new URLSearchParams(location.search).get('dither-t')) || 0) * 1000;
     let hiddenAt = 0;
@@ -252,9 +261,9 @@ export function DitherBackdrop({ colour }: { colour: BackdropColour }) {
     const size = () => {
       const dpr = window.devicePixelRatio || 1;
       const cw = window.innerWidth, ch = window.innerHeight;
-      const dot = dotSize(cw, ch, dpr, coarse);
+      const dot = dotSize(cw, ch, dpr, coarse, undefined, grain);
       const w = Math.max(1, Math.ceil((cw * dpr) / dot)), h = Math.max(1, Math.ceil((ch * dpr) / dot));
-      r.resize(w, h);
+      r.resize(w, h, calmFor(grain, phone.matches));
       // integer upscale: each canvas pixel is exactly `dot` device pixels (the canvas may overhang the viewport by < 1 dot)
       canvas.style.width = `${(w * dot) / dpr}px`;
       canvas.style.height = `${(h * dot) / dpr}px`;

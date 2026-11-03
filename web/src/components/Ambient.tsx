@@ -14,7 +14,8 @@ const ditherColour = (a: AmbientMode): DitherColour | 'album' | null =>
 function AlbumDither() {
   const album = usePlayer((s) => currentItem(s.state)?.album);
   const tint = useCoverColor(album);
-  const colour: BackdropColour = (album && paletteFromColour(tint)) || 'purple';
+  const page = useUi((s) => s.pagePalette);
+  const colour: BackdropColour = page ?? (album && paletteFromColour(tint)) ?? 'purple';
   return <DitherBackdrop colour={colour} />;
 }
 
@@ -25,11 +26,13 @@ export function Ambient() {
   // Now Playing draws its own Dither backdrop over the whole window; don't run two at once
   const npOpen = useUi((s) => s.nowPlayingOpen);
   const colour = ditherColour(ambient);
+  // an open album page tints every Dither mode with its own cover colour (the dots blend over there and back)
+  const page = useUi((s) => s.pagePalette);
   return (
     <div className="ambient" aria-hidden="true">
       {colour ? (
         npOpen ? null : (
-          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={colour} />}</Suspense>
+          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={page ?? colour} />}</Suspense>
         )
       ) : (
         <>

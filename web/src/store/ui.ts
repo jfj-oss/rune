@@ -1,5 +1,6 @@
 import { clientLog } from '../clientLog';
 import { create } from 'zustand';
+import type { DitherPalette, DotSize } from '../lib/dither';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -37,6 +38,22 @@ function loadAmbient(): Ambient {
   } catch { /* storage blocked */ }
   return isAmbient(v) ? v : 'dither';
 }
+/** Dither dot grain ("Dot size" in Settings): fine is the default, classic the original chunkier grain.
+    Persisted like the ambient: localStorage + the shared server value; `?dots=classic` picks it for this load. */
+export const DOT_SIZES: DotSize[] = ['fine', 'classic'];
+export const DOT_LABEL: Record<DotSize, string> = { fine: 'Fine', classic: 'Classic' };
+const isDots = (v: unknown): v is DotSize => DOT_SIZES.includes(v as DotSize);
+let dotsFromUrl = false;
+function loadDots(): DotSize {
+  let v: unknown = null;
+  try {
+    const q = new URLSearchParams(location.search).get('dots');
+    if (isDots(q)) { dotsFromUrl = true; localStorage.setItem('rune.dots', q); return q; }
+    v = localStorage.getItem('rune.dots');
+  } catch { /* storage blocked */ }
+  return isDots(v) ? v : 'fine';
+}
+
 /** Page colour behind everything; iOS home-screen apps also paint their status/home-bar strips with it. */
 const PAGE_BG: Partial<Record<Ambient, string>> = { off: '#0f1013' };
 function applyAmbient(a: Ambient) {
@@ -49,6 +66,11 @@ function applyAmbient(a: Ambient) {
 interface UiStore {
   ambient: Ambient;
   setAmbient(a: Ambient): void;
+  dots: DotSize;
+  setDots(d: DotSize): void;
+  /** Palette of the album page being viewed: while set, every Dither mode shows it (Ambient). */
+  pagePalette: DitherPalette | null;
+  setPagePalette(p: DitherPalette | null): void;
   sidebarCollapsed: boolean;
   queueOpen: boolean;
   nowPlayingOpen: boolean;
@@ -71,6 +93,14 @@ export const useUi = create<UiStore>((set) => ({
     set({ ambient: a });
     void syncAmbient('push', a);
   },
+  dots: loadDots(),
+  setDots: (d) => {
+    try { localStorage.setItem('rune.dots', d); } catch { /* storage blocked */ }
+    set({ dots: d });
+    void syncDots('push', d);
+  },
+  pagePalette: null,
+  setPagePalette: (pagePalette) => set({ pagePalette }),
   sidebarCollapsed: load('rune.sidebar', false),
   queueOpen: false,
   nowPlayingOpen: false,
@@ -114,3 +144,28 @@ async function syncAmbient(dir: 'pull' | 'push', a?: Ambient): Promise<void> {
   } catch { /* offline: keep the local choice */ }
 }
 if (typeof window !== 'undefined' && !ambientFromUrl) void syncAmbient('pull');
+
+/** Same for the dot size (server key `ui.dots`). */
+async function syncDots(dir: 'pull' | 'push', d?: DotSize): Promise<void> {
+  try {
+    const { isMock } = await import('../api');
+    if (isMock) return;
+    if (dir === 'push') {
+      await fetch('/api/settings/dots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dots: d }) });
+      return;
+    }
+    const res = await fetch('/api/settings/dots');
+    if (!res.ok) return;
+    const { dots } = (await res.json()) as { dots: unknown };
+    if (!isDots(dots)) {
+      let picked: string | null = null;
+      try { picked = localStorage.getItem('rune.dots'); } catch { /* storage blocked */ }
+      if (isDots(picked)) void syncDots('push', picked);
+      return;
+    }
+    if (dots === useUi.getState().dots) return;
+    try { localStorage.setItem('rune.dots', dots); } catch { /* storage blocked */ }
+    useUi.setState({ dots });
+  } catch { /* offline: keep the local choice */ }
+}
+if (typeof window !== 'undefined' && !dotsFromUrl) void syncDots('pull');
