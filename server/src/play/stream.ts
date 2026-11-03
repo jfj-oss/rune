@@ -12,9 +12,15 @@
 //   immediately without buffering the whole file. (fragmented MP4 would also work
 //   but adds a moov init segment and offers no benefit for a live-only stream.)
 //
-// ffmpeg is killed as soon as the HTTP client disconnects.
+// First play of a track whose cache file does not exist yet is answered at once by
+// a live ffmpeg stream (X-Rune-Live: 1) while a background job builds the cache for
+// later plays and range seeks. Live streams have no length and cannot be range
+// seeked, so clients reload with ?t=<ms>; the server slices from that offset.
+//
+// ffmpeg for a live stream is killed as soon as the HTTP client disconnects.
+// Background cache jobs are deliberately *not* tied to a client.
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, statSync, mkdirSync, renameSync, rmSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, statSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
@@ -23,11 +29,14 @@ import { ensureLoudnessSchema, gainInfoForTrack } from '../loudness/index.js';
 
 export interface StoredTrack {
   id: string;
+  album_id: string;
   path: string | null;
   cue_start_ms: number | null;
   cue_end_ms: number | null;
   format: string | null;
   source: string;
+  disc: number;
+  number: number;
 }
 
 export type StreamFormat = 'orig' | 'flac' | 'aac';
@@ -142,48 +151,139 @@ function seconds(ms: number): string {
   return String(Number((ms / 1000).toFixed(6)));
 }
 
+/** Where a track's finished cache file would live (null if the source is gone). */
+export function transcodeOutputPath(
+  cfg: Config,
+  track: StoredTrack,
+  fmt: 'flac' | 'aac',
+  kbps: number,
+): string | null {
+  if (!track.path) return null;
+  let mtime: number;
+  try {
+    mtime = Math.round(statSync(track.path).mtimeMs);
+  } catch {
+    return null;
+  }
+  const ext = fmt === 'flac' ? 'flac' : 'm4a';
+  const name = `${track.id.replace(/[^a-z0-9]/gi, '_')}-${fmt}${fmt === 'aac' ? kbps : ''}-${mtime}.${ext}`;
+  return join(cfg.dataDir, 'transcode', name);
+}
+
 const cacheJobs = new Map<string, Promise<string | null>>();
+/** Cache jobs waiting for a slot. Only one background ffmpeg runs at a time. */
+const cacheQueue: Array<() => void> = [];
+let cacheRunning = 0;
+const CACHE_CONCURRENCY = 1;
+
+function drainCacheQueue(): void {
+  while (cacheRunning < CACHE_CONCURRENCY && cacheQueue.length > 0) {
+    const start = cacheQueue.shift()!;
+    cacheRunning++;
+    start();
+  }
+}
 
 /**
  * Transcode a whole track (or cue slice) once into <dataDir>/transcode and reuse it.
  * A finished file can be served with byte ranges, which Safari requires for <audio>
  * and which makes seeking work everywhere.
+ *
+ * The returned promise settles when the file is ready, but callers streaming a
+ * first play do not await it: one background job per output file is enough and
+ * jobs run one at a time (the live stream is a separate ffmpeg).
  */
 export function cachedTranscode(cfg: Config, track: StoredTrack, fmt: 'flac' | 'aac', kbps: number): Promise<string | null> {
+  const out = transcodeOutputPath(cfg, track, fmt, kbps);
+  if (!out) return Promise.resolve(null);
+  if (existsSync(out)) return Promise.resolve(out);
+  const existing = cacheJobs.get(out);
+  if (existing) return existing;
+
   const dir = join(cfg.dataDir, 'transcode');
   mkdirSync(dir, { recursive: true });
-  const mtime = Math.round(statSync(track.path!).mtimeMs);
-  const ext = fmt === 'flac' ? 'flac' : 'm4a';
-  const out = join(dir, `${track.id.replace(/[^a-z0-9]/gi, '_')}-${fmt}${fmt === 'aac' ? kbps : ''}-${mtime}.${ext}`);
-  if (existsSync(out)) return Promise.resolve(out);
-  let job = cacheJobs.get(out);
-  if (!job) {
-    const tmp = out + '.part';
-    const base = ffmpegArgs(track, fmt, kbps).slice(0, -1); // drop pipe:1
-    const fmtIdx = base.lastIndexOf('-f');
-    if (fmt === 'aac') base.splice(fmtIdx, 2, '-movflags', '+faststart', '-f', 'mp4');
-    job = new Promise<string | null>((resolve) => {
+  const tmp = out + '.part';
+  const base = ffmpegArgs(track, fmt, kbps).slice(0, -1); // drop pipe:1
+  const fmtIdx = base.lastIndexOf('-f');
+  if (fmt === 'aac') base.splice(fmtIdx, 2, '-movflags', '+faststart', '-f', 'mp4');
+
+  const job = new Promise<string | null>((resolve) => {
+    let settled = false;
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      cacheRunning--;
+      cacheJobs.delete(out);
+      resolve(value);
+      drainCacheQueue();
+    };
+    cacheQueue.push(() => {
       const child = spawn('ffmpeg', ['-y', ...base, tmp], { stdio: 'ignore' });
-      child.on('error', () => resolve(null));
+      child.on('error', () => {
+        rmSync(tmp, { force: true });
+        finish(null);
+      });
       child.on('close', (code) => {
         if (code === 0) {
-          renameSync(tmp, out);
-          resolve(out);
+          try {
+            renameSync(tmp, out);
+            finish(out);
+          } catch {
+            rmSync(tmp, { force: true });
+            finish(null);
+          }
         } else {
           rmSync(tmp, { force: true });
-          resolve(null);
+          finish(null);
         }
       });
-    }).finally(() => cacheJobs.delete(out));
-    cacheJobs.set(out, job);
-  }
+    });
+  });
+  cacheJobs.set(out, job);
+  drainCacheQueue();
   return job;
+}
+
+/**
+ * Remove `.part` files left behind by a crashed cache job. Files younger than an
+ * hour might belong to a live server instance, so they are left alone.
+ */
+export function cleanupStaleCacheParts(cfg: Config, olderThanMs = 3_600_000, nowMs = Date.now()): number {
+  const dir = join(cfg.dataDir, 'transcode');
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!name.endsWith('.part')) continue;
+    const path = join(dir, name);
+    try {
+      if (nowMs - statSync(path).mtimeMs > olderThanMs) {
+        rmSync(path, { force: true });
+        removed++;
+      }
+    } catch {
+      // another process may have just removed it
+    }
+  }
+  return removed;
 }
 
 export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config): void {
   ensureLoudnessSchema(db);
+  cleanupStaleCacheParts(cfg);
   const getTrack = db.prepare(
-    'SELECT id, path, cue_start_ms, cue_end_ms, format, source FROM tracks WHERE id = ?',
+    'SELECT id, album_id, path, cue_start_ms, cue_end_ms, format, source, disc, number FROM tracks WHERE id = ?',
+  );
+  const getNextTrack = db.prepare(
+    `SELECT id, album_id, path, cue_start_ms, cue_end_ms, format, source, disc, number
+       FROM tracks
+      WHERE album_id = ? AND (disc > ? OR (disc = ? AND number > ?))
+      ORDER BY disc, number
+      LIMIT 1`,
   );
 
   app.get('/api/stream/:trackId', async (request, reply) => {
@@ -219,9 +319,35 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
     }
     // Cue tracks are always resliced; orig means "lossless FLAC" in that case.
     const outFmt: 'flac' | 'aac' = fmt === 'aac' ? 'aac' : 'flac';
+
+    // Warm the next track of the album so gapless preloading gets a ranged file.
+    // Only one background job runs at a time, and it never blocks this response.
+    const warmNext = (): void => {
+      if (!isCue && fmt !== 'aac') return;
+      const next = getNextTrack.get(track.album_id, track.disc, track.disc, track.number) as
+        | StoredTrack
+        | undefined;
+      if (!next?.path || !existsSync(next.path)) return;
+      // A plain file needs no cache unless the client asked for a transcoded format.
+      if (next.cue_start_ms == null && fmt === 'orig') return;
+      void cachedTranscode(cfg, next, outFmt, kbps).catch(() => null);
+    };
+
     if (offsetMs === 0 && query.live !== '1') {
-      const file = await cachedTranscode(cfg, track, outFmt, kbps);
-      if (file) return serveFile(request.method, request.headers.range, reply, file, loudnessHeaders);
+      const cachePath = transcodeOutputPath(cfg, track, outFmt, kbps);
+      if (cachePath && existsSync(cachePath)) {
+        // Fully cached: byte ranges, instant start, normal seeking.
+        if (request.method !== 'HEAD') warmNext();
+        return serveFile(request.method, request.headers.range, reply, cachePath, loudnessHeaders);
+      }
+      if (request.method !== 'HEAD') {
+        // Not ready: answer now with a live stream and build the cache in parallel.
+        void cachedTranscode(cfg, track, outFmt, kbps).catch(() => null);
+        warmNext();
+      }
+      // HEAD (the client's gain/seek probe) must not spawn ffmpeg; serveTranscode
+      // only writes the live headers. X-Rune-Live tells the client to seek via ?t=.
+      return serveTranscode(request.method, reply, track, outFmt, kbps, offsetMs, loudnessHeaders);
     }
     return serveTranscode(request.method, reply, track, outFmt, kbps, offsetMs, loudnessHeaders);
   });
@@ -404,11 +530,22 @@ function serveTranscode(
   extraHeaders: Record<string, string> = {},
 ): void {
   const contentType = fmt === 'flac' ? 'audio/flac' : 'audio/aac';
+  const exposed = new Set(
+    (extraHeaders['Access-Control-Expose-Headers'] ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  exposed.add('X-Rune-Live');
   const headers = {
     'Content-Type': contentType,
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     ...extraHeaders,
+    'Access-Control-Expose-Headers': [...exposed].join(', '),
+    // The body is an unbounded live ffmpeg stream: no length, no byte ranges.
+    // A client that wants to seek must reload with ?t=<ms>.
+    'X-Rune-Live': '1',
   };
 
   if (method === 'HEAD') {

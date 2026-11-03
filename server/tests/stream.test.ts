@@ -1,15 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type Db } from '../src/db/index.js';
 import type { Config } from '../src/config.js';
 import {
   activeFfmpegPids,
+  cleanupStaleCacheParts,
   parseRangeHeader,
   registerStreamRoutes,
+  transcodeOutputPath,
+  type StoredTrack,
 } from '../src/play/stream.js';
 
 const cfg: Config = {
@@ -26,7 +29,9 @@ let app: FastifyInstance;
 let plainPath: string;
 let cuePath: string;
 let longPath: string;
+let slowCuePath: string;
 let plainBytes: Buffer;
+let address: string | null = null;
 
 function run(cmd: string, args: string[]): void {
   const res = spawnSync(cmd, args, { encoding: 'utf8' });
@@ -103,14 +108,49 @@ function insertTrack(row: {
   );
 }
 
+const trackRow = (id: string): StoredTrack =>
+  db
+    .prepare(
+      'SELECT id, album_id, path, cue_start_ms, cue_end_ms, format, source, disc, number FROM tracks WHERE id = ?',
+    )
+    .get(id) as StoredTrack;
+
+async function ensureAddress(): Promise<string> {
+  if (!address) address = await app.listen({ port: 0, host: '127.0.0.1' });
+  return address;
+}
+
+/** Resolve once the server serves `id` as a cached (range-capable) file. */
+async function waitForCached(id: string, url = `/api/stream/${encodeURIComponent(id)}?fmt=flac`): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const res = await app.inject({ method: 'HEAD', url });
+    if (res.headers['accept-ranges'] === 'bytes') return;
+    await sleep(25);
+  }
+  throw new Error(`cache for ${id} was not ready in time`);
+}
+
+async function waitForPath(path: string, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return;
+    await sleep(25);
+  }
+  throw new Error(`${path} did not appear in time`);
+}
+
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'liner-stream-'));
+  cfg.dataDir = dir; // keep cache files in the test's temp dir
   plainPath = join(dir, 'tone4.flac');
   cuePath = join(dir, 'tone10.flac');
-  longPath = join(dir, 'long2410.flac');
+  longPath = join(dir, 'long240.flac');
+  slowCuePath = join(dir, 'tone600.flac');
   tone(plainPath, 4, 440);
   tone(cuePath, 10, 330);
   tone(longPath, 240, 220);
+  tone(slowCuePath, 600, 275);
   plainBytes = readFileSync(plainPath);
 
   db = openDb(':memory:');
@@ -128,14 +168,44 @@ beforeAll(async () => {
     cueStart: 2000,
     cueEnd: 6000,
   });
+  // cue3 -> cue4 are consecutive in this album: cue3 warms cue4.
+  insertTrack({
+    id: 'l:cue3',
+    title: 'Cue 3',
+    number: 5,
+    durationMs: 2000,
+    path: cuePath,
+    cueStart: 1000,
+    cueEnd: 3000,
+  });
+  insertTrack({
+    id: 'l:cue4',
+    title: 'Cue 4',
+    number: 6,
+    durationMs: 2000,
+    path: cuePath,
+    cueStart: 3000,
+    cueEnd: 5000,
+  });
   insertTrack({
     id: 'l:missing',
     title: 'Missing',
-    number: 3,
+    number: 9,
     durationMs: 4000,
     path: join(dir, 'does-not-exist.flac'),
   });
   insertTrack({ id: 'l:long', title: 'Long', number: 4, durationMs: 240_000, path: longPath });
+  // A long cue slice: the live transcode has plenty of audio to emit before the
+  // background cache file can possibly be complete.
+  insertTrack({
+    id: 'l:slowcue',
+    title: 'Slow cue',
+    number: 20,
+    durationMs: 600_000,
+    path: slowCuePath,
+    cueStart: 0,
+    cueEnd: 600_000,
+  });
 
   app = Fastify({ logger: false, forceCloseConnections: true });
   registerStreamRoutes(app, db, cfg);
@@ -293,6 +363,8 @@ describe('GET /api/stream transcoding', () => {
   });
 
   it('serves cached cue slices with byte ranges (Safari needs them)', async () => {
+    // The first request above started the background cache job; wait for it.
+    await waitForCached('l:cue');
     const full = await app.inject({ method: 'GET', url: '/api/stream/l:cue?fmt=flac' });
     expect(full.headers['accept-ranges']).toBe('bytes');
     const size = Number(full.headers['content-length']);
@@ -355,11 +427,79 @@ describe('GET /api/stream transcoding', () => {
   });
 });
 
+describe('uncached cue tracks', () => {
+  it('starts live at once, finishes caching after the client leaves, then serves ranges', async () => {
+    const base = await ensureAddress();
+    const id = 'l:slowcue';
+    const cachePath = transcodeOutputPath(cfg, trackRow(id), 'flac', 256)!;
+    expect(existsSync(cachePath)).toBe(false);
+
+    const controller = new AbortController();
+    const started = Date.now();
+    const res = await fetch(`${base}/api/stream/${id}?fmt=flac`, { signal: controller.signal });
+    const headersMs = Date.now() - started;
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-rune-live')).toBe('1');
+    expect(res.headers.get('accept-ranges')).toBeNull();
+    // The HTTP request is answered without waiting for the cache file.
+    expect(headersMs).toBeLessThan(1000);
+    expect(existsSync(cachePath)).toBe(false);
+
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    expect(first.value?.length ?? 0).toBeGreaterThan(0);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(existsSync(cachePath)).toBe(false);
+
+    // The background cache job is not tied to the client.
+    controller.abort();
+    await waitForPath(cachePath);
+
+    // A later range request is served from the finished file.
+    const part = await app.inject({
+      method: 'GET',
+      url: `/api/stream/${id}?fmt=flac`,
+      headers: { range: 'bytes=0-1' },
+    });
+    expect(part.statusCode).toBe(206);
+    expect(part.rawPayload.length).toBe(2);
+    expect(part.headers['content-range']).toMatch(/^bytes 0-1\/\d+$/);
+  }, 40_000);
+
+  it('warms the cache of the next track of the album', async () => {
+    const nextCache = transcodeOutputPath(cfg, trackRow('l:cue4'), 'flac', 256)!;
+    expect(existsSync(nextCache)).toBe(false);
+
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:cue3?fmt=orig' });
+    expect(res.statusCode).toBe(200);
+    await waitForPath(nextCache);
+    expect(existsSync(nextCache)).toBe(true);
+  }, 40_000);
+});
+
+describe('stale cache parts', () => {
+  it('removes .part files older than an hour and keeps fresh ones', () => {
+    const cacheDir = join(dir, 'transcode');
+    mkdirSync(cacheDir, { recursive: true });
+    const old = join(cacheDir, 'crashed-job.part');
+    const fresh = join(cacheDir, 'running-job.part');
+    writeFileSync(old, 'stale');
+    writeFileSync(fresh, 'fresh');
+    const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(old, twoHoursAgo, twoHoursAgo);
+
+    expect(cleanupStaleCacheParts(cfg)).toBeGreaterThanOrEqual(1);
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    rmSync(fresh, { force: true });
+  });
+});
+
 describe('client disconnect', () => {
   it('kills ffmpeg when the HTTP client goes away', async () => {
-    const address = await app.listen({ port: 0, host: '127.0.0.1' });
+    const base = await ensureAddress();
     const controller = new AbortController();
-    const response = await fetch(`${address}/api/stream/l:long?fmt=aac&kbps=128&live=1`, {
+    const response = await fetch(`${base}/api/stream/l:long?fmt=aac&kbps=128&live=1`, {
       signal: controller.signal,
     });
     expect(response.status).toBe(200);

@@ -174,3 +174,59 @@ describe('AudioEngine look-ahead', () => {
     expect(FakeAudio.instances.map((el) => el.volume)).toEqual([0.35, 0.35]);
   });
 });
+
+describe('AudioEngine live transcode seeking', () => {
+  const cue = (id: string): Track => ({
+    ...local(id),
+    cue: { startMs: 0, endMs: 200_000 },
+  });
+
+  it('reloads a live cue stream with t= and reports position t + currentTime', () => {
+    const engine = new AudioEngine();
+    const track = cue('l:cue');
+    engine.load(track, 0, true, []);
+    const el = elementFor(track.id)!;
+
+    engine.seek(5000);
+
+    const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=orig&kbps=256`;
+    expect(el.src).toBe(`${base}&t=5000`);
+    // The new live slice starts at 0; the offset lives in liveBaseMs.
+    expect(el.currentTime).toBe(0);
+    expect(engine.position()).toBe(5000);
+    expect(el.playCalls).toBe(2); // load + continued playback after the reload
+
+    el.currentTime = 2.5;
+    expect(engine.position()).toBe(7500); // duration still comes from track metadata
+  });
+
+  it('seeks in place when the server has a cached ranged file', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(null, { headers: { 'X-Rune-Gain-Db': '0', 'Accept-Ranges': 'bytes' } }),
+      ),
+    );
+    const engine = new AudioEngine();
+    const track = cue('l:cued');
+    engine.load(track, 0, true, []);
+    await new Promise((r) => setTimeout(r, 0)); // let the HEAD probe report a cached file
+    const el = elementFor(track.id)!;
+
+    engine.seek(4000);
+
+    expect(el.src).toBe(streamSrc(track.id)); // no t= reload
+    expect(el.currentTime).toBe(4);
+    expect(engine.position()).toBe(4000);
+  });
+
+  it('starts a resumed live track with t= instead of waiting for metadata', () => {
+    const engine = new AudioEngine();
+    const track = cue('l:resume');
+    engine.load(track, 12_000, true, []);
+    const el = FakeAudio.instances[0]!; // the active element (src carries t=)
+    expect(el.src).toBe(`/api/stream/${encodeURIComponent(track.id)}?fmt=orig&kbps=256&t=12000`);
+    expect(engine.position()).toBe(12_000);
+  });
+});

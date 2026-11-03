@@ -44,9 +44,12 @@ function pickFormat(): { fmt: string; kbps: number } {
   return { fmt: 'orig', kbps: 256 };
 }
 
-function streamSrc(track: Track, fmt: { fmt: string; kbps: number }): string {
+function streamSrc(track: Track, fmt: { fmt: string; kbps: number }, tMs?: number): string {
   if (isLiveTrack(track)) return `/api/radio/${encodeURIComponent(track.id)}/stream`;
-  return `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}`;
+  const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}`;
+  // Live transcoded streams have no length and cannot be range-seeked, so seeking
+  // reloads with t=<ms> and the server slices from there.
+  return tMs && tMs > 0 ? `${base}&t=${Math.round(tMs)}` : base;
 }
 
 type AudioContextCtor = typeof AudioContext;
@@ -68,10 +71,19 @@ export class AudioEngine implements Engine {
   private errorFn: (m: string) => void = () => {};
   private fmt = pickFormat();
   private loadedId: string | null = null;
+  private loadedTrack: Track | null = null;
   /** Track id currently buffered in `spareEl`, if any. */
   private preloadedId: string | null = null;
+  private preloadedTrack: Track | null = null;
   /** Invalidates metadata handlers left over from a previous load/seek. */
   private loadGen = 0;
+  private playing = false;
+  /** Time offset already encoded in the active live stream's `?t=` (0 = from start). */
+  private liveBaseMs = 0;
+  /** Per element: t= could be needed if the server has no cache (cue track or AAC). */
+  private readonly wantsLiveFlags = new WeakMap<HTMLAudioElement, boolean>();
+  /** Per element: the current src really is a live ffmpeg stream (from X-Rune-Live). */
+  private readonly liveFlags = new WeakMap<HTMLAudioElement, boolean>();
 
   // Loudness levelling: the server sends X-Rune-Gain-Db on local streams; apply it
   // with a GainNode. One graph (and one MediaElementSource, which browsers only
@@ -140,12 +152,20 @@ export class AudioEngine implements Engine {
     return token;
   }
 
-  /** HEAD the stream and read the level hint (the GET itself never alters audio). */
+  /** HEAD the stream: read the level hint and learn whether the body is live. */
   private readGain(src: string, el: HTMLAudioElement) {
     const token = this.bumpGainToken(el);
     void fetch(src, { method: 'HEAD' })
       .then((res) => {
         if (this.gainTokens.get(el) !== token) return;
+        // The server marks a live ffmpeg body with X-Rune-Live; a cached file has
+        // Content-Length/Accept-Ranges instead. Absence of ranges is the fallback
+        // if custom headers are not exposed.
+        const wanted = this.wantsLiveFlags.get(el) ?? false;
+        this.liveFlags.set(
+          el,
+          res.ok && (res.headers.get('X-Rune-Live') === '1' || (wanted && !res.headers.has('accept-ranges'))),
+        );
         const raw = res.headers.get('X-Rune-Gain-Db');
         const db = raw === null ? null : Number(raw);
         this.applyGainDb(el, Number.isFinite(db) ? db : null);
@@ -163,10 +183,18 @@ export class AudioEngine implements Engine {
   private releasePreload() {
     this.bumpGainToken(this.spareEl);
     this.preloadedId = null;
+    this.preloadedTrack = null;
+    this.liveFlags.set(this.spareEl, false);
+    this.wantsLiveFlags.set(this.spareEl, false);
     this.spareEl.pause();
     this.spareEl.removeAttribute('src');
     this.spareEl.load();
     this.applyGainDb(this.spareEl, null);
+  }
+
+  /** Cue tracks and AAC requests may be served as a live transcode when uncached. */
+  private wantsLive(track: Track): boolean {
+    return this.fmt.fmt === 'aac' || !!track.cue;
   }
 
   /** Buffer `track` in the spare element (only local, finite files can be preloaded). */
@@ -180,6 +208,10 @@ export class AudioEngine implements Engine {
     // The same URL the active element uses, so the swap needs no new load.
     const src = streamSrc(desired, this.fmt);
     this.preloadedId = desired.id;
+    this.preloadedTrack = desired;
+    this.wantsLiveFlags.set(this.spareEl, this.wantsLive(desired));
+    // Until the HEAD probe answers, assume the worst (live) for cue/AAC tracks.
+    this.liveFlags.set(this.spareEl, this.wantsLive(desired));
     this.bumpGainToken(this.spareEl);
     this.spareEl.src = src;
     this.spareEl.load();
@@ -195,10 +227,15 @@ export class AudioEngine implements Engine {
     this.gainNode = this.spareGainNode;
     this.spareGainNode = oldGain;
     this.loadedId = this.preloadedId;
+    this.loadedTrack = this.preloadedTrack;
     this.preloadedId = null;
+    this.preloadedTrack = null;
+    this.liveBaseMs = 0;
 
     // The previous track is done (ended or skipped): release its file.
     this.bumpGainToken(oldEl);
+    this.liveFlags.set(oldEl, false);
+    this.wantsLiveFlags.set(oldEl, false);
     oldEl.pause();
     oldEl.removeAttribute('src');
     oldEl.load();
@@ -207,6 +244,7 @@ export class AudioEngine implements Engine {
 
   load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
     const gen = ++this.loadGen;
+    this.playing = autoplay && track.source !== 'spotify';
     if (track.source === 'spotify') {
       this.el.pause();
       this.releasePreload();
@@ -215,16 +253,26 @@ export class AudioEngine implements Engine {
     }
     // A queue advance (ended / Next) to the preloaded track: swap and play without a new load.
     const swap = startMs === 0 && this.preloadedId === track.id;
+    // A cue/AAC track may be served as a live stream (no length, no byte ranges).
+    // Start mid-track via ?t= instead of seeking after metadata, which would fail.
+    const viaT = !isLiveTrack(track) && startMs > 0 && this.wantsLive(track);
     if (swap) this.swapToPreloaded();
     else {
-      const src = streamSrc(track, this.fmt);
-      if (this.loadedId !== track.id) {
+      const src = streamSrc(track, this.fmt, viaT ? startMs : undefined);
+      if (this.loadedId !== track.id || viaT) {
         this.bumpGainToken(this.el);
         this.applyGainDb(this.el, null);
+        this.liveBaseMs = viaT ? startMs : 0;
+        this.wantsLiveFlags.set(this.el, this.wantsLive(track));
+        // Until the HEAD probe answers, assume a live body for cue/AAC tracks.
+        this.liveFlags.set(this.el, this.wantsLive(track));
         this.el.src = src;
         this.loadedId = track.id;
+        this.loadedTrack = track;
         // Radio is live: no seek, and loudness normalisation does not apply.
         if (!isLiveTrack(track)) this.readGain(src, this.el);
+      } else {
+        this.liveBaseMs = 0;
       }
     }
     this.resumeContext();
@@ -232,14 +280,14 @@ export class AudioEngine implements Engine {
     const target = this.el;
     const start = () => {
       if (gen !== this.loadGen || target !== this.el) return;
-      if (!isLiveTrack(track)) target.currentTime = startMs / 1000;
+      if (!isLiveTrack(track) && !viaT) target.currentTime = startMs / 1000;
       if (autoplay) void target.play().catch(() => this.errorFn('Tap play to start audio'));
     };
-    if (!isLiveTrack(track) && startMs > 0) {
+    if (!isLiveTrack(track) && startMs > 0 && !viaT) {
       target.addEventListener('loadedmetadata', start, { once: true });
     } else if (autoplay) {
-      // A swapped-in preload is already at its start: play it without rebuffering.
-      if (swap) this.el.currentTime = 0;
+      // A swapped-in preload (or a live t= reload) is already at its start.
+      if (swap || viaT) this.el.currentTime = 0;
       void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
     }
     // Keep one song buffered ahead; release it when the queue now points elsewhere.
@@ -249,23 +297,64 @@ export class AudioEngine implements Engine {
   setUpcoming(upcoming: Track[]) { this.setPreload(upcoming[0]); }
 
   play() {
+    this.playing = true;
     this.resumeContext();
     void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
   }
-  pause() { this.el.pause(); }
-  seek(ms: number) { this.el.currentTime = ms / 1000; }
+  pause() {
+    this.playing = false;
+    this.el.pause();
+  }
+  seek(ms: number) {
+    const pos = Math.max(0, ms);
+    // A live stream cannot be seeked in-place: reload it from the requested time.
+    if (this.liveFlags.get(this.el) && this.loadedTrack) {
+      this.reloadLive(pos);
+      return;
+    }
+    this.el.currentTime = pos / 1000;
+  }
+
+  /** Restart the active live stream at `ms` using the server's ?t= slice. */
+  private reloadLive(ms: number) {
+    const track = this.loadedTrack;
+    if (!track) return;
+    this.loadGen++;
+    this.liveBaseMs = ms;
+    this.liveFlags.set(this.el, true);
+    this.wantsLiveFlags.set(this.el, true);
+    this.bumpGainToken(this.el);
+    // A new src starts at 0; position() adds liveBaseMs back.
+    this.el.currentTime = 0;
+    const src = streamSrc(track, this.fmt, ms);
+    this.el.src = src;
+    this.loadedId = track.id;
+    if (!isLiveTrack(track)) this.readGain(src, this.el);
+    if (this.playing) void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
+  }
+
   setVolume(v: number) {
     const volume = Math.max(0, Math.min(1, v / 100));
     this.el.volume = volume;
     this.spareEl.volume = volume;
   }
-  position() { return Number.isFinite(this.el.currentTime) ? this.el.currentTime * 1000 : null; }
+  position() {
+    if (!Number.isFinite(this.el.currentTime)) return null;
+    // A live t= slice reports time relative to the slice; add the slice offset back.
+    const base = this.liveFlags.get(this.el) ? this.liveBaseMs : 0;
+    return base + this.el.currentTime * 1000;
+  }
   stop() {
     this.loadGen++;
+    this.playing = false;
     this.bumpGainToken(this.el);
+    this.liveFlags.set(this.el, false);
+    this.wantsLiveFlags.set(this.el, false);
     this.el.pause();
     this.el.removeAttribute('src');
     this.loadedId = null;
+    this.loadedTrack = null;
+    this.liveBaseMs = 0;
     this.el.load();
     this.releasePreload();
   }
