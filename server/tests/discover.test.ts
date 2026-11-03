@@ -678,6 +678,35 @@ describe('discover feed', () => {
     expect(fake.calls.length).toBe(cachedCalls);
   });
 
+  it('Refresh rebuilds a fresh feed and skips the songs just shown', async () => {
+    const db = openDb(':memory:');
+    seedDb(db);
+    const fake = fakeSpotify();
+    const { discover } = service(db, fake.spotify);
+    const first = await discover.feed({ limit: 15 });
+    const shown = new Set(first.groups.flatMap((g) => g.items.map((i) => i.track.id)));
+    expect(shown.size).toBeGreaterThan(0);
+
+    const next = await discover.feed({ limit: 15, refresh: true });
+    expect(next.cached).toBe(false);
+    expect(next.groups.flatMap((g) => g.items).length).toBeGreaterThan(0);
+    for (const item of next.groups.flatMap((g) => g.items)) expect(shown.has(item.track.id)).toBe(false);
+  });
+
+  it('Refresh keeps the saved feed when the Spotify budget is low', async () => {
+    const db = openDb(':memory:');
+    seedDb(db);
+    const fake = fakeSpotify();
+    const { discover } = service(db, fake.spotify);
+    await discover.feed({ limit: 15 });
+    Object.assign(fake.spotify.api, { budgetLevel: () => 'low' });
+    const calls = fake.calls.length;
+    const res = await discover.feed({ limit: 15, refresh: true });
+    expect(res.cached).toBe(true);
+    expect(res.notice).toMatch(/daily limit/);
+    expect(fake.calls.length).toBe(calls);
+  });
+
   it('is unavailable without Spotify', async () => {
     const db = openDb(':memory:');
     seedDb(db);

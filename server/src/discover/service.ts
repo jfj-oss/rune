@@ -51,6 +51,8 @@ export interface DiscoverServiceOptions {
   radioMappings?: number;
   /** Run the 6h feed refresh in the background when serving stale cache. */
   backgroundRefresh?: boolean;
+  /** Randomness for the Refresh button's reshuffle (tests pass a seeded one). */
+  random?: () => number;
 }
 
 export class DiscoverNotFoundError extends Error {
@@ -132,6 +134,19 @@ export function createDiscover(
   ensureDiscoverSchema(db);
   ensureSpotifyLibrarySchema(db);
   const now = opts.now ?? Date.now;
+  const random = opts.random ?? Math.random;
+  /** Weighted sample of `n` items without replacement (higher weight = likelier, never certain). */
+  const sample = <T,>(items: T[], weight: (t: T, i: number) => number, n: number): T[] => {
+    const pool = items.map((t, i) => ({ t, w: Math.max(0.0001, weight(t, i)) }));
+    const out: T[] = [];
+    while (out.length < n && pool.length) {
+      let r = random() * pool.reduce((a, p) => a + p.w, 0);
+      let k = 0;
+      while (k < pool.length - 1 && (r -= pool[k]!.w) > 0) k++;
+      out.push(pool.splice(k, 1)[0]!.t);
+    }
+    return out;
+  };
   const cache = new DiscoverCache(db, now);
   const budget = new SpotifyDiscoverBudget(db, { ...opts.budget, now, sleep: opts.sleep });
   const gateway = spotify
@@ -530,7 +545,7 @@ export function createDiscover(
 
   // ---------- feed ----------
 
-  async function pickSeeds(limit: number): Promise<{ id: string; name: string; mbid?: string }[]> {
+  async function pickSeeds(limit: number, vary = false): Promise<{ id: string; name: string; mbid?: string }[]> {
     const weights = new Map<string, number>();
     const add = (artistId: string, weight: number) => {
       if (!artistId) return;
@@ -585,7 +600,12 @@ export function createDiscover(
       .all() as { id: string; n: number }[];
     for (const row of library) add(row.id, Math.min(row.n, 40) * 0.3);
 
-    const ranked = [...weights.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(limit * 2, 8));
+    let ranked = [...weights.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(limit * 2, 8));
+    // Refresh: draw the seeds from a wider pool of your artists, favouring the ones you play most
+    if (vary) {
+      const pool = [...weights.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(limit * 4, 24));
+      ranked = sample(pool, ([, w]) => Math.sqrt(w), Math.max(limit * 2, 8));
+    }
     if (ranked.length === 0) {
       // Empty database: use the most recently added local album artist.
       const fallback = db
@@ -615,13 +635,14 @@ export function createDiscover(
     return seeds;
   }
 
-  async function buildFeed(limit: number): Promise<FeedGroup[]> {
+  async function buildFeed(limit: number, vary?: { avoid: Set<string> }): Promise<FeedGroup[]> {
     if (!gateway) return [];
-    const seeds = await pickSeeds(FEED_SEEDS);
+    const seeds = await pickSeeds(FEED_SEEDS, !!vary);
     const perGroup = clamp(Math.ceil(limit / Math.max(1, seeds.length)) + 2, 6, 15);
     const index = ownedIndex();
     const usedPerArtist = new Map<string, number>();
-    const usedTracks = new Set<string>();
+    // Refresh skips the songs that were just on screen so the list really changes
+    const usedTracks = new Set<string>(vary?.avoid ?? []);
     const usedSongs = new Set<string>();
     const built: BuiltFeedGroup[] = [];
 
@@ -635,9 +656,11 @@ export function createDiscover(
           score: a.score,
         }));
       }
-      related = related
-        .filter((a) => !!a.name && normalizeName(a.name) !== normalizeName(seed.name))
-        .slice(0, FEED_RELATED);
+      related = related.filter((a) => !!a.name && normalizeName(a.name) !== normalizeName(seed.name));
+      // Refresh: pick among the closest dozen similar artists instead of always the top four
+      related = vary
+        ? sample(related.slice(0, FEED_RELATED * 3), (_, i) => 1 / (1 + i * 0.25), FEED_RELATED)
+        : related.slice(0, FEED_RELATED);
       if (related.length > 0) {
         const maxScore = Math.max(1, ...related.map((a) => a.score ?? 0));
         for (const [i, rel] of related.entries()) {
@@ -752,9 +775,9 @@ export function createDiscover(
   }
 
   let feedBuild: Promise<FeedGroup[]> | null = null;
-  function ensureFeedBuild(limit: number): Promise<FeedGroup[]> {
+  function ensureFeedBuild(limit: number, vary?: { avoid: Set<string> }): Promise<FeedGroup[]> {
     if (!feedBuild) {
-      feedBuild = buildFeed(limit).finally(() => {
+      feedBuild = buildFeed(limit, vary).finally(() => {
         feedBuild = null;
       });
     }
@@ -769,7 +792,7 @@ export function createDiscover(
 
     // "Refreshed at most every 6 hours": both a page load and the Refresh button
     // use the cached feed while it is fresh.
-    if (fresh && cached) return feedFromCache(cached.value, cached.fetchedAt, limit);
+    if (fresh && cached && !options.refresh) return feedFromCache(cached.value, cached.fetchedAt, limit);
 
     if (!spotifyUsable() || !gateway) {
       if (cached) {
@@ -802,8 +825,21 @@ export function createDiscover(
       return feedFromCache(cached.value, cached.fetchedAt, limit);
     }
 
+    // The Refresh button builds a new mix, unless Spotify's daily budget is nearly spent
+    let vary: { avoid: Set<string> } | undefined;
+    if (options.refresh && cached) {
+      const level = spotify?.api.budgetLevel() ?? 'normal';
+      if (level === 'low' || level === 'out') {
+        return {
+          ...feedFromCache(cached.value, cached.fetchedAt, limit),
+          notice: "Spotify's daily limit is nearly used up — showing the saved picks. Try Refresh again tomorrow.",
+        };
+      }
+      vary = { avoid: new Set(cached.value.groups.flatMap((g) => g.items.map((i) => `sp:${i.spotifyTrackId}`))) };
+    }
+
     try {
-      const groups = await ensureFeedBuild(limit);
+      const groups = await ensureFeedBuild(limit, vary);
       cache.set(CACHE_FEED, { groups });
       return {
         status: groups.length ? 'ok' : 'empty',
