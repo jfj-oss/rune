@@ -217,25 +217,29 @@
 .dotlogo { position: relative; display: inline-block; flex: none; }
 .dotlogo__pair { position: absolute; inset: 0; --pair-delay: 0s; }
 .dotlogo__pair--a { transform: rotate(45deg); }
-.dotlogo__pair--b { transform: rotate(-45deg); --pair-delay: 1.3s; }
+.dotlogo__pair--b { transform: rotate(-45deg); --pair-delay: 0.9s; }
 /* each pair lies along its own x axis: dot 1 at the left end of the diagonal, dot 2 at the right */
 .dotlogo__x {
   --s: var(--dot-d);
   position: absolute; top: 50%; left: 50%; width: var(--s); height: var(--s); margin: calc(var(--s) / -2);
   /* hard acceleration, then a small overshoot past the corner that settles back */
-  animation: dotlogo-x1 2.6s cubic-bezier(0.72, 0, 0.18, 1.14) infinite;
+  animation: dotlogo-x1 1.8s cubic-bezier(0.72, 0, 0.18, 1.14) infinite;
 }
 .dotlogo__x--1 { translate: calc(var(--dot-L) / -2) 0; }
 .dotlogo__x--2 { translate: calc(var(--dot-L) / 2) 0; animation-name: dotlogo-x2; }
 .dotlogo__y {
-  display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--dot-c);
-  box-shadow: 0 0 3px color-mix(in srgb, var(--dot-c) 30%, transparent); transition: background 1.2s ease, box-shadow 1.2s ease;
-  animation: dotlogo-y1 2.6s infinite, dotlogo-pop 2.6s infinite;
+  position: relative; display: block; width: 100%; height: 100%;
+  animation: dotlogo-y1 1.8s infinite, dotlogo-pop 1.8s infinite;
 }
+/* the dithered disk, turned back upright so its pixels line up with the backdrop's (each pair is rotated 45°) */
+.dotlogo__y::before { content: ''; position: absolute; inset: 0; background: var(--dot-img) center / 100% 100% no-repeat; image-rendering: pixelated; }
+.dotlogo__pair--a .dotlogo__y::before { rotate: -45deg; }
+.dotlogo__pair--b .dotlogo__y::before { rotate: 45deg; }
+.dotlogo__ghost .dotlogo__y::before { content: none; }
 .dotlogo__y--2 { animation-name: dotlogo-y2, dotlogo-pop; }
 /* trail pixels: tiny squares, only there while the pair is in flight */
 .dotlogo__ghost { --s: var(--dot-px); }
-.dotlogo__ghost .dotlogo__y { border-radius: 0; box-shadow: none; translate: var(--jx) var(--jy); opacity: 0; }
+.dotlogo__ghost .dotlogo__y { background: var(--dot-c); translate: var(--jx) var(--jy); opacity: 0; }
 .dotlogo__ghost--mid .dotlogo__y { background: var(--dot-m); filter: brightness(1.6); }
 .dotlogo__ghost .dotlogo__y--1 { animation-name: dotlogo-y1, dotlogo-trail; }
 .dotlogo__ghost .dotlogo__y--2 { animation-name: dotlogo-y2, dotlogo-trail; }
