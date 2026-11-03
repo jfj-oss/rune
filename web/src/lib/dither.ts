@@ -4,7 +4,7 @@
 export type Rgb = readonly [number, number, number];
 /** A dither palette: black plus a dark mid tone and the strong "light" colour. */
 export interface DitherPalette { mid: Rgb; light: Rgb }
-export type DitherHue = 'red' | 'blue' | 'purple' | 'green' | 'olive' | 'lime';
+export type DitherHue = 'red' | 'blue' | 'purple' | 'green' | 'olive' | 'lime' | 'teal';
 export type DitherColour = DitherHue | 'cycle';
 
 const hex = (h: string): Rgb => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -17,6 +17,7 @@ export const DITHER_PALETTES: Record<DitherHue, DitherPalette> = {
   green: { light: hex('#22924c'), mid: hex('#0e3519') },
   olive: { light: hex('#a39642'), mid: hex('#464020') },
   lime: { light: hex('#a2a646'), mid: hex('#454721') },
+  teal: { light: hex('#1b8fa6'), mid: hex('#002f39') },
 };
 
 /** Cycle order and timing: ~2 min round trip, each colour holds 20 s then eases into the next over 10 s. */
