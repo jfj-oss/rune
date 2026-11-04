@@ -7,7 +7,7 @@
 // are written and re-indexed.
 
 import { promises as fsp, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { parseFile } from 'music-metadata';
 import type { IAudioMetadata } from 'music-metadata';
 import type { ScanProgress } from '@liner/shared';
@@ -44,6 +44,13 @@ export interface ScanStats extends ScanProgress {
 
 export interface ScannerWithStats extends Scanner {
   scan(onProgress?: (p: ScanProgress) => void): Promise<ScanStats>;
+  /** Paths (relative to a library root) the last scan could not read, with a short reason. */
+  scanErrors(): ScanError[];
+}
+
+export interface ScanError {
+  path: string;
+  reason: string;
 }
 
 // ---------------------------------------------------------------- metadata
@@ -164,7 +171,16 @@ function normalizeCachedMeta(raw: unknown): ParsedMeta | null {
   };
 }
 
-async function parseAudioFile(path: string): Promise<{ meta: ParsedMeta; parseError: boolean }> {
+/** Short, user-facing reason for a parse failure (kept small; it is stored per file). */
+function shortReason(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const line = message.split('\n')[0]?.trim() || 'could not read audio tags';
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line;
+}
+
+async function parseAudioFile(
+  path: string,
+): Promise<{ meta: ParsedMeta; parseError: boolean; reason?: string }> {
   try {
     const meta = metaFromMetadata(await parseFile(path, { duration: true }));
     if (meta.durationMs > 0) return { meta, parseError: false };
@@ -184,7 +200,7 @@ async function parseAudioFile(path: string): Promise<{ meta: ParsedMeta; parseEr
     // (66 in the real library). Fall back to ffprobe before giving up.
     const probed = await probeWithFfprobe(path);
     if (probed) return { meta: probed, parseError: false };
-    return { meta: { ...EMPTY_META, error: true }, parseError: true };
+    return { meta: { ...EMPTY_META, error: true }, parseError: true, reason: shortReason(e) };
   }
 }
 
@@ -263,10 +279,11 @@ interface WalkResult {
   cueByDir: Map<string, string[]>;
   imagesByDir: Map<string, string[]>;
   errors: number;
+  issues: ScanError[];
 }
 
 async function walkRoots(roots: string[]): Promise<WalkResult> {
-  const result: WalkResult = { audio: [], cueByDir: new Map(), imagesByDir: new Map(), errors: 0 };
+  const result: WalkResult = { audio: [], cueByDir: new Map(), imagesByDir: new Map(), errors: 0, issues: [] };
 
   const push = (map: Map<string, string[]>, dir: string, file: string): void => {
     const list = map.get(dir);
@@ -280,6 +297,7 @@ async function walkRoots(roots: string[]): Promise<WalkResult> {
       entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch {
       result.errors++;
+      result.issues.push({ path: dir, reason: 'folder could not be read' });
       return;
     }
     entries.sort((a, b) => a.name.localeCompare(b.name));
@@ -1532,11 +1550,14 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       };
 
       let errors = 0;
+      /** Every `errors++` below records the path and a short reason for Settings. */
+      const issues: ScanError[] = [];
       progress({ running: true, filesSeen: 0, albumsFound: 0, errors });
 
       // ---- 1. walk
       const walked = await walkRoots(roots);
       errors += walked.errors;
+      issues.push(...walked.issues);
       const seenPaths = new Set(walked.audio);
 
       // ---- 2. parse audio (concurrent, cached by mtime+size)
@@ -1557,6 +1578,7 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
           stat = await fsp.stat(path);
         } catch {
           errors++;
+          issues.push({ path, reason: 'file could not be read' });
           return;
         }
         const mtime = Math.round(stat.mtimeMs);
@@ -1567,17 +1589,26 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
           const parsed = normalizeCachedMeta(JSON.parse(cached.meta));
           if (parsed) {
             meta = parsed;
-            if (parsed.error) errors++;
+            if (parsed.error) {
+              errors++;
+              issues.push({ path, reason: 'could not read audio tags' });
+            }
           } else {
             const result = await parseAudioFile(path);
             meta = result.meta;
-            if (result.parseError) errors++;
+            if (result.parseError) {
+              errors++;
+              issues.push({ path, reason: result.reason ?? 'could not read audio tags' });
+            }
             changedFiles++;
           }
         } else {
           const result = await parseAudioFile(path);
           meta = result.meta;
-          if (result.parseError) errors++;
+          if (result.parseError) {
+            errors++;
+            issues.push({ path, reason: result.reason ?? 'could not read audio tags' });
+          }
           changedFiles++;
         }
 
@@ -1635,6 +1666,7 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
             sheet = parseCue(decodeCue(buf));
           } catch {
             errors++;
+            issues.push({ path: cuePath, reason: 'cue sheet could not be read' });
             continue;
           }
           if (sheet.files.length !== 1) continue; // multi-FILE cues are ignored
@@ -1658,6 +1690,14 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
           }));
         }
       }
+
+      // ---- 3b. remember unreadable paths for Settings (DB only, never the library)
+      const replaceIssues = db.transaction((items: ScanError[]) => {
+        db.exec('DELETE FROM scan_errors');
+        const insert = db.prepare('INSERT OR REPLACE INTO scan_errors (path, reason) VALUES (?, ?)');
+        for (const issue of items) insert.run(issue.path, issue.reason);
+      });
+      replaceIssues(issues);
 
       // ---- 4. group and build album models
       // Unreadable files (damaged / zeroed) stay in the cache but never become tracks.
@@ -1795,6 +1835,18 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       return stats;
   };
 
+  /** Library roots, for reporting paths relative to what the user configured. */
+  const rootsForErrors = cfg.libraryRoots.map((r) => resolve(r));
+  const relativeToRoot = (path: string): string => {
+    for (const root of rootsForErrors) {
+      if (path === root) return '.';
+      if (path.startsWith(root.endsWith(sep) ? root : root + sep)) {
+        return path.slice(root.length + (root.endsWith(sep) ? 0 : 1));
+      }
+    }
+    return path;
+  };
+
   return {
     async scan(onProgress?: (p: ScanProgress) => void): Promise<ScanStats> {
       // Background workers (loudness analysis) pause while this is set.
@@ -1804,6 +1856,12 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       } finally {
         endScan();
       }
+    },
+    scanErrors(): ScanError[] {
+      const rows = db
+        .prepare('SELECT path, reason FROM scan_errors ORDER BY path')
+        .all() as ScanError[];
+      return rows.map((row) => ({ path: relativeToRoot(row.path), reason: row.reason }));
     },
   };
 }

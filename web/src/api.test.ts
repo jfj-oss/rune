@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { http } from './api';
+import { api, http } from './api';
 
 describe('http', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -19,5 +19,22 @@ describe('http', () => {
     const calls = capture();
     await http('/settings/hotkeys', { method: 'POST', body: JSON.stringify({ albumKey: '' }) });
     expect(type(calls[0]!)).toBe('application/json');
+  });
+});
+
+describe('spotify + scan API shapes', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const respond = (payload: unknown) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })));
+  };
+
+  it('spotifyStatus keeps working when the server says Spotify is not configured', async () => {
+    respond({ connected: false, configured: false });
+    await expect(api.spotifyStatus()).resolves.toEqual({ connected: false, configured: false });
+  });
+
+  it('fetching scan errors returns their paths and reasons', async () => {
+    respond([{ path: 'Artist/Album/broken.flac', reason: 'End-Of-Stream' }]);
+    await expect(api.scanErrors()).resolves.toEqual([{ path: 'Artist/Album/broken.flac', reason: 'End-Of-Stream' }]);
   });
 });

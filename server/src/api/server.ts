@@ -1114,6 +1114,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { started: true };
       });
       r.get('/scan', async () => last);
+      /** Files the last scan could not read, so Settings can show which ones. */
+      r.get('/scan/errors', async () => scanner.scanErrors());
+
+      // Without a Spotify client id there is no Spotify module to register its
+      // routes; answer the status the UI asks for on every load instead of 404ing.
+      if (!spotify) r.get('/spotify/status', async () => ({ connected: false, configured: false }));
 
       // Spotify request counters and the quota circuit breaker, for diagnosing runaway polling.
       r.get('/spotify/usage', async (_req, reply) => {

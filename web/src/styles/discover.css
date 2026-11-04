@@ -257,6 +257,12 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .statusroot__path { font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
 .statusroot__badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .statusroot__free { font-size: 12px; color: var(--text-3); }
+.scanerrors { margin-top: 8px; font-size: 12.5px; }
+.scanerrors summary { cursor: pointer; color: var(--warn); padding: 6px 0; }
+.scanerrors__list { list-style: none; margin: 4px 0 0; padding: 0; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.scanerrors__list li { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.scanerrors__path { color: var(--text); overflow-wrap: anywhere; }
+.scanerrors__reason { color: var(--text-3); font-size: 12px; }
 .badge--ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .badge--bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

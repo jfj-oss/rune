@@ -769,6 +769,22 @@ describe('GET /api/ws', () => {
   }, 10_000);
 });
 
+describe('GET /api/spotify/status without a Spotify client id', () => {
+  it('answers 200 with configured:false instead of 404', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/spotify/status' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ connected: false, configured: false });
+  });
+});
+
+describe('GET /api/scan/errors', () => {
+  it('returns the stored scan errors (none before the first scan)', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/scan/errors' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
 function firstScanEvent(url: string): Promise<ServerEvent> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);

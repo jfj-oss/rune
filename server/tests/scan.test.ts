@@ -597,4 +597,22 @@ describe('scanner', () => {
       chmodSync(library, 0o755);
     }
   });
+
+  it('records unreadable files with a short reason for Settings', async () => {
+    const broken = join(albumOneFolder(), '03 - Broken.flac');
+    writeFileSync(broken, 'this is not a flac file');
+    const stats = await scanner.scan();
+    expect(stats.errors).toBe(1);
+    const errors = scanner.scanErrors();
+    expect(errors).toHaveLength(1);
+    // Paths are reported relative to the library root the user configured.
+    expect(errors[0]!.path).toBe(join('Artist One - Album One (1999) [FLAC]', '03 - Broken.flac'));
+    expect(errors[0]!.reason.length).toBeGreaterThan(0);
+
+    // A later successful scan clears the list, so it always describes the last run.
+    unlinkSync(broken);
+    const clean = await scanner.scan();
+    expect(clean.errors).toBe(0);
+    expect(scanner.scanErrors()).toEqual([]);
+  });
 });

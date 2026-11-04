@@ -82,7 +82,7 @@ describe('SpotifyAuth', () => {
     const state = authorizeUrl.searchParams.get('state') ?? '';
 
     const status = await auth.handleCallback('code-123', state);
-    expect(status).toEqual({ connected: true, user: { name: 'Listener', product: 'premium' } });
+    expect(status).toEqual({ connected: true, configured: true, user: { name: 'Listener', product: 'premium' } });
     expect(tokenRequests).toHaveLength(1);
     expect(auth.hasRefreshToken()).toBe(true);
 
@@ -152,19 +152,19 @@ describe('SpotifyAuth', () => {
     auth.storeTokens({ access_token: 'expired', token_type: 'Bearer', expires_in: -10, refresh_token: 'rt' });
 
     await expect(auth.getAccessToken()).rejects.toMatchObject({ name: 'SpotifyAuthError', code: 'invalid_grant' });
-    expect(auth.status()).toEqual({ connected: false });
+    expect(auth.status()).toEqual({ connected: false, configured: true });
     expect(auth.hasRefreshToken()).toBe(false);
   });
 
   it('reports not_connected and logs out', async () => {
     const { fetch } = fakeFetch(() => jsonResponse(500, {}));
     const { auth } = makeAuth(fetch);
-    expect(auth.status()).toEqual({ connected: false });
+    expect(auth.status()).toEqual({ connected: false, configured: true });
     await expect(auth.getAccessToken()).rejects.toBeInstanceOf(SpotifyAuthError);
 
     auth.storeTokens({ access_token: 'a', token_type: 'Bearer', expires_in: 60, refresh_token: 'r' });
     expect(auth.status().connected).toBe(true);
     auth.logout();
-    expect(auth.status()).toEqual({ connected: false });
+    expect(auth.status()).toEqual({ connected: false, configured: true });
   });
 });

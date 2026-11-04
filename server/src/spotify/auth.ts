@@ -67,6 +67,8 @@ export class SpotifyAuthError extends Error {
 
 export interface SpotifyStatus {
   connected: boolean;
+  /** False only for the stand-in answer when no Spotify client id is configured. */
+  configured: boolean;
   user?: { name: string; product: string };
 }
 
@@ -213,11 +215,11 @@ export class SpotifyAuth {
 
   status(): SpotifyStatus {
     const row = this.load();
-    if (!row?.access_token || !row?.refresh_token) return { connected: false };
+    if (!row?.access_token || !row?.refresh_token) return { connected: false, configured: true };
     const name = row.user_name;
     return name
-      ? { connected: true, user: { name, product: row.user_product ?? '' } }
-      : { connected: true };
+      ? { connected: true, configured: true, user: { name, product: row.user_product ?? '' } }
+      : { connected: true, configured: true };
   }
 
   /** Access token for the browser Web Playback SDK, refreshed when needed. */

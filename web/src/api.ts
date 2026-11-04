@@ -141,12 +141,12 @@ export const api = {
     return http(`/player/${encodeURIComponent(zone)}`, { method: 'POST', body: JSON.stringify(cmd) });
   },
   // ---------- Spotify ----------
-  async spotifyStatus(): Promise<{ connected: boolean; user?: { name: string; product: string } }> {
+  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string } }> {
     if (isMock) return (await mock()).mockApi.spotifyStatus();
     try {
       return await http('/spotify/status');
     } catch {
-      return { connected: false };
+      return { connected: false, configured: false };
     }
   },
   async playlists(): Promise<RunePlaylistSummary[]> {
@@ -173,6 +173,11 @@ export const api = {
   async scan(): Promise<void> {
     if (isMock) return;
     await http('/scan', { method: 'POST' });
+  },
+  /** Files the last scan could not read (paths relative to a library root). */
+  async scanErrors(): Promise<{ path: string; reason: string }[]> {
+    if (isMock) return [];
+    return http<{ path: string; reason: string }[]>('/scan/errors');
   },
 };
 
