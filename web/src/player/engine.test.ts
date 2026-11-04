@@ -31,7 +31,11 @@ class FakeAudio {
     this.playCalls += 1;
     return Promise.resolve();
   }
-  pause(): void {}
+  paused = true;
+  pauseCalls = 0;
+  pause(): void {
+    this.pauseCalls += 1;
+  }
   load(): void {
     this.loadCalls += 1;
   }
@@ -275,4 +279,21 @@ describe('AudioEngine on iOS (background playback)', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(routed.length).toBeGreaterThan(0);
   });
+
+  it('unlocks the audio elements on the first tap, silently (iOS refuses a play() that waits for the server)', async () => {
+    stubAudioContext();
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal('document', {
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+      removeEventListener: (type: string) => listeners.delete(type),
+    });
+    await engineFor('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15');
+    const [a, b] = FakeAudio.instances.slice(-2);
+    expect(a!.playCalls).toBe(0);
+    listeners.get('touchend')!();
+    expect([a!.playCalls, b!.playCalls]).toEqual([1, 1]);
+    expect([a!.pauseCalls, b!.pauseCalls]).toEqual([1, 1]); // paused in the same task: no sound
+    expect(listeners.size).toBe(0); // once is enough
+  });
 });
+
