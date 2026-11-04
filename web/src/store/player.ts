@@ -9,7 +9,7 @@ import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
 import { PcBackend, type PcDevice } from '../player/pc';
 import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
-import { preferLocal } from '../player/preferLocal';
+import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, zoneTransport } from '../player/remote';
 import { cantPlayMessage, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
 import { emptyState, livePosition, type Backend } from '../player/types';
@@ -147,8 +147,12 @@ export const usePlayer = create<PlayerStore>((set, get) => {
    * app never appeared — in which case no playback has been touched.
    */
   /** Spotify tracks the user also owns play from the local file, on zones that can play local files. */
-  function ownCopies(z: ZoneInfo, items: PlayItem[]): Promise<PlayItem[]> {
-    return zoneCanPlay(z, 'local', capsFrom(useSpotify.getState())) ? preferLocal(items, api.localTwins) : Promise.resolve(items);
+  /** Each song in the copy this zone can play (own file or Spotify), so as little as possible is skipped. */
+  function ownCopies(z: ZoneInfo, items: PlayItem[], startIndex = 0, whole = true): Promise<PlayItem[]> {
+    const sp = useSpotify.getState();
+    const caps = capsFrom(sp);
+    const can = { local: zoneCanPlay(z, 'local', caps), spotify: zoneCanPlay(z, 'spotify', caps), spotifyElsewhere: sp.connected };
+    return fitForZone(items, startIndex, can, { toLocal: api.localTwins, toSpotify: api.spotifyTwins }, whole);
   }
 
   async function ensurePcSpotify(items: PlayItem[], z: ZoneInfo): Promise<ZoneInfo | null> {
@@ -285,7 +289,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           start = 0;
         }
         // Owned songs play from the local file (and then need no Spotify app at all).
-        list = await ownCopies(z, list);
+        list = await ownCopies(z, list, start);
         // Sending Spotify tracks to the PC speakers: start the app and wait for it.
         if (needsPcSpotify(z, list)) {
           const pc = await ensurePcSpotify(list, z);
@@ -310,7 +314,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       try {
         let z = get().zones.find((x) => x.id === zoneId);
         if (!z) return;
-        req = { ...req, items: await ownCopies(z, req.items) };
+        req = { ...req, items: await ownCopies(z, req.items, req.startIndex) };
         // Chosen from the "Play on…" sheet: starting Spotify is still only a step of
         // actually sending Spotify tracks to the PC speakers.
         if (needsPcSpotify(z, req.items)) {
@@ -338,7 +342,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         let z = st.zones.find((x) => x.id === st.zone);
         const b = z && backends.get(z.id);
         if (!z || !b || !items.length) return;
-        items = await ownCopies(z, items);
+        items = await ownCopies(z, items, 0, false);
         // Queueing Spotify tracks on the PC speakers needs the app too.
         if (needsPcSpotify(z, items)) {
           const pc = await ensurePcSpotify(items, z);

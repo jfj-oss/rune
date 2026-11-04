@@ -105,6 +105,12 @@ export const api = {
     const r = await http<{ twins: Record<string, PlayItem> }>('/local-twins', { method: 'POST', body: JSON.stringify({ tracks }) });
     return r.twins ?? {};
   },
+  /** Spotify copies of local tracks: 'l:<id>' → the Spotify track (for Spotify-only zones). */
+  async spotifyTwins(ids: string[]): Promise<Record<string, PlayItem>> {
+    if (isMock || !ids.length) return {};
+    const r = await http<{ twins: Record<string, PlayItem> }>('/spotify-twins', { method: 'POST', body: JSON.stringify({ ids }) });
+    return r.twins ?? {};
+  },
   /** Spotify devices hidden from the "Play on" list (by name, for every rune page). */
   async hiddenZones(): Promise<string[]> {
     if (isMock) return [];

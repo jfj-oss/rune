@@ -16,6 +16,10 @@ function seeded() {
   track.run('l:3', 'la:2', 'Free Bird', 1, 552_000);
   track.run('l:4', 'la:1', 'Zero', 3, 160_000);
   db.prepare(`INSERT INTO track_links (track_id, spotify_track_id, linked_at) VALUES ('l:4', 'zeroSp', 1)`).run();
+  // A Spotify album rune stored (from a playlist / saved albums) with Free Bird on it.
+  db.prepare(`INSERT INTO albums (id, source, title, artist_id, added_at) VALUES ('sp:alb', 'spotify', 'Gold & Platinum', 'ar:2', 1)`).run();
+  db.prepare(`INSERT INTO tracks (id, album_id, source, title, number, duration_ms) VALUES ('sp:fb', 'sp:alb', 'spotify', 'Free Bird - Live', 1, 700000)`).run();
+  db.prepare(`INSERT INTO tracks (id, album_id, source, title, number, duration_ms) VALUES ('sp:fb2', 'sp:alb', 'spotify', 'Free Bird', 2, 549000)`).run();
   return db;
 }
 
@@ -47,6 +51,20 @@ describe('local twins: a Spotify track the user owns plays from the local file',
     expect(items['sp:a']?.track.id).toBe('l:1');
     expect(items['sp:a']?.track.source).toBe('local');
     expect(items['sp:a']?.album).toMatchObject({ id: 'la:1', title: 'Mellon Collie' });
+  });
+  it('never hands a file path to the browser', () => {
+    const items = createLocalTwins(seeded()).items([q('sp:a', 'Tonight, Tonight', ['The Smashing Pumpkins'], 255_000)]);
+    expect(items['sp:a']?.track).not.toHaveProperty('path');
+  });
+  it('reverse: a local file plays its Spotify copy on a Spotify-only zone', () => {
+    const tw = createLocalTwins(seeded()).spotifyItems(['l:3', 'l:4', 'l:2', 'nope']);
+    expect(tw['l:3']?.track.id).toBe('sp:fb2'); // same song by name (not the live one)
+    expect(tw['l:3']?.track.source).toBe('spotify');
+    // linked, but rune never stored that Spotify track: local metadata under the Spotify id
+    expect(tw['l:4']?.track).toMatchObject({ id: 'sp:zeroSp', source: 'spotify', title: 'Zero', spotifyUri: 'spotify:track:zeroSp' });
+    expect(tw['l:4']?.track).not.toHaveProperty('path');
+    expect(tw['l:2']).toBeUndefined(); // the live version has no Spotify copy
+    expect(Object.keys(tw)).toHaveLength(2);
   });
   it('normalises packaging words only', () => {
     expect(normTitle('Blue Moon - 1999 Remastered')).toBe('blue moon');

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { api, isMock } from '../api';
-import { deviceName, sdkSupported } from '../lib/device';
+import { devicePlace, sdkSupported } from '../lib/device';
 import type { PlayItem, PlaySource } from '../lib/types';
 import { SpotifySdkEngine, type SdkStatus } from '../player/spotifySdk';
 import type { Caps } from '../player/routing';
@@ -31,7 +31,8 @@ interface SpotifyStore {
   remember(need: PlaySource, zone: string | undefined): void;
 }
 
-export const sdkName = () => `rune — ${deviceName()}`;
+/** The Spotify device name of this tab, as every other device sees it: "rune in the browser (Mac)". */
+export const sdkName = () => `rune in the browser (${devicePlace()})`;
 let engine: SpotifySdkEngine | null = null;
 /** The one Web Playback SDK engine of this tab (the browser zone's Spotify half). */
 export function getSdkEngine(): SpotifySdkEngine {

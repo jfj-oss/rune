@@ -8,6 +8,20 @@ export function deviceName(ua = typeof navigator === 'undefined' ? '' : navigato
 }
 
 /**
+ * Where this device is, as other devices should read it ("Mac", "Linux PC"). The Spotify device a
+ * rune tab registers is listed on every other device too, where "This computer" would be misleading.
+ */
+export function devicePlace(ua = typeof navigator === 'undefined' ? '' : navigator.userAgent, touchPoints = typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints): string {
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && touchPoints > 1)) return 'iPad';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  if (/Linux|X11|CrOS/.test(ua)) return 'Linux PC';
+  return 'a computer';
+}
+
+/**
  * The Spotify Web Playback SDK does not run on phones/tablets (and needs EME + a secure context).
  * Pure so it can be unit-tested; `sdkSupported()` feeds it the real browser.
  */
