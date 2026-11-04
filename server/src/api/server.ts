@@ -30,6 +30,7 @@ import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
+import { createLocalTwins, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
@@ -213,6 +214,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     ...opts.pcSpotify,
   });
   const history = createHistory(db);
+  const localTwins = createLocalTwins(db);
   const lastState = new Map<Zone, PlayerState>();
   const recordHistory = (state: PlayerState) => {
     const prev = lastState.get(state.zone);
@@ -905,6 +907,13 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         if (d !== 'fine' && d !== 'classic') return reply.code(400).send({ error: 'dots must be fine or classic' });
         setState('ui.dots', d);
         return { dots: d };
+      });
+
+      // Spotify tracks the user also has locally: the client swaps them for the local copy before playing.
+      r.post<{ Body: unknown }>('/local-twins', async (req, reply) => {
+        const queries = parseTwinQueries(req.body);
+        if (!queries) return reply.code(400).send({ error: 'tracks: [{ id, title, artists, durationMs }] required' });
+        return { twins: localTwins.items(queries) };
       });
 
       // Hotkeys (album key + playlist keys), shared too: browsers that clear site data on exit would lose them.

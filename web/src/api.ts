@@ -1,7 +1,7 @@
 import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, Zone } from '@liner/shared';
 import type { RunePlaylistDetail, RunePlaylistSummary } from './lib/playlists';
 import { mockCover } from './mock/covers';
-import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from './lib/types';
+import type { AlbumQuery, MatchCandidate, PlayItem, SearchResults, ZoneInfo } from './lib/types';
 
 /** Mock mode: VITE_MOCK=1 at build time, or ?mock=1 (sticks for the session; ?mock=0 clears it). */
 function detectMock(): boolean {
@@ -98,6 +98,12 @@ export const api = {
   async pcSpotifyStart(): Promise<{ started: boolean; running: boolean }> {
     if (isMock) return { started: false, running: false };
     return http('/pc/spotify/start', { method: 'POST' });
+  },
+  /** Local copies of Spotify tracks the user owns: 'sp:<id>' → the local track + its album. */
+  async localTwins(tracks: { id: string; title: string; artists: string[]; durationMs: number }[]): Promise<Record<string, PlayItem>> {
+    if (isMock || !tracks.length) return {};
+    const r = await http<{ twins: Record<string, PlayItem> }>('/local-twins', { method: 'POST', body: JSON.stringify({ tracks }) });
+    return r.twins ?? {};
   },
   /** Spotify devices hidden from the "Play on" list (by name, for every rune page). */
   async hiddenZones(): Promise<string[]> {
