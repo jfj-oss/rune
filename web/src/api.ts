@@ -29,7 +29,9 @@ export class ApiError extends Error {
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch('/api' + path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+    // Only label a body that exists: Fastify rejects an empty body sent as JSON (400), which silently
+    // broke the bodiless POSTs (/pc/spotify/start never launched Spotify; /scan never scanned).
+    headers: { ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(init?.headers ?? {}) },
   });
   if (!res.ok) {
     let msg: string | undefined;
