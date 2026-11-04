@@ -24,14 +24,11 @@ export interface PlayItem {
 }
 
 /**
- * Contract gaps (not in @liner/shared): the queue drawer needs reorder and clear.
- * `move` / `clear` are handled locally by the browser zone; for server zones `clear`
- * is emulated with `remove` per item and `move` is sent as-is (server may ignore it).
+ * Commands the queue drawer can send. `move` / `clear` live in the shared
+ * PlayerCommand: the browser zone handles them locally, server zones over
+ * POST /player/:zone.
  */
-export type ExtCommand =
-  | PlayerCommand
-  | { type: 'move'; queueId: string; toIndex: number }
-  | { type: 'clear' };
+export type ExtCommand = PlayerCommand;
 
 /** Contract gap: candidate list for "Fix match" (GET /albums/:id/candidates). */
 export interface MatchCandidate {

@@ -169,6 +169,43 @@ export function remove(q: QueueState, queueId: string): QueueState {
 }
 
 /**
+ * Reorder the queue: the entry with `queueId` moves to `toIndex` in the visible
+ * queue (clamped to the ends). The current track stays current wherever it lands.
+ * Shuffled playback order is preserved as a sequence of entries; when shuffle is
+ * off the order is the queue order, so it stays the identity order.
+ * Throws for an unknown queueId so the API can report a useful error.
+ */
+export function move(q: QueueState, queueId: string, toIndex: number): QueueState {
+  const from = q.items.findIndex((it) => it.queueId === queueId);
+  if (from < 0) throw new Error(`unknown queue item ${queueId}`);
+  const requested = Number.isFinite(toIndex) ? Math.trunc(toIndex) : from;
+  const to = clamp(requested, 0, q.items.length - 1);
+  if (from === to) return q;
+
+  const items = q.items.slice();
+  const [moved] = items.splice(from, 1);
+  items.splice(to, 0, moved!);
+
+  // Old index -> new index for every entry (the moved one now sits at `to`).
+  const remap = (old: number): number => {
+    if (old === from) return to;
+    if (from < to) return old > from && old <= to ? old - 1 : old;
+    return old >= to && old < from ? old + 1 : old;
+  };
+  return {
+    ...q,
+    items,
+    index: q.index >= 0 ? remap(q.index) : q.index,
+    order: q.shuffle ? q.order.map(remap) : identityOrder(items.length),
+  };
+}
+
+/** Empty the queue. Shuffle/repeat settings stay as they are (matches the browser zone). */
+export function clear(q: QueueState): QueueState {
+  return { ...q, items: [], index: -1, order: [] };
+}
+
+/**
  * Advance. `auto` is true for natural end-of-track advances: repeat 'one' then
  * repeats the current track instead of moving on.
  */

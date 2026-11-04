@@ -17,11 +17,13 @@ import { nowPlayingFromMetadata } from '../iradio/nowplaying.js';
 import { MpvIpc, type MpvArg, type MpvMessage } from './mpv-ipc.js';
 import { levelingLabel } from './signal-path.js';
 import {
+  clear as queueClear,
   createQueue,
   currentItem,
   enqueue as queueEnqueue,
   indexOfQueueId,
   jump as queueJump,
+  move as queueMove,
   next as queueNext,
   play as queuePlay,
   prev as queuePrev,
@@ -729,6 +731,10 @@ class PcZoneImpl implements PcZone {
         return this.cmdJump(cmd.index);
       case 'remove':
         return this.cmdRemove(cmd.queueId);
+      case 'move':
+        return this.cmdMove(cmd.queueId, cmd.toIndex);
+      case 'clear':
+        return this.cmdClear();
       case 'volume':
         return this.cmdVolume(cmd.volume);
       case 'shuffle':
@@ -925,6 +931,25 @@ class PcZoneImpl implements PcZone {
     } else {
       this.emitChange();
     }
+  }
+
+  /** Reorder the queue. The current track keeps playing; only its queue index moves. */
+  private async cmdMove(queueId: string, toIndex: number): Promise<void> {
+    const before = this.q;
+    this.q = queueMove(this.q, queueId, toIndex);
+    if (this.q === before) return; // no-op (same position): nothing to broadcast
+    if (this.status === 'playing' || this.status === 'paused') {
+      // Playback order is unchanged, but recompute the preloaded tail defensively.
+      await this.syncWindow();
+    }
+    this.emitChange();
+  }
+
+  /** Empty the queue and stop playback; shuffle/repeat settings are kept. */
+  private async cmdClear(): Promise<void> {
+    this.q = queueClear(this.q);
+    await this.stopPlayback();
+    this.emitChange();
   }
 
   private async cmdVolume(volume: number): Promise<void> {
