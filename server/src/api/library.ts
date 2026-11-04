@@ -63,6 +63,16 @@ function summary(r: AlbumRow): AlbumSummary {
   };
 }
 
+/** Escape LIKE metacharacters so a user's `%`/`_` stay literal. */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** Query numbers arrive as text: keep a finite whole number, else use the fallback. */
+function whole(v: number | undefined, fallback: number): number {
+  return v !== undefined && Number.isFinite(v) ? Math.trunc(v) : fallback;
+}
+
 /** FTS5 prefix query from free text: every word must match as a prefix. */
 export function ftsQuery(q: string): string | null {
   const words = q
@@ -103,14 +113,24 @@ export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
     where.push('a.artist_id = ?');
     args.push(q.artistId);
   }
-  const fts = q.q ? ftsQuery(q.q) : null;
-  if (fts) {
-    // albums matching directly, or whose artist / tracks match
-    where.push(`(a.id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'album')
-      OR a.id IN (SELECT t.album_id FROM tracks t WHERE t.id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'track'))
-      OR a.title LIKE ? OR ar.name LIKE ?)`);
-    const like = `%${q.q}%`;
-    args.push(fts, fts, like, like);
+  if (q.q) {
+    // albums matching directly, or whose artist / tracks match. The LIKE fallback also
+    // covers queries with no FTS words (e.g. a lone "%"), which must not mean "everything".
+    const fts = ftsQuery(q.q);
+    const like = `%${escapeLike(q.q)}%`;
+    const match = [
+      `a.title LIKE ? ESCAPE '\\'`,
+      `ar.name LIKE ? ESCAPE '\\'`,
+    ];
+    args.push(like, like);
+    if (fts) {
+      match.push(
+        `a.id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'album')`,
+        `a.id IN (SELECT t.album_id FROM tracks t WHERE t.id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'track'))`,
+      );
+      args.push(fts, fts);
+    }
+    where.push(`(${match.join(' OR ')})`);
   }
   const order =
     q.sort === 'artist'
@@ -121,8 +141,8 @@ export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
           ? 'a.year DESC NULLS LAST, a.title COLLATE NOCASE'
           : 'a.added_at DESC, a.title COLLATE NOCASE';
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const limit = Math.min(Math.max(q.limit ?? 100, 1), 2000);
-  const offset = Math.max(q.offset ?? 0, 0);
+  const limit = Math.min(Math.max(whole(q.limit, 100), 1), 2000);
+  const offset = Math.max(whole(q.offset, 0), 0);
   const total = (db.prepare(`SELECT count(*) n FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id ${w}`).get(...args) as { n: number }).n;
   const rows = db.prepare(`${ALBUM_SELECT} ${w} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...args, limit, offset) as AlbumRow[];
   return { items: rows.map(summary), total };
@@ -241,13 +261,13 @@ export function getArtist(db: Db, id: string): Omit<Artist, 'bio'> | undefined {
 
 export function listArtists(db: Db, q?: string): { id: string; name: string; albumCount: number; coverAlbumId?: string }[] {
   ensureSpotifyLibrarySchema(db);
-  const like = q ? `%${q}%` : '%';
+  const like = q ? `%${escapeLike(q)}%` : '%';
   return (
     db
       .prepare(
         `SELECT ar.id, ar.name, count(a.id) AS albumCount, max(a.id) AS coverAlbumId
          FROM artists ar JOIN albums a ON a.artist_id = ar.id AND a.in_library = 1
-         WHERE ar.name LIKE ? GROUP BY ar.id ORDER BY coalesce(ar.sort_name, ar.name) COLLATE NOCASE`,
+         WHERE ar.name LIKE ? ESCAPE '\\' GROUP BY ar.id ORDER BY coalesce(ar.sort_name, ar.name) COLLATE NOCASE`,
       )
       .all(like) as { id: string; name: string; albumCount: number; coverAlbumId: string }[]
   );
@@ -256,14 +276,14 @@ export function listArtists(db: Db, q?: string): { id: string; name: string; alb
 export function search(db: Db, q: string): { albums: AlbumSummary[]; artists: ArtistRef[]; tracks: Track[] } {
   ensureSpotifyLibrarySchema(db);
   const fts = ftsQuery(q);
-  const like = `%${q}%`;
+  const like = `%${escapeLike(q)}%`;
   const albums = listAlbums(db, { q, limit: 12, sort: 'artist' }).items;
   const notHiddenX = albumNotHiddenSql(db, 'x');
   const notHiddenA = albumNotHiddenSql(db, 'a');
   const artists = db
     .prepare(
       `SELECT id, name FROM artists
-       WHERE (name LIKE ? ${fts ? "OR id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'artist')" : ''})
+       WHERE (name LIKE ? ESCAPE '\\' ${fts ? "OR id IN (SELECT ref_id FROM search_fts WHERE search_fts MATCH ? AND kind = 'artist')" : ''})
          AND EXISTS (SELECT 1 FROM albums x WHERE x.artist_id = artists.id AND x.in_library = 1 AND ${notHiddenX})
        ORDER BY (EXISTS (SELECT 1 FROM albums WHERE artist_id = artists.id)) DESC, length(name) LIMIT 8`,
     )

@@ -372,6 +372,29 @@ describe('GET /api/library/albums', () => {
     const page = await getJson<Page<AlbumSummary>>('/api/library/albums?q=oyster&q=oys');
     expect(page.total).toBe(2);
   });
+
+  it('uses defaults for non-numeric or fractional limit/offset instead of a 500', async () => {
+    for (const query of ['limit=abc', 'offset=abc', 'limit=NaN', 'offset=Infinity', 'limit=&offset=']) {
+      const res = await app.inject({ method: 'GET', url: `/api/library/albums?${query}` });
+      expect(res.statusCode, `${query} → ${res.body}`).toBe(200);
+      const page = res.json() as Page<AlbumSummary>;
+      expect(page.total, query).toBe(5);
+      expect(page.items.length, query).toBe(5); // fall back to the default page size
+    }
+    // Fractions are truncated, not passed to SQLite as reals.
+    const paged = await getJson<Page<AlbumSummary>>('/api/library/albums?limit=2.9&offset=1.9');
+    expect(albumIds(paged)).toEqual([UNMATCHED_ALBUM, MATCHED_ALBUM]);
+  });
+
+  it('treats % and _ in q as literal characters, not LIKE wildcards', async () => {
+    for (const q of ['%25', '_']) {
+      const page = await getJson<Page<AlbumSummary>>(`/api/library/albums?q=${q}`);
+      expect(page.total, `q=${q}`).toBe(0);
+    }
+    const search = await getJson<{ albums: AlbumSummary[]; artists: ArtistRef[]; tracks: Track[] }>('/api/search?q=%25');
+    expect(search).toEqual({ albums: [], artists: [], tracks: [] });
+    expect(await getJson<ArtistRef[]>('/api/artists?q=%25')).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------- /albums/:id
@@ -679,6 +702,64 @@ describe('GET /api/cover/:id', () => {
 describe('GET /api/zones', () => {
   it('has no PC zone when pcZone is disabled', async () => {
     expect(await getJson('/api/zones')).toEqual([]);
+  });
+});
+
+describe('POST /api/player/:zone', () => {
+  const url = '/api/player/pc';
+
+  it('rejects every malformed command with a short 400 before the zone is reached', async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ type: 'volume' }, 'volume must be a number between 0 and 100'],
+      [{ type: 'volume', volume: null }, 'volume must be a number between 0 and 100'],
+      [{ type: 'volume', volume: 'loud' }, 'volume must be a number between 0 and 100'],
+      [{ type: 'seek' }, 'seek positionMs must be a number of milliseconds (0 or more)'],
+      [{ type: 'seek', positionMs: -1 }, 'seek positionMs must be a number of milliseconds (0 or more)'],
+      [{ type: 'repeat', mode: 'banana' }, 'repeat mode must be off, all or one'],
+      [{ type: 'shuffle', on: 'yes' }, 'shuffle on must be true or false'],
+      [{ type: 'play', trackId: 123 }, 'play needs trackIds: an array of track ids'],
+      [{ type: 'play', trackIds: ['l:x'], startIndex: -1 }, 'play startIndex must be a whole number (0 or more)'],
+      [{ type: 'jump', index: 1.5 }, 'jump index must be a whole number (0 or more)'],
+      [{ type: 'remove' }, 'remove needs a queueId'],
+      [{ type: 'move', queueId: 'q:a', toIndex: -1 }, 'move toIndex must be a whole number (0 or more)'],
+      [{ type: 'nope', detail: 'internal' }, 'unknown player command'],
+    ];
+    for (const [payload, error] of cases) {
+      const res = await app.inject({ method: 'POST', url, payload });
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(res.json()).toEqual({ error });
+    }
+    // A JSON body that is not an object is rejected too, without echoing it.
+    for (const raw of ['null', '[]', '"volume"', '7']) {
+      const res = await app.inject({ method: 'POST', url, headers: { 'content-type': 'application/json' }, payload: raw });
+      expect(res.statusCode, raw).toBe(400);
+      expect(res.json()).toEqual({ error: 'player command must be a JSON object' });
+    }
+  });
+
+  it('accepts every real command and every command the queue UI sends', async () => {
+    const commands = [
+      { type: 'pause' },
+      { type: 'resume' },
+      { type: 'next' },
+      { type: 'prev' },
+      { type: 'seek', positionMs: 90_000 },
+      { type: 'jump', index: 2 },
+      { type: 'remove', queueId: 'q:a' },
+      { type: 'move', queueId: 'q:a', toIndex: 1 },
+      { type: 'clear' },
+      { type: 'volume', volume: 62 },
+      { type: 'shuffle', on: true },
+      { type: 'repeat', mode: 'one' },
+      { type: 'play', trackIds: [MATCHED_D1N1], startIndex: 0, positionMs: 1000, paused: false },
+      { type: 'enqueue', trackIds: [MATCHED_D1N2], next: true },
+    ];
+    for (const payload of commands) {
+      const res = await app.inject({ method: 'POST', url, payload });
+      // Validation passed; with pcZone disabled the next step is "this zone does not exist".
+      expect(res.statusCode, `${JSON.stringify(payload)} → ${res.body}`).toBe(404);
+      expect(res.json()).toEqual({ error: 'unknown zone' });
+    }
   });
 });
 

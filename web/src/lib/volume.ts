@@ -8,7 +8,8 @@ export const VOL_FINE_STEP = 0.5; // % per step below the knee
 export const VOL_COARSE_STEP = 2; // % per step above the knee
 export const VOL_SHIFT_FACTOR = 5; // Shift multiplies the step
 
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+/** Clamp, but treat a missing / NaN level (bad or stale server state) as the bottom. */
+const clamp = (n: number, lo: number, hi: number) => (Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo);
 
 /** Slider position (0..1) -> volume (0..100), unquantised. */
 export function posToVolume(p: number): number {
@@ -35,7 +36,9 @@ export function stepVolume(v: number, dir: 1 | -1, coarse = false): number {
   return snapVolume(v + dir * step);
 }
 
-export function formatVolume(v: number): string {
+/** Volume text; never throws on a missing / non-finite level from a stale server state. */
+export function formatVolume(v: number | null | undefined): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return '—';
   return `${Number.isInteger(v) ? v : v.toFixed(1)}%`;
 }
 

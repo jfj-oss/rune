@@ -71,6 +71,18 @@ describe('formatVolume', () => {
     expect(formatVolume(40)).toBe('40%');
     expect(formatVolume(0)).toBe('0%');
   });
+  it('never throws on a missing or non-finite level from stale server state', () => {
+    expect(formatVolume(null)).toBe('—');
+    expect(formatVolume(undefined)).toBe('—');
+    expect(formatVolume(Number.NaN)).toBe('—');
+    expect(formatVolume(Number.POSITIVE_INFINITY)).toBe('—');
+  });
+  it('treats a non-finite level as 0 for slider maths', () => {
+    expect(posToVolume(Number.NaN)).toBe(0);
+    expect(volumeToPos(Number.NaN)).toBe(0);
+    expect(snapVolume(Number.NaN)).toBe(0);
+    expect(volumeToPos(null as unknown as number)).toBe(0);
+  });
 });
 
 describe('detectIOS', () => {

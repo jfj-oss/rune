@@ -37,6 +37,7 @@ import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
 import { albumsByIds, coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
+import { parsePlayerCommand } from './playerCommand.js';
 import { createLoudness, ensureLoudnessSchema, registerLoudnessRoutes } from '../loudness/index.js';
 import { albumNotHiddenSql, ensureDupesSchema, registerDupesRoutes } from '../library/dupes.js';
 import { createRadio, registerRadioRoutes } from '../radio/index.js';
@@ -1077,23 +1078,33 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return z ? sanitize(z.state()) : reply.code(404).send({ error: 'unknown zone' });
       });
 
-      r.post<{ Params: { zone: string }; Body: PlayerCommand }>('/player/:zone', async (req, reply) => {
+      r.post<{ Params: { zone: string }; Body: unknown }>('/player/:zone', async (req, reply) => {
+        // Validate first: a malformed command must never reach a zone (and must not depend
+        // on which zones happen to exist). 400 with a short message the client can toast.
+        const parsed = parsePlayerCommand(req.body);
+        if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
         const z = await zoneFor(req.params.zone);
         if (!z) return reply.code(404).send({ error: 'unknown zone' });
         try {
-          if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: req.body?.type }, 'spotify command');
-          return sanitize(await z.command(req.body));
+          if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: parsed.command.type }, 'spotify command');
+          return sanitize(await z.command(parsed.command as PlayerCommand));
         } catch (e) {
           if (e instanceof HttpError && e.status === 429) {
             const until = spotify?.api.blockedUntil() ?? Date.now() + (e.retryAfterMs ?? 0);
             const message =
               `Spotify's daily limit is used up — Spotify songs play again around ${clockTime(until)}. ` +
               'Local music still works.';
-            app.log.warn({ zone: req.params.zone, cmd: req.body?.type, until: new Date(until).toISOString() }, 'player command rate limited');
+            app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, until: new Date(until).toISOString() }, 'player command rate limited');
             return reply.code(429).send({ error: message });
           }
-          app.log.warn({ zone: req.params.zone, cmd: req.body?.type, err: (e as Error).message }, 'player command failed');
-          return reply.code(400).send({ error: (e as Error).message });
+          app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, err: (e as Error).message }, 'player command failed');
+          // Zones throw a plain Error for expected, user-actionable failures (e.g. Spotify
+          // Connect cannot remove queue items) — show those. Anything else (TypeError,
+          // SqliteError, …) is an internal bug: log it without echoing its text.
+          if (!(e instanceof Error) || e.constructor !== Error) {
+            return reply.code(500).send({ error: 'the player could not complete that command' });
+          }
+          return reply.code(400).send({ error: e.message });
         }
       });
 
