@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server } from 'lucide-react';
 import { Empty } from '../components/Rows';
-import { http, isMock } from '../api';
+import { api, http, isMock } from '../api';
 import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { LibraryTabs } from './Albums';
@@ -127,6 +127,26 @@ function KeyboardCard() {
 
 const OPTIONAL_JOB_LABEL: Record<string, string> = { matching: 'Metadata matching', details: 'Album details', loudness: 'Loudness analysis' };
 
+/** Files the last scan could not read, collapsed so the Library card stays compact. */
+function ScanErrorsList() {
+  const q = useQuery({ queryKey: ['scan-errors'], queryFn: () => api.scanErrors(), staleTime: 60_000 });
+  const errors = q.data ?? [];
+  if (errors.length === 0) return null;
+  return (
+    <details className="scanerrors">
+      <summary>{errors.length} {errors.length === 1 ? 'file' : 'files'} could not be read</summary>
+      <ul className="scanerrors__list">
+        {errors.map((e) => (
+          <li key={e.path}>
+            <span className="scanerrors__path mono">{e.path}</span>
+            <span className="scanerrors__reason">{e.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export default function Settings() {
   const q = useQuery({ queryKey: ['health'], queryFn: () => discoverApi.health(), refetchInterval: 30_000 });
   const h = q.data;
@@ -184,6 +204,7 @@ export default function Settings() {
                 </div>
               ))}
               <div className="statusrow"><span className="statusrow__k">Last scan</span><span className="statusrow__v">{formatStamp(h.library.lastScanAt)}</span></div>
+              <ScanErrorsList />
             </section>
 
             <section className="statuscard">

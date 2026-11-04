@@ -14,3 +14,10 @@ CREATE TABLE IF NOT EXISTS scan_albums (
   album_id TEXT PRIMARY KEY,
   sig TEXT NOT NULL
 );
+
+-- Files/folders the last scan could not read, with a short reason. Replaced at the
+-- end of each scan so Settings can show exactly which files the error count means.
+CREATE TABLE IF NOT EXISTS scan_errors (
+  path TEXT PRIMARY KEY,
+  reason TEXT NOT NULL
+);
