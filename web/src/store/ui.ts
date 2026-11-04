@@ -15,17 +15,17 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-cycle' | 'dither-album';
+export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-slate' | 'dither-cycle' | 'dither-album';
 /** Non-Dither choices: only Off (plain dark) is left; the old gradient backdrops were removed. */
 export const AMBIENTS: Ambient[] = ['off'];
 /** The removed gradient backdrops, mapped to the nearest Dither colour for anyone who still has one saved. */
 const RETIRED_AMBIENT: Record<string, Ambient> = { cycle: 'dither-cycle', blue: 'dither-blue', purple: 'dither-purple', slate: 'dither-blue', green: 'dither-green' };
 const upgradeAmbient = (v: unknown): unknown => (typeof v === 'string' && v in RETIRED_AMBIENT ? RETIRED_AMBIENT[v] : v);
 /** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
-export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-olive', 'dither-lime', 'dither-teal', 'dither-cycle', 'dither-album'];
+export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-olive', 'dither-lime', 'dither-teal', 'dither-slate', 'dither-cycle', 'dither-album'];
 export const AMBIENT_LABEL: Record<Ambient, string> = {
   off: 'Off',
-  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-olive': 'Dither · Olive', 'dither-lime': 'Dither · Lime', 'dither-teal': 'Dither · Teal', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album',
+  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-olive': 'Dither · Olive', 'dither-lime': 'Dither · Lime', 'dither-teal': 'Dither · Teal', 'dither-slate': 'Dither · Slate', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album',
 };
 const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
 
