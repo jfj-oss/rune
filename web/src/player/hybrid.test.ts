@@ -106,6 +106,10 @@ describe('one queue across both engines (LocalBackend + HybridEngine)', () => {
     return { local, sp, b };
   };
 
+  it('starts at full volume, so a reload never drops the level', () => {
+    expect(setup().b.state.volume).toBe(100);
+  });
+
   it('advances local -> spotify -> local when each track ends', async () => {
     const { local, sp, b } = setup();
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, [item(L1), item(S1), item(L2)]);

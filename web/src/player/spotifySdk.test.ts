@@ -156,7 +156,7 @@ describe('SpotifySdkEngine local playback reports', () => {
         durationMs: 200_000,
         shuffle: true,
         repeat: 2,
-        volume: 0.7,
+        volume: 1, // the engine starts at full volume
         track: {
           id: 'a',
           uri: 'spotify:track:a',

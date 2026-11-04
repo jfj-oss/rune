@@ -44,7 +44,7 @@ export class ZoneEngine implements Engine {
   private off: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastPollAt = 0;
-  private volume = 70;
+  private volume = 100;
   private serverVolume: number | null = null;
   private endedFn: () => void = () => {};
   private errorFn: (m: string) => void = () => {};

@@ -169,7 +169,7 @@ export class PcBackend implements Backend {
       const sp = this.device ? `spotify:${this.device.id}` : null;
       if (!sp) return null;
       const engine = new HybridEngine(new ZoneEngine(this.deps.transport('pc')), new ZoneEngine(this.deps.transport(sp)));
-      this.mixed = new LocalBackend('pc', engine, { volume: this.pc.state.volume || 70 }, this.deps.notice);
+      this.mixed = new LocalBackend('pc', engine, { volume: this.pc.state.volume || 100 }, this.deps.notice);
       this.offs.push(this.mixed.subscribe((s) => this.onChild('mixed', s)));
     }
     return this.child(mode);

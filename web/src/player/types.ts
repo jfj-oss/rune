@@ -13,7 +13,7 @@ export interface Backend {
 }
 
 export function emptyState(zone: string): PlayerState {
-  return { zone, status: 'stopped', queue: [], index: -1, positionMs: 0, volume: 70, shuffle: false, repeat: 'off', updatedAt: Date.now() };
+  return { zone, status: 'stopped', queue: [], index: -1, positionMs: 0, volume: 100, shuffle: false, repeat: 'off', updatedAt: Date.now() };
 }
 
 /** Position right now, interpolated from the last snapshot while playing. */

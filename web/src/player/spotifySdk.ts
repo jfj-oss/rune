@@ -104,7 +104,7 @@ export class SpotifySdkEngine implements Engine {
   private seq = 0;
   private snap: Snap | null = null;
   private pos = { ms: 0, at: 0, playing: false };
-  private volume = 0.7;
+  private volume = 1;
   private endedFn: () => void = () => {};
   private errorFn: (m: string) => void = () => {};
   private syncFn: (pos: number, playing: boolean) => void = () => {};

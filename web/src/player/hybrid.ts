@@ -8,7 +8,7 @@ import type { Engine } from './engine';
  */
 export class HybridEngine implements Engine {
   private active: Engine | null = null;
-  private volume = 70;
+  private volume = 100;
   private endedFn: () => void = () => {};
   private errorFn: (m: string) => void = () => {};
   private syncFn: (pos: number, playing: boolean) => void = () => {};
