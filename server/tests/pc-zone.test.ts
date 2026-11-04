@@ -191,4 +191,62 @@ describe('PcZone gapless track switches', () => {
     expect(names()).not.toContain('playlist-next');
     expect(state.index).toBe(1);
   });
+
+  it('Move reorders the queue, keeps the playing track current and broadcasts', async () => {
+    await playFive();
+    const queue = zone.state().queue;
+    // Moves l:5 (after the current track) to just after l:1, changing what plays next.
+    const states: string[][] = [];
+    const off = zone.onChange((s) => states.push(s.queue.map((q) => q.track.id)));
+
+    const state = await zone.command({ type: 'move', queueId: queue[4]!.queueId, toIndex: 1 });
+
+    expect(state.queue.map((q) => q.track.id)).toEqual(['l:1', 'l:5', 'l:2', 'l:3', 'l:4']);
+    expect(state.queue[state.index]?.track.id).toBe('l:1');
+    expect(state.index).toBe(0);
+    expect(states.at(-1)).toEqual(['l:1', 'l:5', 'l:2', 'l:3', 'l:4']);
+    off();
+  });
+
+  it('Move of the playing track keeps it current at its new index', async () => {
+    await playFive();
+    const queue = zone.state().queue;
+    const state = await zone.command({ type: 'move', queueId: queue[0]!.queueId, toIndex: 4 });
+
+    expect(state.queue.map((q) => q.track.id)).toEqual(['l:2', 'l:3', 'l:4', 'l:5', 'l:1']);
+    expect(state.queue[state.index]?.track.id).toBe('l:1');
+    expect(state.index).toBe(4);
+  });
+
+  it('Move clamps a toIndex past the end and rejects an unknown queue id', async () => {
+    await playFive();
+    const queue = zone.state().queue;
+    const state = await zone.command({ type: 'move', queueId: queue[0]!.queueId, toIndex: 99 });
+    expect(state.queue.at(-1)?.track.id).toBe('l:1');
+    expect(state.index).toBe(4);
+
+    await expect(
+      zone.command({ type: 'move', queueId: 'q:nope', toIndex: 0 }),
+    ).rejects.toThrow(/unknown queue item q:nope/);
+    expect(zone.state().queue).toHaveLength(5);
+  });
+
+  it('Clear empties the queue, stops playback and broadcasts once', async () => {
+    await playFive();
+    clearCommands();
+    const states: number[] = [];
+    const off = zone.onChange((s) => states.push(s.queue.length));
+
+    const state = await zone.command({ type: 'clear' });
+
+    expect(state.queue).toEqual([]);
+    expect(state.index).toBe(-1);
+    expect(state.status).toBe('stopped');
+    expect(state.positionMs).toBe(0);
+    expect(names()).toContain('stop');
+    expect(names()).toContain('playlist-clear');
+    expect(states).toEqual([0]);
+    off();
+    expect(zone.state().queue).toEqual([]);
+  });
 });

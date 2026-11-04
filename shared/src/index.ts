@@ -155,6 +155,10 @@ export type PlayerCommand =
   | { type: 'seek'; positionMs: number }
   | { type: 'jump'; index: number }
   | { type: 'remove'; queueId: string }
+  /** Reorder the queue: the entry moves to `toIndex` (clamped to the queue ends). */
+  | { type: 'move'; queueId: string; toIndex: number }
+  /** Empty the queue and stop playback. */
+  | { type: 'clear' }
   | { type: 'volume'; volume: number }
   | { type: 'shuffle'; on: boolean }
   | { type: 'repeat'; mode: PlayerState['repeat'] };

@@ -601,6 +601,14 @@ export class SpotifyConnectZone implements PlaybackZone {
         throw new Error(
           'Spotify Connect does not support removing individual queue items: Spotify has no Web API for it.',
         );
+      case 'move':
+        throw new Error(
+          'Spotify Connect does not support reordering its queue: Spotify has no Web API for it.',
+        );
+      case 'clear':
+        throw new Error(
+          'Spotify Connect does not support clearing its queue: Spotify has no Web API for it.',
+        );
       case 'volume': {
         // Spotify keeps reporting the previous level for a moment: don't bounce back to it.
         this.volumeHold = { volume: Math.round(cmd.volume), until: this.now() + VOLUME_HOLD_MS };

@@ -157,12 +157,6 @@ export class RemoteBackend implements Backend {
     else if (cmd.type === 'shuffle') this.apply({ ...s, shuffle: cmd.on });
     else if (cmd.type === 'repeat') this.apply({ ...s, repeat: cmd.mode });
     try {
-      if (cmd.type === 'clear') {
-        let last = s;
-        for (const q of s.queue) last = await api.playerSend(this.zone, { type: 'remove', queueId: q.queueId });
-        this.apply(last);
-        return;
-      }
       this.apply(await api.playerSend(this.zone, cmd));
     } catch (e) {
       await this.refresh();
