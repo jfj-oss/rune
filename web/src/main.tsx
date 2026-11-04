@@ -2,6 +2,7 @@ import { installClientLog } from './clientLog';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { installCoverGlow } from './lib/coverGlow';
 // Fonts ship with rune (no Google request); latin subsets load on demand via unicode-range.
 import '@fontsource-variable/inter';
@@ -24,6 +25,8 @@ installClientLog();
 installCoverGlow();
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
