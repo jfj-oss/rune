@@ -206,7 +206,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   };
 
   // ---------- zones
-  const pc: PcZone | undefined = opts.pcZone === false ? undefined : await createPcZone(db, cfg);
+  const pc: PcZone | undefined =
+    opts.pcZone === false
+      ? undefined
+      : await createPcZone(db, cfg, {
+          log: (message, err) => app.log.warn({ err }, message),
+        });
   // "Linux PC speakers" can host Spotify by starting the desktop app on demand.
   // Creating it does nothing; the app only launches from POST /api/pc/spotify/start.
   const pcSpotify = createPcSpotify(cfg, {
