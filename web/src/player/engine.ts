@@ -117,6 +117,11 @@ export class AudioEngine implements Engine {
   private ensureGainGraph(el: HTMLAudioElement): GainNode | null {
     const existing = this.gainNodeFor(el);
     if (existing) return existing;
+    // iOS mutes Web Audio when the page is in the background or the screen locks, but the
+    // <audio> element keeps running: a song routed through a MediaElementSource goes silent
+    // while the clock keeps moving. iPhones/iPads therefore skip levelling and play the
+    // element directly (iOS ignores element volume, so there is no other way to apply gain).
+    if (ON_IOS) return null;
     const Ctor = audioContextCtor();
     if (!Ctor) return null;
     try {

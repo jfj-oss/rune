@@ -230,3 +230,49 @@ describe('AudioEngine live transcode seeking', () => {
     expect(engine.position()).toBe(12_000);
   });
 });
+
+describe('AudioEngine on iOS (background playback)', () => {
+  /** Records whether the element was routed through Web Audio. */
+  function stubAudioContext() {
+    const routed: unknown[] = [];
+    class FakeCtx {
+      state = 'running';
+      destination = {};
+      createMediaElementSource(el: unknown) {
+        routed.push(el);
+        return { connect() {} };
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect() {} };
+      }
+      resume() { return Promise.resolve(); }
+    }
+    vi.stubGlobal('window', { AudioContext: FakeCtx });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { headers: { 'X-Rune-Gain-Db': '-6.0' } })));
+    return routed;
+  }
+
+  async function engineFor(userAgent: string) {
+    vi.stubGlobal('navigator', { userAgent, maxTouchPoints: 5 });
+    vi.resetModules();
+    const { AudioEngine: Fresh } = await import('./engine');
+    return new Fresh();
+  }
+
+  it('never routes the element through Web Audio on an iPhone (iOS mutes it when locked)', async () => {
+    const routed = stubAudioContext();
+    const engine = await engineFor('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15');
+    engine.load(local('l:locked'), 0, true, []);
+    await new Promise((r) => setTimeout(r, 0)); // the gain HEAD probe answers -6 dB
+    expect(routed).toHaveLength(0);
+    expect(FakeAudio.instances.some((el) => el.playCalls > 0)).toBe(true);
+  });
+
+  it('still levels loudness through Web Audio on desktop browsers', async () => {
+    const routed = stubAudioContext();
+    const engine = await engineFor('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36');
+    engine.load(local('l:desk'), 0, true, []);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(routed.length).toBeGreaterThan(0);
+  });
+});
