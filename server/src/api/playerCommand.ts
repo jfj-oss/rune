@@ -5,10 +5,7 @@
 // until proven otherwise. Failures carry a short message the UI can show as a toast.
 import type { PlayerCommand, PlayerState } from '@liner/shared';
 
-/** Commands the web client sends that the shared PlayerCommand does not carry (queue reorder / clear). */
-export type QueueCommand = { type: 'move'; queueId: string; toIndex: number } | { type: 'clear' };
-
-export type PlayerRequest = PlayerCommand | QueueCommand;
+export type PlayerRequest = PlayerCommand;
 
 export type ParsedPlayerCommand = { ok: true; command: PlayerRequest } | { ok: false; error: string };
 

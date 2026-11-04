@@ -1092,7 +1092,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         if (!z) return reply.code(404).send({ error: 'unknown zone' });
         try {
           if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: parsed.command.type }, 'spotify command');
-          return sanitize(await z.command(parsed.command as PlayerCommand));
+          return sanitize(await z.command(parsed.command));
         } catch (e) {
           if (e instanceof HttpError && e.status === 429) {
             const until = spotify?.api.blockedUntil() ?? Date.now() + (e.retryAfterMs ?? 0);
