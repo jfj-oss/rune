@@ -875,7 +875,10 @@ class PcZoneImpl implements PcZone {
         this.props.pause = true;
         await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
       } else {
+        // mpv keeps its pause flag across loadfile: after any pause the new song would sit silent at 0:00
+        // while rune showed it playing.
         this.props.pause = false;
+        await ipc.command(['set_property', 'pause', false]).catch(() => undefined);
       }
       this.status = opts.paused ? 'paused' : 'playing';
     } finally {

@@ -149,6 +149,17 @@ describe('PcZone gapless track switches', () => {
     expect(state.status).toBe('paused');
   });
 
+  it('A new song after a pause tells mpv to play: its pause flag survives loading a file', async () => {
+    await playFive();
+    await zone.command({ type: 'pause' });
+    clearCommands();
+
+    const state = await zone.command({ type: 'play', trackIds: ['l:1', 'l:2'], startIndex: 0 });
+
+    expect(commands()).toContainEqual(['set_property', 'pause', false]);
+    expect(state.status).toBe('playing');
+  });
+
   it('Jump to a preloaded entry selects it with playlist-pos', async () => {
     await playFive();
     clearCommands();
