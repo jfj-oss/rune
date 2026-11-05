@@ -11,7 +11,7 @@ describe('album key choices', () => {
   it('fall back to the default for missing or taken keys, keep off', () => {
     expect(validAlbumKey(undefined)).toBe(DEFAULT_ALBUM_KEY);
     expect(validAlbumKey('z')).toBe(DEFAULT_ALBUM_KEY);
-    expect(validAlbumKey('q')).toBe('q');
+    expect(validAlbumKey('w')).toBe('w');
     expect(validAlbumKey('')).toBe('');
   });
 });
@@ -23,7 +23,8 @@ describe('playlist hotkeys', () => {
     expect(keyOwner('a', 'a', pls)).toBe('Go to the playing album');
     expect(keyOwner('p', 'a', pls)).toBe('the playlist “Gym”');
     expect(keyOwner('p', 'a', pls, 'rp:1')).toBeNull();
-    expect(keyOwner('q', 'a', pls)).toBeNull();
+    expect(keyOwner('w', 'a', pls)).toBeNull();
+    expect(keyOwner('q', 'a', pls)).toBe('Back');
   });
   it('drops bad stored entries', () => {
     expect(cleanPlaylistKeys({ p: { id: 'x', name: 'X' }, z: { id: 'y', name: 'Y' }, '!': { id: 'w', name: 'W' }, q: 5 })).toEqual({ p: { id: 'x', name: 'X' } });
