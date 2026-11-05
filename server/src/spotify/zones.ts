@@ -926,30 +926,32 @@ export class SpotifyConnectZone implements PlaybackZone {
    */
   private backgroundDelayMs(): number {
     const watched = this.clientsWatching();
+    const level = this.budgetLevel?.() ?? 'normal';
+    const multiplier = level === 'out' ? 1 : BUDGET_DELAY_MULTIPLIER[level];
     let delay: number;
+    // The poll aimed at the song's end. Never stretched by the budget: it replaces a periodic poll, so it costs
+    // nothing extra, and stretching it left a finished song on screen for up to 30 s after the next one began.
+    let songEnd: number | null = null;
     if (this.snapshot.status === 'playing') {
       const duration =
         this.lastPlayback?.item?.duration_ms ?? this.snapshot.queue[this.snapshot.index]?.track.durationMs ?? 0;
       const position = this.lastPlayback?.progress_ms ?? this.snapshot.positionMs;
       const remaining = duration > 0 ? Math.max(0, duration - position) : null;
-      if (watched) {
-        delay =
-          remaining === null
-            ? WATCHED_PLAYING_UNKNOWN_MS
-            : Math.min(WATCHED_PLAYING_MAX_MS, remaining + WATCHED_PLAYING_SLACK_MS);
-      } else {
-        delay =
-          remaining === null
-            ? UNWATCHED_PLAYING_UNKNOWN_MS
-            : Math.min(UNWATCHED_PLAYING_MAX_MS, remaining + UNWATCHED_PLAYING_SLACK_MS);
+      const slack = watched ? WATCHED_PLAYING_SLACK_MS : UNWATCHED_PLAYING_SLACK_MS;
+      const cap = watched ? WATCHED_PLAYING_MAX_MS : UNWATCHED_PLAYING_MAX_MS;
+      if (remaining === null) delay = watched ? WATCHED_PLAYING_UNKNOWN_MS : UNWATCHED_PLAYING_UNKNOWN_MS;
+      else {
+        delay = cap;
+        songEnd = remaining + slack;
       }
     } else {
       delay = watched ? WATCHED_IDLE_MS : UNWATCHED_IDLE_MS;
     }
     delay = Math.max(MIN_BACKGROUND_POLL_MS, delay);
-    const level = this.budgetLevel?.() ?? 'normal';
     if (level === 'out') return Math.max(delay, OUT_BACKGROUND_POLL_MS);
-    return delay * BUDGET_DELAY_MULTIPLIER[level];
+    const periodic = delay * multiplier;
+    // The floor keeps its budget stretch: a song stuck at its end must not poll flat out.
+    return songEnd === null ? periodic : Math.min(periodic, Math.max(songEnd, MIN_BACKGROUND_POLL_MS * multiplier));
   }
 
   private scheduleAt(at: number): void {

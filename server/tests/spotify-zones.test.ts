@@ -579,18 +579,32 @@ describe('Spotify Connect zones', () => {
     await zone.close();
   });
 
+  it('polls right after the song ends whatever the budget, so a finished song does not stay on screen', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 40_000 });
+    api.playback.item!.duration_ms = 60_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { budgetLevel: () => 'tight' });
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(25_100); // 20 s left + 5 s slack with no client watching
+    expect(api.currentPlaybackCalls).toBe(2);
+  });
+
   it('multiplies background delays by the budget level, and "out" polls every ten minutes', async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();
     api.playback = playbackState(sampleTrack('t1'), { progress_ms: 20_000 });
-    api.playback.item!.duration_ms = 60_000;
+    api.playback.item!.duration_ms = 600_000;
     let level: SpotifyBudgetLevel = 'normal';
     const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { budgetLevel: () => level });
     zone.onChange(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(api.currentPlaybackCalls).toBe(1);
 
-    // 40 s left → the normal 30 s cap; tight doubles it.
+    // Long song: the normal 30 s cap; tight doubles it.
     level = 'tight';
     await vi.advanceTimersByTimeAsync(30_000);
     expect(api.currentPlaybackCalls).toBe(2);
