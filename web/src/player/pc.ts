@@ -97,7 +97,8 @@ export class PcBackend implements Backend {
     // pick up what is already playing (started from the Spotify app, another rune tab, ...)
     const pcOn = this.pc.state.queue.length > 0 && this.pc.state.status !== 'stopped';
     const spOn = !!this.sp && this.sp.state.status !== 'stopped';
-    const want: PcMode = pcOn ? 'pc' : spOn ? 'spotify' : this.mode;
+    const spPlaying = this.sp?.state.status === 'playing' && this.pc.state.status !== 'playing';
+    const want: PcMode = spPlaying ? 'spotify' : pcOn ? 'pc' : spOn ? 'spotify' : this.mode;
     if (want !== this.mode) this.mode = want;
     this.emit();
   }
@@ -188,13 +189,18 @@ export class PcBackend implements Backend {
     this.emit();
   }
 
-  private onChild(from: PcMode, s: PlayerState) {
-    if (from === this.mode) { this.emit(); return; }
-    // something started playing behind our back (the Spotify app on the PC): follow it
-    if (from === 'spotify' && this.mode === 'pc' && s.status === 'playing' && this.pc.state.status !== 'playing') {
-      this.mode = 'spotify';
-      this.emit();
+  private onChild(from: PcMode, _s: PlayerState) {
+    // The page shows whichever player is sounding: something can start the other one behind our back (the Spotify
+    // app itself, another tab, the voice assistant), and the server then pauses the first (play/oneSpeaker.ts).
+    if (this.mode !== 'mixed' && from !== 'mixed') {
+      const other: PcMode = this.mode === 'pc' ? 'spotify' : 'pc';
+      if (this.child(other)?.state.status === 'playing' && this.child(this.mode)?.state.status !== 'playing') {
+        this.mode = other;
+        this.emit();
+        return;
+      }
     }
+    if (from === this.mode) this.emit();
   }
 
   private emit() {

@@ -210,6 +210,26 @@ describe('PcBackend', () => {
     expect(pc.state.zone).toBe('pc');
   });
 
+  it('shows mpv when it starts while the page was on Spotify (voice, another tab)', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    await zones['spotify:dev'].send({ type: 'play', trackIds: ['sp:77'] });
+    expect(pc.currentMode).toBe('spotify');
+    await zones.pc.send({ type: 'play', trackIds: ['l:1'] });
+    await zones['spotify:dev'].send({ type: 'pause' });
+    expect(pc.currentMode).toBe('pc');
+  });
+
+  it('a paused queue restored on mpv does not hide what Spotify is playing', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    await zones.pc.send({ type: 'play', trackIds: ['l:1'] });
+    await zones.pc.send({ type: 'pause' });
+    await zones['spotify:dev'].send({ type: 'play', trackIds: ['sp:77'] });
+    await pc.refresh();
+    expect(pc.currentMode).toBe('spotify');
+  });
+
   it('losing the Spotify app falls back to the plain pc zone', async () => {
     const { pc } = make();
     live = pc;

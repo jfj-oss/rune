@@ -30,6 +30,7 @@ import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
+import { createSpeakerGuard } from '../play/oneSpeaker.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
@@ -228,6 +229,18 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (prev) history.recordFromState(prev, state);
     lastState.set(state.zone, state);
   };
+  // The Spotify app on this PC and mpv share the speakers: only one may sound (play/oneSpeaker.ts).
+  let pcSpotifyZoneId: Zone | null = null;
+  const speakers = createSpeakerGuard(
+    { pc: () => pc, spotify: () => (pcSpotifyZoneId ? spotify?.zones.get(pcSpotifyZoneId) : undefined) },
+    (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
+  );
+  const notePcSpotify = (list: { id: Zone; name: string }[]): void => {
+    const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();
+    const match = list.find((z) => z.name.toLowerCase() === wanted) ?? (wanted ? list.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
+    pcSpotifyZoneId = match?.id ?? null;
+  };
+  pc?.onChange((state) => speakers.changed('pc', state));
   pc?.onChange((state) => {
     recordHistory(state);
     broadcast({ type: 'player', state: sanitize(state) });
@@ -407,6 +420,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (watched?.zone === z) return z;
     watched?.off();
     const off = z.onChange((state) => {
+      if (id === pcSpotifyZoneId) speakers.changed('spotify', state);
       recordHistory(state);
       broadcast({ type: 'player', state: sanitize(state) });
     });
@@ -419,7 +433,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (!spotify) return;
     try {
       if (!(await spotify.auth.status()).connected) return;
-      for (const z of await spotify.zones.listZones()) watchSpotifyZone(z.id);
+      const list = await spotify.zones.listZones();
+      notePcSpotify(list);
+      for (const z of list) watchSpotifyZone(z.id);
     } catch (err) {
       app.log.warn({ err }, 'watching spotify devices failed');
     }
@@ -1057,6 +1073,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         if (spotify && (await spotify.auth.status()).connected) {
           try {
             spotifyZones = await spotify.zones.listZones();
+            notePcSpotify(spotifyZones);
             for (const z of spotifyZones) watchSpotifyZone(z.id);
             zones.push(...spotifyZones);
           } catch (e) {
