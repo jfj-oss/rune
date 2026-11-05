@@ -629,14 +629,14 @@ export class SpotifyApi {
     return out;
   }
 
-  /** PUT /me/albums — save albums to the user's library (max 50 ids per call). */
+  /** PUT /me/library — save albums to the user's library. Spotify removed PUT /me/albums in February 2026 (403 now). */
   saveAlbums(ids: string[]): Promise<void> {
-    return this.request<void>('/me/albums', { method: 'PUT', body: { ids: ids.slice(0, 50) } });
+    return this.request<void>(this.query('/me/library', { uris: albumUris(ids) }), { method: 'PUT' });
   }
 
-  /** DELETE /me/albums — remove albums from the user's library (max 50 ids per call). */
+  /** DELETE /me/library — remove albums from the user's library. */
   removeSavedAlbums(ids: string[]): Promise<void> {
-    return this.request<void>('/me/albums', { method: 'DELETE', body: { ids: ids.slice(0, 50) } });
+    return this.request<void>(this.query('/me/library', { uris: albumUris(ids) }), { method: 'DELETE' });
   }
 
   /** All liked songs (GET /me/tracks), following pagination. */
@@ -811,6 +811,9 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 /** <50% normal, <80% tight, <100% low, otherwise out. */
+/** At most 40 items per /me/library call. */
+const albumUris = (ids: string[]): string => ids.slice(0, 40).map((id) => `spotify:album:${id}`).join(',');
+
 export function budgetLevelFor(used24h: number, dailyBudget: number): SpotifyBudgetLevel {
   if (used24h < dailyBudget * 0.5) return 'normal';
   if (used24h < dailyBudget * 0.8) return 'tight';

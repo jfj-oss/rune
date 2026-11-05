@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALBUM_KEY_CHOICES, cleanPlaylistKeys, DEFAULT_ALBUM_KEY, FIXED_KEYS, keyOwner, validAlbumKey } from './keys';
+import { ALBUM_KEY_CHOICES, cleanPlaylistKeys, DEFAULT_ALBUM_KEY, FIXED_KEYS, keyOwner, skipAheadMs, validAlbumKey } from './keys';
 
 describe('album key choices', () => {
   it('leave out every key rune already uses', () => {
@@ -28,5 +28,16 @@ describe('playlist hotkeys', () => {
   it('drops bad stored entries', () => {
     expect(cleanPlaylistKeys({ p: { id: 'x', name: 'X' }, z: { id: 'y', name: 'Y' }, '!': { id: 'w', name: 'W' }, q: 5 })).toEqual({ p: { id: 'x', name: 'X' } });
     expect(cleanPlaylistKeys(null)).toEqual({});
+  });
+});
+
+describe('key 4: skip a fifth of the song', () => {
+  it('moves 20% of the song on from wherever it is', () => {
+    expect(skipAheadMs(0, 100_000)).toBe(20_000);
+    expect(skipAheadMs(33_000, 100_000)).toBe(53_000);
+  });
+  it('goes to the next song past the end', () => {
+    expect(skipAheadMs(85_000, 100_000)).toBeNull();
+    expect(skipAheadMs(79_500, 100_000)).toBeNull();
   });
 });

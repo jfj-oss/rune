@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { encId } from '../lib/format';
-import { keyCapture } from '../lib/keys';
+import { keyCapture, skipAheadMs } from '../lib/keys';
+import { livePosition } from '../player/types';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
 import { shownVolume, useVolumeHold } from '../store/volumeHold';
@@ -75,6 +76,24 @@ export function KeyboardShortcuts() {
       });
     };
 
+    // key 4: quick presses add up from where the last one aimed, not from the (lagging) reported position
+    let skipTarget: number | null = null;
+    let skipKey = 0;
+    let skipTrack = '';
+    const skipFifth = () => {
+      const { state, command } = usePlayer.getState();
+      const item = state.queue[state.index];
+      const durationMs = item?.track.durationMs ?? 0;
+      if (!item || durationMs <= 0) return; // live radio has no length
+      const now = performance.now();
+      const fresh = skipTarget !== null && skipTrack === item.queueId && now - skipKey < 1500;
+      const to = skipAheadMs(fresh ? skipTarget! : livePosition(state), durationMs);
+      skipKey = now;
+      skipTrack = item.queueId;
+      skipTarget = to;
+      void command(to === null ? { type: 'next' } : { type: 'seek', positionMs: to });
+    };
+
     const down = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       if (keyCapture.active) return; // a hotkey button is listening for the key
@@ -106,6 +125,11 @@ export function KeyboardShortcuts() {
       if ((k === '1' || k === '2' || k === '3') && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
         e.preventDefault();
         if (!e.repeat) songKey(k);
+        return;
+      }
+      if (k === '4' && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
+        e.preventDefault();
+        if (!e.repeat) skipFifth();
         return;
       }
       if (e.code !== 'Space' && e.key !== ' ') return;

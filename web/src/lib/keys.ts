@@ -6,6 +6,7 @@ export const FIXED_KEYS: { key: string; label: string; does: string }[] = [
   { key: '1', label: '1', does: 'Previous song' },
   { key: '2', label: '2', does: 'Restart this song' },
   { key: '3', label: '3', does: 'Next song' },
+  { key: '4', label: '4', does: 'Skip 20% of the song' },
   { key: 'z', label: 'Z', does: 'Home' },
   { key: 'x', label: 'X', does: 'Playlists' },
   { key: 'f', label: 'F', does: 'Shuffle-play the open playlist' },
@@ -23,6 +24,12 @@ export const DEFAULT_ALBUM_KEY = 'a';
 export function validAlbumKey(v: unknown): string {
   if (v === '') return '';
   return typeof v === 'string' && ALBUM_KEY_CHOICES.includes(v) ? v : DEFAULT_ALBUM_KEY;
+}
+
+/** Key 4: where 20% further into the song is, or null when that passes the end (go to the next song). */
+export function skipAheadMs(positionMs: number, durationMs: number): number | null {
+  const next = positionMs + durationMs * 0.2;
+  return next >= durationMs - 1000 ? null : Math.round(next);
 }
 
 /** A key assigned to open a playlist. */

@@ -590,16 +590,16 @@ describe('SpotifyApi playlist/library endpoints', () => {
     expect(calls.every((c) => c.url.searchParams.get('limit') === '50')).toBe(true);
   });
 
-  it('sends PUT/DELETE /me/albums with the ids payload', async () => {
+  it('saves and removes through /me/library with album URIs', async () => {
     const { fetch, calls } = fakeFetch(() => jsonResponse(204, ''));
     const api = new SpotifyApi({ fetch, getToken: async () => 'token', baseUrl: 'http://api.test/v1' });
 
-    await api.saveAlbums(['abbey']);
+    await api.saveAlbums(['abbey', 'road']);
     await api.removeSavedAlbums(['abbey']);
 
     expect(calls.map((c) => c.init?.method)).toEqual(['PUT', 'DELETE']);
-    expect(calls.map((c) => JSON.parse(String(c.init?.body)))).toEqual([{ ids: ['abbey'] }, { ids: ['abbey'] }]);
-    expect(calls.every((c) => c.url.pathname === '/v1/me/albums')).toBe(true);
+    expect(calls.map((c) => c.url.searchParams.get('uris'))).toEqual(['spotify:album:abbey,spotify:album:road', 'spotify:album:abbey']);
+    expect(calls.every((c) => c.url.pathname === '/v1/me/library')).toBe(true);
   });
 });
 
@@ -632,8 +632,8 @@ describe('HTTP routes (injected fake Spotify API)', () => {
             artists: paging([BEATLES]),
             tracks: paging([sampleTrack('t1')]),
           });
-        case 'PUT /v1/me/albums':
-        case 'DELETE /v1/me/albums':
+        case 'PUT /v1/me/library':
+        case 'DELETE /v1/me/library':
           return jsonResponse(204, '');
         default:
           return jsonResponse(404, { error: `unexpected ${method} ${url.pathname}` });
@@ -700,8 +700,8 @@ describe('HTTP routes (injected fake Spotify API)', () => {
       const saved = await app.inject({ method: 'POST', url: '/api/albums/sp:fetchme/save' });
       expect(saved.statusCode).toBe(200);
       expect(inLibrary(db, 'sp:fetchme')).toBe(1);
-      const put = calls.find((c) => (c.init?.method ?? 'GET') === 'PUT' && c.url.pathname === '/v1/me/albums');
-      expect(JSON.parse(String(put?.init?.body))).toEqual({ ids: ['fetchme'] });
+      const put = calls.find((c) => (c.init?.method ?? 'GET') === 'PUT' && c.url.pathname === '/v1/me/library');
+      expect(put?.url.searchParams.get('uris')).toBe('spotify:album:fetchme');
 
       const listed = (await app.inject({ method: 'GET', url: '/api/library/albums' })).json();
       expect(listed.total).toBe(1);
@@ -710,8 +710,8 @@ describe('HTTP routes (injected fake Spotify API)', () => {
       const unsaved = await app.inject({ method: 'DELETE', url: '/api/albums/sp:fetchme/save' });
       expect(unsaved.statusCode).toBe(200);
       expect(inLibrary(db, 'sp:fetchme')).toBe(0);
-      const del = calls.find((c) => c.init?.method === 'DELETE' && c.url.pathname === '/v1/me/albums');
-      expect(JSON.parse(String(del?.init?.body))).toEqual({ ids: ['fetchme'] });
+      const del = calls.find((c) => c.init?.method === 'DELETE' && c.url.pathname === '/v1/me/library');
+      expect(del?.url.searchParams.get('uris')).toBe('spotify:album:fetchme');
       expect((await app.inject({ method: 'GET', url: '/api/library/albums' })).json().total).toBe(0);
 
       // Local (non-Spotify) album ids cannot be saved to Spotify.
