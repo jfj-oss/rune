@@ -80,8 +80,8 @@ describe('tone + readability', () => {
     for (const [name, p] of Object.entries(DITHER_PALETTES)) {
       const [dL, dM] = densities(1);
       const mean = dL * lum(p.light) + dM * lum(p.mid);
-      // olive, lime and amber are the user's picks, taken as-is (album colours are not capped): olive ~3.6:1, lime ~3.2:1, amber ~3.8:1
-      expect((0.551 + 0.05) / (mean + 0.05)).toBeGreaterThanOrEqual(name === 'olive' || name === 'lime' || name === 'amber' ? 3.2 : 4.5);
+      // olive, lime, amber and copper are the user's picks, taken as-is (album colours are not capped): olive ~3.6:1, lime ~3.2:1, amber ~3.8:1, copper ~4.0:1
+      expect((0.551 + 0.05) / (mean + 0.05)).toBeGreaterThanOrEqual(name === 'olive' || name === 'lime' || name === 'amber' || name === 'copper' ? 3.2 : 4.5);
     }
   });
   it('field is finite and non-negative', () => {

@@ -21,7 +21,7 @@
 .ambdot { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
 .ambdot--off { background: #0f1013; }
 /* dither swatches: a tiny dot screen of the strong colour on black */
-.ambdot--dither, .ambdot--dither-blue, .ambdot--dither-purple, .ambdot--dither-green, .ambdot--dither-olive, .ambdot--dither-lime, .ambdot--dither-teal, .ambdot--dither-slate, .ambdot--dither-amber, .ambdot--dither-cycle, .ambdot--dither-album {
+.ambdot--dither, .ambdot--dither-blue, .ambdot--dither-purple, .ambdot--dither-green, .ambdot--dither-olive, .ambdot--dither-lime, .ambdot--dither-teal, .ambdot--dither-slate, .ambdot--dither-amber, .ambdot--dither-copper, .ambdot--dither-cycle, .ambdot--dither-album {
   --c: #d4584f;
   background: radial-gradient(circle, var(--c) 0 38%, transparent 46%) 0 0 / 3px 3px, radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--c) 55%, #000), #000 75%);
 }
@@ -33,6 +33,7 @@
 .ambdot--dither-teal { --c: #00604c; }
 .ambdot--dither-slate { --c: #727c90; }
 .ambdot--dither-amber { --c: #c68942; }
+.ambdot--dither-copper { --c: #dd7736; }
 .ambdot--dither-cycle { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, conic-gradient(#d4584f, #8f5ae8, #3f74e8, #22924c, #d4584f); }
 .ambdot--dither-album { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, linear-gradient(135deg, #e0a040, #c04a70 50%, #3f74e8); }
 
