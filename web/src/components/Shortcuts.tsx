@@ -105,6 +105,11 @@ export function KeyboardShortcuts() {
         if (!e.repeat) go(`/playlist/${encId(pl.id)}`);
         return;
       }
+      if (plain && k === 'q') {
+        e.preventDefault();
+        if (!e.repeat) navigate(-1);
+        return;
+      }
       if (plain && (k === 'z' || k === 'x' || (albumKey && k === albumKey))) {
         e.preventDefault();
         if (e.repeat) return;
