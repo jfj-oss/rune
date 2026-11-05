@@ -16,3 +16,9 @@ ALTER TABLE playlists ADD COLUMN limit_count INTEGER;                 -- smart: 
 ALTER TABLE playlists ADD COLUMN created_at INTEGER;                  -- epoch ms (Spotify rows may be NULL)
 
 CREATE INDEX IF NOT EXISTS playlists_source_position ON playlists(source, position);
+
+-- A picture the user chose for a playlist (the file is <dataDir>/playlist-images/; see myplaylists/image.ts).
+CREATE TABLE IF NOT EXISTS playlist_images (
+  playlist_id TEXT PRIMARY KEY,
+  updated_at INTEGER NOT NULL
+);

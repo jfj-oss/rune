@@ -30,7 +30,7 @@ import { ensureSpotifyLibrarySchema } from '../spotify/library-schema.js';
 import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
-import { createLocalTwins, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
+import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
@@ -47,6 +47,7 @@ import {
   listAllPlaylists,
   registerMyPlaylistRoutes,
 } from '../myplaylists/index.js';
+import { clearPlaylistImage, MAX_IMAGE_BYTES, playlistImageFile, playlistImageUrl, savePlaylistImage } from '../myplaylists/image.js';
 import { ensureMyPlaylistSchema } from '../myplaylists/schema.js';
 import { createPeaks, registerPeaksRoutes } from '../peaks/index.js';
 import { ensurePeopleSchema, registerPeopleRoutes } from '../people/index.js';
@@ -941,12 +942,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
       r.get<{ Params: { id: string } }>('/artists/:id', async (req, reply) => {
         const a = getArtist(db, req.params.id);
-        // Spotify artists (search results, playlist artists): add their Spotify discography.
-        const remote = spotify?.artistPage(req.params.id);
+        // Spotify artists (search results, playlist artists) and local artists linked to one: add the Spotify
+        // discography. A local artist only uses it under the same name, in case the stored link is wrong.
+        const linked = spotify && a ? (db.prepare('SELECT spotify_id AS id FROM artists WHERE id = ?').get(req.params.id) as { id: string | null } | undefined)?.id : null;
+        const remote = spotify?.artistPage(linked ? `ar:sp:${linked}` : req.params.id);
         if (remote) {
           try {
             if ((await spotify!.auth.status()).connected) {
               const sp = await remote;
+              if (linked && a && normArtist(sp.name) !== normArtist(a.name)) return a;
               const have = new Set([...(a?.albums ?? []), ...(a?.appearsOn ?? [])].map((x) => x.id));
               return {
                 id: req.params.id,
@@ -991,6 +995,25 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       // One playlist collection for both sources: rune playlists first, then
       // the synced Spotify ones (worker P's readers handle both).
       r.get('/playlists', async () => listAllPlaylists(db));
+
+      // A picture chosen for a playlist: the raw file as the body (myplaylists/image.ts).
+      r.addContentTypeParser(/^image\//, { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_req, body, done) => done(null, body));
+      r.post<{ Params: { id: string }; Body: Buffer }>('/playlists/:id/image', { bodyLimit: MAX_IMAGE_BYTES }, async (req, reply) => {
+        if (!getPlaylistDetail(db, req.params.id)) return reply.code(404).send({ error: 'not found' });
+        if (!Buffer.isBuffer(req.body)) return reply.code(400).send({ error: 'send the picture as the request body' });
+        if (!(await savePlaylistImage(db, cfg.dataDir, req.params.id, req.body))) return reply.code(400).send({ error: 'use a JPEG, PNG, GIF or WebP picture' });
+        return { imageUrl: playlistImageUrl(db, req.params.id) };
+      });
+      r.delete<{ Params: { id: string } }>('/playlists/:id/image', async (req) => {
+        clearPlaylistImage(db, cfg.dataDir, req.params.id);
+        return { ok: true };
+      });
+      r.get<{ Params: { id: string } }>('/playlists/:id/image', async (req, reply) => {
+        const file = playlistImageFile(cfg.dataDir, req.params.id);
+        if (!existsSync(file)) return reply.code(404).send({ error: 'no picture' });
+        reply.type('image/jpeg').header('cache-control', 'public, max-age=31536000, immutable');
+        return reply.send(createReadStream(file));
+      });
 
       r.get<{ Params: { id: string } }>('/playlists/:id', async (req, reply) => {
         const playlist = getPlaylistDetail(db, req.params.id);

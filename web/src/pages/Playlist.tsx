@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
-import { ArrowDownWideNarrow, Check, Copy, Download, GripVertical, HardDrive, ListEnd, ListOrdered, ListPlus, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
+import { ArrowDownWideNarrow, Check, Copy, Download, GripVertical, HardDrive, ImageOff, ImagePlus, ListEnd, ListOrdered, ListPlus, Lock, MoreHorizontal, Play, Plus, Shuffle, Sparkles, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { PlaylistHotkey } from '../components/PlaylistHotkey';
@@ -14,7 +14,7 @@ import { Eq } from '../components/Eq';
 import { InlineText } from '../components/InlineText';
 import { MobileBack } from '../components/MobileBack';
 import { MenuItem, Popover } from '../components/Popover';
-import { PlaylistCover } from '../components/PlaylistCover';
+import { isChosenImage, PlaylistCover } from '../components/PlaylistCover';
 import { Empty } from '../components/Rows';
 import { TrackMenuItems, trackMenuHandler } from '../components/TrackMenu';
 import { useScrollRoot } from '../hooks/scrollRoot';
@@ -48,6 +48,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const { play, enqueue } = usePlaylistPlay();
   const nav = useNavigate();
   const actions = usePlaylistActions();
+  const imageInput = useRef<HTMLInputElement>(null);
   const order = usePlaylistUi((s) => s.order);
   const setOrder = usePlaylistUi((s) => s.setOrder);
   const { view: d, origIndex, sorted } = useMemo(() => orderPlaylist(raw, order), [raw, order]);
@@ -61,7 +62,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const mixed = isMixed(d.tracks);
   const bgSrc = d.imageUrl ?? (d.tracks[0] ? coverSrc(d.tracks[0].album, 200) : undefined);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const art = genArtFor(d.id);
+  const art = isChosenImage(d.imageUrl) ? null : genArtFor(d.id);
 
   // F = shuffle-play this playlist (not while typing or while a hotkey button is listening)
   const playRef = useRef(play);
@@ -96,7 +97,14 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
         </div>
         <MobileBack />
         <div className="ahero__inner">
-          <div className="ahero__cover"><PlaylistCover id={d.id} name={d.name} imageUrl={d.imageUrl} albumIds={d.coverAlbumIds} smart={smart} iconSize={96} /></div>
+          <button type="button" className="ahero__cover ahero__cover--pick" aria-label="Choose a picture for this playlist" title="Choose a picture" onClick={() => imageInput.current?.click()}>
+            <PlaylistCover id={d.id} name={d.name} imageUrl={d.imageUrl} albumIds={d.coverAlbumIds} smart={smart} iconSize={96} />
+            <span className="ahero__coverhint" aria-hidden><ImagePlus size={28} /></span>
+          </button>
+          <input
+            ref={imageInput} type="file" hidden accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void actions.setImage(d.id, f); }}
+          />
           <div className="ahero__txt">
             <span className="eyebrow ahero__kind">{smart ? 'Smart playlist' : rune ? 'Playlist' : 'Spotify playlist'}</span>
             <h1 className="ahero__title">
@@ -144,6 +152,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void usePlayer.getState().enqueueItems(items, true); }}>Play next</MenuItem>
                     {rune && <MenuItem icon={<Copy size={16} />} onClick={() => { close(); void duplicate(); }}>Duplicate</MenuItem>}
+                    {isChosenImage(d.imageUrl) && <MenuItem icon={<ImageOff size={16} />} onClick={() => { close(); void actions.clearImage(d.id); }}>Remove picture</MenuItem>}
                     <MenuItem icon={<Download size={16} />} onClick={() => { close(); void actions.exportM3u8(d.id, d.name); }}>Export .m3u8</MenuItem>
                     {rune && <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); setConfirmDelete(true); }}>Delete playlist</MenuItem>}
                   </div>

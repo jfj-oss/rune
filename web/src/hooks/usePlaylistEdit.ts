@@ -1,5 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+import { http, type ApiError } from '../api';
 import { playlistApi } from '../playlistApi';
 import {
   SPOTIFY_ADD_NOTE, applyEdit, applyEditToSummary, isRunePlaylist, noteRecent, splitForTarget, toPlaylistTrack,
@@ -71,6 +72,27 @@ export function usePlaylistActions() {
       toast(refused ? `Added ${plural(items.length, 'track')} to “${playlistName}” — ${SPOTIFY_ADD_NOTE.replace(/^S/, 's')}` : `Added ${plural(items.length, 'track')} to “${playlistName}”`);
     }
     return ok;
+  }, [qc, toast]);
+
+  /** A picture chosen for a playlist, in rune only: a Spotify playlist keeps its picture on Spotify. */
+  const setImage = useCallback(async (id: string, file: File): Promise<void> => {
+    try {
+      await http(`/playlists/${encodeURIComponent(id)}/image`, { method: 'POST', body: file, headers: { 'content-type': file.type || 'application/octet-stream' } });
+    } catch (e) {
+      toast((e as ApiError).status === 413 ? 'That picture is too big (15 MB at most)' : ((e as ApiError).serverMessage ?? 'Could not save the picture'));
+    }
+    void qc.invalidateQueries({ queryKey: DETAIL(id) });
+    void qc.invalidateQueries({ queryKey: LIST });
+  }, [qc, toast]);
+
+  const clearImage = useCallback(async (id: string): Promise<void> => {
+    try {
+      await http(`/playlists/${encodeURIComponent(id)}/image`, { method: 'DELETE' });
+    } catch {
+      toast('Could not remove the picture');
+    }
+    void qc.invalidateQueries({ queryKey: DETAIL(id) });
+    void qc.invalidateQueries({ queryKey: LIST });
   }, [qc, toast]);
 
   const create = useCallback(async (name: string, opts?: { description?: string; items?: PlayItem[] }): Promise<RunePlaylistDetail | null> => {
@@ -156,5 +178,5 @@ export function usePlaylistActions() {
     catch { toast('Could not export the playlist'); }
   }, [toast]);
 
-  return { addItems, create, createSmart, rename, describe, removeAt, move, remove, duplicate, exportM3u8 };
+  return { addItems, setImage, clearImage, create, createSmart, rename, describe, removeAt, move, remove, duplicate, exportM3u8 };
 }

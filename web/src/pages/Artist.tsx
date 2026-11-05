@@ -13,7 +13,7 @@ import { MobileBack } from '../components/MobileBack';
 import { Empty, QuietNote, SectionHead, SourceLink } from '../components/Rows';
 import { discoverApi } from '../discoverApi';
 import { usePlay } from '../hooks/usePlay';
-import { groupDiscography } from '../lib/discover';
+import { groupDiscography, placeAlbums } from '../lib/discover';
 import { encId, plural } from '../lib/format';
 import { textPreview } from '../lib/previews';
 import { startRadio } from '../lib/radio';
@@ -48,9 +48,11 @@ export default function ArtistPage() {
   const mosaic = [...new Map(a.albums.concat(a.appearsOn).map((x) => [x.id, x])).values()].slice(0, 4);
   const bannerOk = !!heroImage && banner?.src === heroImage && banner.ok;
   const hasPhoto = bannerOk || avatarPhotoOf === a.id;
-  const ids = a.albums.map((x) => x.id);
   const hasLocal = a.albums.some((x) => x.source === 'local');
+  // Play means the albums you own when there are any, not the artist's whole Spotify catalogue.
+  const ids = a.albums.filter((x) => !hasLocal || x.source === 'local').map((x) => x.id);
   const sections = groupDiscography(discog.data?.releaseGroups ?? []);
+  const { playable, extras } = placeAlbums(discog.data?.releaseGroups ?? [], a.albums);
   const albumById = new Map(a.albums.map((x) => [x.id, x]));
   const ownedInDiscography = sections.reduce((n, s) => n + s.items.filter((g) => g.owned).length, 0);
 
@@ -156,6 +158,8 @@ export default function ArtistPage() {
                       </Link>
                     );
                   }
+                  const onSpotify = playable.get(g.mbReleaseGroupId);
+                  if (onSpotify) return <div key={g.mbReleaseGroupId} className="discog__item"><AlbumCard album={onSpotify} /></div>;
                   return (
                     <div key={g.mbReleaseGroupId} className="discog__item is-missing" aria-label={`${g.title} — not in library`}>
                       <div className="card__art"><Cover album={{ id: g.mbReleaseGroupId, title: g.title }} sizes="180px" /></div>
@@ -168,7 +172,15 @@ export default function ArtistPage() {
               </div>
             </section>
           ))
-        ) : a.albums.length > 0 ? (
+        ) : null}
+
+        {sections.length > 0 && extras.length > 0 && (
+          <section className="asec">
+            <SectionHead title="More albums" />
+            <div className="grid grid--lib">{extras.map((x) => <AlbumCard key={x.id} album={x} />)}</div>
+          </section>
+        )}
+        {!discog.isLoading && sections.length === 0 && a.albums.length > 0 ? (
           <section className="asec">
             <SectionHead title="Albums" />
             <div className="grid grid--lib">{a.albums.map((x) => <AlbumCard key={x.id} album={x} />)}</div>

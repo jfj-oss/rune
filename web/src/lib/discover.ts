@@ -227,6 +227,37 @@ export interface ArtistStats {
   topTracks: TopTrackStat[];
 }
 
+/** Album title for matching across catalogues: no case, punctuation or edition suffix ("(Deluxe)", "- Remastered"). */
+export function discogTitleKey(title: string): string {
+  return title
+    .replace(/\s*[([][^)\]]*(?:deluxe|remaster|expanded|edition|anniversary|bonus)[^)\]]*[)\]]/gi, ' ')
+    .replace(/\s+-\s+.*(?:deluxe|remaster|expanded|edition|anniversary).*$/i, ' ')
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * The artist page lists MusicBrainz release groups, but only what rune knows can be opened. `playable` is each
+ * unowned group's album of that title (a Spotify one, usually); `extras` are the albums no group accounts for, so
+ * nothing the artist page knows about disappears behind the MusicBrainz list.
+ */
+export function placeAlbums<A extends { id: string; title: string }>(groups: DiscographyReleaseGroup[], albums: A[]): { playable: Map<string, A>; extras: A[] } {
+  const inGroups = new Set(groups.flatMap((g) => g.albumIds));
+  const byTitle = new Map<string, A>();
+  for (const x of albums) if (!inGroups.has(x.id) && !byTitle.has(discogTitleKey(x.title))) byTitle.set(discogTitleKey(x.title), x);
+  const playable = new Map<string, A>();
+  const used = new Set<string>(inGroups);
+  for (const g of groups) {
+    const key = discogTitleKey(g.title);
+    const hit = byTitle.get(key);
+    if (hit && !g.owned) playable.set(g.mbReleaseGroupId, hit);
+    // An owned group already shows this title: another copy under it is the same album, not an extra.
+    if (key) for (const x of albums) if (discogTitleKey(x.title) === key) used.add(x.id);
+  }
+  return { playable, extras: albums.filter((x) => !used.has(x.id)) };
+}
+
 // ---------- duplicates ----------
 
 export type DuplicateGroupKind = 'release-group' | 'same-title' | 'mixed';

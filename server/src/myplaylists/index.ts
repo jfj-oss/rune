@@ -10,6 +10,7 @@
 // src/api/server.ts; the main session should call the exported
 // `listAllPlaylists(db)` / `getPlaylistDetail(db, id)` there instead of adding
 // duplicate routes (see the report for the exact two-line change).
+import { playlistImageUrl } from './image.js';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { PlaylistDetail, PlaylistSummary, PlaylistTrack, Track } from '@liner/shared';
@@ -257,11 +258,12 @@ function summaryFor(
   trackIds: string[] | undefined,
 ): RunePlaylistSummary {
   const rune = isRune(row);
+  const chosen = playlistImageUrl(db, row.id);
   const summary: RunePlaylistSummary = {
     id: row.id,
     name: row.name,
     ...(row.owner ? { owner: row.owner } : {}),
-    ...(row.image_url ? { imageUrl: row.image_url } : {}),
+    ...(chosen ?? row.image_url ? { imageUrl: (chosen ?? row.image_url) as string } : {}),
     trackCount: rune ? (trackIds?.length ?? 0) : row.track_count + overlayCount(db, row.id),
     source: rune ? 'local' : 'spotify',
   };

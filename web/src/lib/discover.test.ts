@@ -3,6 +3,7 @@ import type { DayStat, DiscographyReleaseGroup, DuplicateAlbumVersion } from './
 import {
   dailySeries,
   discogSectionOf,
+  discogTitleKey,
   duplicateKindLabel,
   formatBytes,
   formatListening,
@@ -11,6 +12,7 @@ import {
   formatStamp,
   formatVersionDetail,
   groupDiscography,
+  placeAlbums,
   normalizeBars,
   personInBucket,
   roleBucketOf,
@@ -174,5 +176,28 @@ describe('duplicate helpers', () => {
     };
     expect(formatVersionDetail(v)).toBe('FLAC 24/96 · 12 tracks · 2 discs');
     expect(formatVersionDetail({ ...v, trackCount: 1, discCount: 1, format: undefined })).toBe('1 track');
+  });
+});
+
+describe('placeAlbums: the MusicBrainz list and the albums rune can open', () => {
+  const g = (id: string, title: string, albumIds: string[] = []) => ({ mbReleaseGroupId: id, title, type: 'Album', secondaryTypes: [], owned: albumIds.length > 0, albumIds });
+  it('makes a missing release playable from the album of that title', () => {
+    const sp = { id: 'sp:1', title: 'Open Season (Deluxe Edition)' };
+    const r = placeAlbums([g('m1', 'Open Season')], [sp]);
+    expect(r.playable.get('m1')).toBe(sp);
+    expect(r.extras).toEqual([]);
+  });
+  it('keeps albums no release group accounts for', () => {
+    const other = { id: 'la:2', title: 'Disco Elysium OST' };
+    const r = placeAlbums([g('m1', 'Disco Elysium', ['la:1'])], [{ id: 'la:1', title: 'Disco Elysium' }, other]);
+    expect(r.extras).toEqual([other]);
+  });
+  it('does not repeat a copy of an album the library already shows', () => {
+    const r = placeAlbums([g('m1', 'Disco Elysium', ['la:1'])], [{ id: 'la:1', title: 'Disco Elysium' }, { id: 'sp:9', title: 'Disco Elysium' }]);
+    expect(r.playable.size).toBe(0);
+    expect(r.extras).toEqual([]);
+  });
+  it('matches across punctuation', () => {
+    expect(discogTitleKey('Open Season ‐ Lost Tracks')).toBe(discogTitleKey('Open Season - Lost Tracks'));
   });
 });

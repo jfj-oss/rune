@@ -16,10 +16,14 @@ interface Props {
   iconSize?: number;
 }
 
+/** A picture the user chose in rune (a Spotify one is a full https URL). */
+export const isChosenImage = (url?: string): boolean => !!url?.startsWith('/api/playlists/');
+
 /** Playlist artwork: Spotify's image, a 2x2 album mosaic for rune playlists, otherwise a gradient tile (heart for Liked Songs). */
 export function PlaylistCover({ id, name, imageUrl, albumIds, smart, iconSize = 40 }: Props) {
   const [state, setState] = useState<'loading' | 'ok' | 'err'>('loading');
-  const art = genArtFor(id);
+  const chosen = isChosenImage(imageUrl);
+  const art = chosen ? null : genArtFor(id);
   if (art) {
     return (
       <div className="cover plcover plcover--wave" aria-label={name} role="img">
@@ -28,7 +32,7 @@ export function PlaylistCover({ id, name, imageUrl, albumIds, smart, iconSize = 
     );
   }
   const liked = isLiked(id);
-  const showImg = !!imageUrl && state !== 'err' && !liked;
+  const showImg = !!imageUrl && state !== 'err' && (!liked || chosen);
   const mosaic = !showImg && !liked && albumIds && albumIds.length > 0 ? albumIds : null;
   return (
     <div className={`cover plcover${liked ? ' plcover--liked' : ''}${mosaic ? ' plcover--mosaic' : ''}`} data-state={state} style={liked ? undefined : { background: tileGradient(id) }} aria-label={name} role="img">

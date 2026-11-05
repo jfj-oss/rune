@@ -15,6 +15,9 @@
 .ahero__inner { position: relative; z-index: 1; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 40px; align-items: end; max-width: 1240px; margin-inline: auto; }
 .ahero__cover { width: 300px; }
 .ahero__cover .cover { box-shadow: var(--shadow-hero); border-radius: 6px; }
+.ahero__cover--pick { position: relative; display: block; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.ahero__coverhint { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 6px; background: rgb(0 0 0 / 45%); color: #fff; opacity: 0; transition: opacity 120ms; pointer-events: none; }
+.ahero__cover--pick:hover .ahero__coverhint, .ahero__cover--pick:focus-visible .ahero__coverhint { opacity: 1; }
 .ahero__txt { min-width: 0; display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; }
 .ahero__kind { color: color-mix(in srgb, var(--text) 62%, transparent); }
 .ahero__title { font-family: var(--serif); font-size: 49px; line-height: 54px; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
