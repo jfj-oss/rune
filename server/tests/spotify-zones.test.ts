@@ -938,6 +938,99 @@ describe('a command on a state Spotify has already left', () => {
   });
 });
 
+describe('the log line after a play', () => {
+  const setup = () => {
+    const api = new FakeZoneApi();
+    const logger = { warn: vi.fn() };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { logger });
+    return { api, logger, zone };
+  };
+
+  it('reports is_playing from the first poll after a play, once, with track ids only', async () => {
+    const { api, logger, zone } = setup();
+    api.playback = playbackState(sampleTrack('t1'), { is_playing: false });
+    await zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [info, message] = logger.warn.mock.calls[0]!;
+    expect(message).toBe('spotify first poll after play');
+    expect(info).toEqual({ trackId: 'sp:t1', reportedTrackId: 'sp:t1', is_playing: false, onThisDevice: true });
+    expect(JSON.stringify(info)).not.toContain('dev1');
+    expect(JSON.stringify(info)).not.toContain('Sim Phone');
+    expect(JSON.stringify(info)).not.toContain('Come Together');
+    await zone.close();
+  });
+
+  it('names the song asked for when another one is reported, and a device that is not this one', async () => {
+    const { api, logger, zone } = setup();
+    api.playback = playbackState(sampleTrack('old'), { device: { ...SIM_DEVICE, id: 'elsewhere' } });
+    const started = zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 1 });
+    await started;
+    expect(logger.warn.mock.calls[0]![0]).toEqual({ trackId: 'sp:b', reportedTrackId: 'sp:old', is_playing: true, onThisDevice: false });
+    await zone.close();
+  });
+
+  it('a pause or a paused start logs nothing, and a failed read leaves the line for the next good one', async () => {
+    const { api, logger, zone } = setup();
+    api.playback = playbackState(sampleTrack('t1'));
+    await zone.command({ type: 'pause' });
+    await zone.command({ type: 'play', trackIds: ['sp:t1'], paused: true });
+    expect(logger.warn).not.toHaveBeenCalled();
+
+    const good = api.currentPlayback.bind(api);
+    let failures = 1;
+    api.currentPlayback = async () => {
+      if (failures-- > 0) throw new Error('down');
+      return good();
+    };
+    await zone.command({ type: 'resume' });
+    expect(logger.warn).not.toHaveBeenCalled(); // that read failed
+    await zone.command({ type: 'seek', positionMs: 0 }); // its refresh is the next good read
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0]![0]).toMatchObject({ trackId: 'sp:t1', is_playing: true });
+    await zone.close();
+  });
+
+  it('reaches zones made by the manager, the way the server creates them', async () => {
+    const api = new FakeZoneApi();
+    api.devicesData = [SIM_DEVICE];
+    api.playback = playbackState(sampleTrack('t1'));
+    const logger = { warn: vi.fn() };
+    const zones = createSpotifyZones(api, { logger });
+    await zones.listZones();
+    const zone = zones.get('spotify:dev1')!;
+    await zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    await zone.close();
+  });
+
+  it('a poll already on its way when the play went out is not the one reported', async () => {
+    const { api, logger, zone } = setup();
+    api.playback = playbackState(sampleTrack('t1'));
+    const good = api.currentPlayback.bind(api);
+    let answerOld = () => {};
+    const held = new Promise<void>((r) => { answerOld = r; });
+    let first = true;
+    api.currentPlayback = async () => {
+      if (first) {
+        first = false;
+        await held;
+        return playbackState(sampleTrack('before'));
+      }
+      return good();
+    };
+    zone.onChange(() => {});
+    await new Promise((r) => setTimeout(r, 0)); // the startup poll is now in flight
+    const playing = zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    await new Promise((r) => setTimeout(r, 0));
+    answerOld();
+    await playing;
+    await new Promise((r) => setTimeout(r, 0));
+    const reported = logger.warn.mock.calls.map((c) => (c[0] as { reportedTrackId: string }).reportedTrackId);
+    expect(reported).not.toContain('sp:before');
+    await zone.close();
+  });
+});
+
 describe('placeholder queue entries', () => {
   it('fills a blank started entry with what /me/player says about the playing track', () => {
     const placeholder = { queueId: 'spq:0:sp:t1', track: { id: 'sp:t1', albumId: 'sp:unknown', source: 'spotify' as const, title: '', artists: [], disc: 1, number: 1, durationMs: 0 }, album: { id: 'sp:unknown', title: '' } };

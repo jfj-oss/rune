@@ -6,6 +6,7 @@ import type { PlayerCommand, PlayerState, QueueItem, Track, Zone } from '@liner/
 import type { PlaybackZone } from '../modules.js';
 import type {
   SpotifyBudgetLevel,
+  SpotifyBudgetLogger,
   SpotifyDevice,
   SpotifyPlaybackState,
   SpotifyPlayBody,
@@ -60,6 +61,8 @@ export interface ConnectZoneOptions {
   librespotSocket?: LibrespotSocketFactory;
   /** Latest playback report from a browser's Web Playback SDK (a free /me/player substitute). */
   localPlayback?: LocalPlaybackSource;
+  /** Gets one line per play: what the first poll after it found (track ids only). */
+  logger?: SpotifyBudgetLogger;
 }
 
 // ---------- local playback reports ----------
@@ -466,6 +469,7 @@ export class SpotifyConnectZone implements PlaybackZone {
   private readonly budgetLevel: (() => SpotifyBudgetLevel) | undefined;
   private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
   private readonly blockedUntil: (() => number | null) | undefined;
+  private readonly logger: SpotifyBudgetLogger | undefined;
   private readonly now: () => number;
   private snapshot: PlayerState;
   private startedQueue: QueueItem[] = [];
@@ -482,6 +486,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   private claimUntil = 0;
   /** Last poll that found this device not playing: a start seen after it happened no earlier. */
   private lastIdleAt = Number.NEGATIVE_INFINITY;
+  /** The song just sent to play: the first poll after it says what Spotify made of it. */
+  private playSent: { trackId: string } | null = null;
   /** Last command that starts sound: such a start is seen as it happens, not at a later poll. */
   private startCommandAt = Number.NEGATIVE_INFINITY;
   private volumeHold: { volume: number; until: number } | null = null;
@@ -509,6 +515,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.budgetLevel = opts.budgetLevel;
     this.knownTracks = opts.knownTracks;
     this.blockedUntil = opts.blockedUntil;
+    this.logger = opts.logger;
     this.now = opts.now ?? Date.now;
     this.snapshot = emptyPlayerState(this.zone, this.now);
   }
@@ -590,6 +597,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         // Show the picked song and the queue we sent at once; Spotify's metadata for those
         // songs is fetched in the background (the command must not wait for it).
         const start = Math.max(0, Math.min(cmd.startIndex ?? 0, spotifyIds.length - 1));
+        if (!cmd.paused) this.playSent = { trackId: spotifyTrackId(spotifyIds[start] ?? '') };
         const rev = ++this.startedRev;
         this.startedQueue = this.seedQueue(spotifyIds);
         this.showStarted(start, cmd.positionMs ?? 0, cmd.paused === true);
@@ -620,6 +628,7 @@ export class SpotifyConnectZone implements PlaybackZone {
           return this.refresh();
         }
         this.claim();
+        this.playSent = { trackId: this.snapshot.queue[this.snapshot.index]?.track.id ?? '' };
         return this.settle();
       case 'next':
         this.expectSong(this.snapshot.index + 1);
@@ -643,6 +652,7 @@ export class SpotifyConnectZone implements PlaybackZone {
         this.expectSong(cmd.index);
         await this.api.play({ uris, offset: { position } }, device);
         this.claim();
+        this.playSent = { trackId: item.track.id };
         const ids = uris.map((u) => u.split(':').pop() as string);
         const rev = ++this.startedRev;
         const queue = await this.fetchStartedQueue(ids, position);
@@ -846,7 +856,23 @@ export class SpotifyConnectZone implements PlaybackZone {
     await this.inFlight;
   }
 
+  /** A song that stays silent while rune shows it playing: was Spotify playing anything right after the command? */
+  private logPlaySent(sent: { trackId: string }, playback: SpotifyPlaybackState | null): void {
+    this.playSent = null;
+    this.logger?.warn(
+      {
+        trackId: sent.trackId,
+        reportedTrackId: playback?.item?.id ? spotifyTrackId(playback.item.id) : null,
+        is_playing: playback?.is_playing ?? null,
+        onThisDevice: playback?.device?.id === this.deviceId,
+      },
+      'spotify first poll after play',
+    );
+  }
+
   private async doPoll(): Promise<void> {
+    // Taken before the read: a poll already on its way when the play went out says nothing about it.
+    const sent = this.playSent;
     let playback: SpotifyPlaybackState | null;
     try {
       playback = await this.api.currentPlayback();
@@ -856,6 +882,7 @@ export class SpotifyConnectZone implements PlaybackZone {
       return;
     }
     this.lastPlayback = playback;
+    if (sent && sent === this.playSent) this.logPlaySent(sent, playback);
     // Reuse the last queue unless the playing item changed, a command ran, or the read went
     // stale (5 min). With no connected client there is nobody to show it to: do not fetch it.
     let queue: SpotifyQueue | undefined = this.lastQueue;

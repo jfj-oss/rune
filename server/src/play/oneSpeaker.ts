@@ -19,13 +19,19 @@ export interface SpeakerGuardOptions {
   /** May mpv starting spend a Spotify read? Default yes. */
   canWake?: () => boolean;
   now?: () => number;
+  /** Told about every pause, for chasing a song that goes silent while rune shows it playing. */
+  onPause?: (info: { paused: SpeakerSide; started: SpeakerSide; trackId: string | null }) => void;
 }
 
 export function createSpeakerGuard(zones: { pc(): SpeakerZone | undefined; spotify(): SpeakerZone | undefined }, opts: SpeakerGuardOptions = {}) {
   const now = opts.now ?? Date.now;
   const last: Partial<Record<SpeakerSide, PlayerState['status']>> = {};
   let pcStartedAt = Number.NEGATIVE_INFINITY;
-  const pause = (zone: SpeakerZone) => void zone.command({ type: 'pause' }).catch(opts.onError ?? (() => {}));
+  const pause = (zone: SpeakerZone, paused: SpeakerSide, started: SpeakerSide) => {
+    const s = zone.state();
+    opts.onPause?.({ paused, started, trackId: s.queue?.[s.index]?.track.id ?? null });
+    void zone.command({ type: 'pause' }).catch(opts.onError ?? (() => {}));
+  };
   return {
     /** Call with every state change of either player. */
     changed(side: SpeakerSide, state: PlayerState): void {
@@ -36,7 +42,7 @@ export function createSpeakerGuard(zones: { pc(): SpeakerZone | undefined; spoti
       const spotify = zones.spotify();
       if (side === 'pc') {
         pcStartedAt = now();
-        if (spotify?.state().status === 'playing') pause(spotify);
+        if (spotify?.state().status === 'playing') pause(spotify, 'spotify', 'pc');
         // Spotify may have started since its last poll: look now, so whichever is older is the one paused.
         else if (opts.canWake?.() ?? true) spotify?.wake?.();
         return;
@@ -44,7 +50,8 @@ export function createSpeakerGuard(zones: { pc(): SpeakerZone | undefined; spoti
       if (pc?.state().status !== 'playing') return;
       // Seen now, but it may have begun before mpv did: then mpv is the newer one and stays.
       const spotifyAt = spotify?.startedAt?.() ?? now();
-      pause(spotify && spotifyAt < pcStartedAt ? spotify : pc);
+      if (spotify && spotifyAt < pcStartedAt) pause(spotify, 'spotify', 'spotify');
+      else pause(pc, 'pc', 'spotify');
     },
   };
 }

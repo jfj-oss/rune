@@ -257,6 +257,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       onError: (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
       // 'out' allows one background poll in ten minutes: mpv starting must not add to that.
       canWake: () => spotify?.api.budgetLevel() !== 'out',
+      // warn: rune runs at LOG_LEVEL=warn, and this is how a silent song gets explained
+      onPause: (info) => app.log.warn(info, 'speaker guard paused a player'),
     },
   );
   const notePcSpotify = (list: { id: Zone; name: string }[]): void => {

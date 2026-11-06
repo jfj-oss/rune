@@ -43,6 +43,33 @@ describe('the PC speakers play one thing at a time', () => {
   });
 });
 
+describe('the log of guard pauses', () => {
+  const withSong = (status: PlayerState['status'], id: string) => {
+    const z = zone(status);
+    z.state = () => ({ status: z.status, index: 0, queue: [{ track: { id, title: 'A private title' } }] }) as unknown as PlayerState;
+    return z;
+  };
+  it('says who was paused, what started and the track id, and nothing else', () => {
+    const pc = withSong('playing', 'l:1');
+    const sp = withSong('playing', 'sp:9');
+    const onPause = vi.fn();
+    createSpeakerGuard({ pc: () => pc, spotify: () => sp }, { onPause }).changed('pc', st('playing'));
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(onPause).toHaveBeenCalledWith({ paused: 'spotify', started: 'pc', trackId: 'sp:9' });
+  });
+  it('stays quiet when nothing is paused, and copes with an empty queue', () => {
+    const pc = zone('playing');
+    const sp = zone('paused');
+    const onPause = vi.fn();
+    const g = createSpeakerGuard({ pc: () => pc, spotify: () => sp }, { onPause });
+    g.changed('pc', st('playing'));
+    expect(onPause).not.toHaveBeenCalled();
+    sp.status = 'playing';
+    g.changed('spotify', st('playing'));
+    expect(onPause).toHaveBeenCalledWith({ paused: 'pc', started: 'spotify', trackId: null });
+  });
+});
+
 describe('a Spotify start seen late', () => {
   it('pauses Spotify instead when mpv started after it', () => {
     let t = 1_000;
