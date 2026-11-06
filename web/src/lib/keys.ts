@@ -33,6 +33,13 @@ export function skipAheadMs(positionMs: number, durationMs: number): number | nu
   return next >= durationMs - 1000 ? null : Math.round(next);
 }
 
+/** Leave the full-screen player and queue, then go: the page that opens would otherwise sit hidden behind them. */
+export function leavingOverlays(ui: { setNowPlayingOpen(open: boolean): void; setQueueOpen(open: boolean): void }, go: () => void): void {
+  ui.setNowPlayingOpen(false);
+  ui.setQueueOpen(false);
+  go();
+}
+
 /** A key assigned to open a playlist. */
 export interface PlaylistKey { id: string; name: string }
 export type PlaylistKeys = Record<string, PlaylistKey>;

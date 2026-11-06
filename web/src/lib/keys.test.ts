@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALBUM_KEY_CHOICES, cleanPlaylistKeys, DEFAULT_ALBUM_KEY, FIXED_KEYS, keyOwner, skipAheadMs, validAlbumKey } from './keys';
+import { ALBUM_KEY_CHOICES, cleanPlaylistKeys, DEFAULT_ALBUM_KEY, FIXED_KEYS, keyOwner, leavingOverlays, skipAheadMs, validAlbumKey } from './keys';
 
 describe('album key choices', () => {
   it('leave out every key rune already uses', () => {
@@ -13,6 +13,17 @@ describe('album key choices', () => {
     expect(validAlbumKey('z')).toBe(DEFAULT_ALBUM_KEY);
     expect(validAlbumKey('w')).toBe('w');
     expect(validAlbumKey('')).toBe('');
+  });
+});
+
+describe('keys that leave the page', () => {
+  it('close Now Playing and the queue before going', () => {
+    const steps: string[] = [];
+    leavingOverlays(
+      { setNowPlayingOpen: (o) => steps.push(`nowPlaying:${o}`), setQueueOpen: (o) => steps.push(`queue:${o}`) },
+      () => steps.push('go'),
+    );
+    expect(steps).toEqual(['nowPlaying:false', 'queue:false', 'go']);
   });
 });
 

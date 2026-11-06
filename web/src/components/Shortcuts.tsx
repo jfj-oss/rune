@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { encId } from '../lib/format';
-import { keyCapture, skipAheadMs } from '../lib/keys';
+import { keyCapture, leavingOverlays, skipAheadMs } from '../lib/keys';
 import { livePosition } from '../player/types';
 import { usePlayer } from '../store/player';
 import { useUi } from '../store/ui';
@@ -34,12 +34,7 @@ export function KeyboardShortcuts() {
   const navigate = useNavigate();
   useEffect(() => {
     /** Leave the full-screen player and queue so the page that opens is visible. */
-    const go = (path: string) => {
-      const ui = useUi.getState();
-      ui.setNowPlayingOpen(false);
-      ui.setQueueOpen(false);
-      navigate(path);
-    };
+    const go = (path: string) => leavingOverlays(useUi.getState(), () => navigate(path));
 
     // the volume being aimed at: held keys step from it, not from the (lagging) reported volume
     let target: number | null = null;
@@ -107,7 +102,7 @@ export function KeyboardShortcuts() {
       }
       if (plain && k === 'q') {
         e.preventDefault();
-        if (!e.repeat) navigate(-1);
+        if (!e.repeat) leavingOverlays(useUi.getState(), () => navigate(-1));
         return;
       }
       if (plain && (k === 'z' || k === 'x' || (albumKey && k === albumKey))) {
