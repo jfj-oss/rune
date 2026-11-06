@@ -101,6 +101,40 @@ describe('ZoneEngine', () => {
     expect(ended).not.toHaveBeenCalled();
   });
 
+  it('a song Spotify reports as paused and rewound after a long gap between polls has ended: the next one starts now', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    tick(141_500); // polls are two minutes apart on a low budget; the song ran out in between
+    zone.finishPaused();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('a song paused elsewhere that Spotify drops minutes later does not start the next one', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    tick(1000);
+    zone.externalPause();
+    tick(600_000);
+    zone.finish();
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(200_000, false);
+  });
+
+  it('the same snapshot delivered again does not hide that the tab found out late', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(170_000);
+    tick(300_000);
+    eng.onState({ ...(zone as unknown as { state: PlayerState }).state });
+    zone.finish();
+    expect(ended).not.toHaveBeenCalled();
+  });
+
   it('counts time played since the last report: a slow poll may only see the next song', async () => {
     const { zone, eng, ended, tick } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true);

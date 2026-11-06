@@ -206,12 +206,19 @@ export class ZoneEngine implements Engine {
         return;
       }
     }
+    // The same snapshot delivered again (the tab's safety poll) says nothing new, so it must not restart the clock.
+    const repeat = s.updatedAt === this.lastUpdated;
     this.lastUpdated = s.updatedAt;
     this.serverVolume = s.volume;
 
     const dur = track.durationMs;
     const playing = s.status === 'playing';
     if (match && playing) this.maxPlayed = Math.max(this.maxPlayed, s.positionMs);
+    // Polls can be two minutes apart, and Spotify reports a finished song as paused, not stopped: going by the last
+    // position it reported, the song looks paused halfway. Count the time played since that report too.
+    if (match && !playing && this.snap?.playing) {
+      this.maxPlayed = Math.max(this.maxPlayed, this.snap.pos + (t - this.snap.at));
+    }
 
     // Another song on the zone is the next one only when ours was about to end; earlier it is another client's song,
     // and sending our next track over it would take the zone back from them.
@@ -236,7 +243,10 @@ export class ZoneEngine implements Engine {
       this.detach();
       // A tab that slept (a closed laptop, a background tab) finds out long after the song ended. It must not start
       // the next song on the PC out of nowhere minutes later, with nobody there: it stops instead.
-      const overdue = !!this.snap?.playing && t - (this.snap.at + Math.max(0, dur - this.snap.pos)) > ZoneEngine.STALE_END_MS;
+      // The same goes for a song paused elsewhere that Spotify drops as stopped minutes later: nobody asked for the next one.
+      const overdue = this.snap?.playing
+        ? t - (this.snap.at + Math.max(0, dur - this.snap.pos)) > ZoneEngine.STALE_END_MS
+        : s.status !== 'paused';
       this.snap = { pos: dur, at: t, playing: false };
       if (overdue) {
         this.userPaused = true;
@@ -247,6 +257,7 @@ export class ZoneEngine implements Engine {
       return;
     }
 
+    if (repeat && this.snap?.playing === playing) return;
     this.snap = { pos: s.positionMs, at: t, playing };
     this.syncFn(s.positionMs, playing);
   }
