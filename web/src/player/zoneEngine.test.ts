@@ -1,3 +1,4 @@
+import type { PlayerState } from '@liner/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { FakeZone, mkTrack } from './testkit';
 import { ZoneEngine } from './zoneEngine';
@@ -131,6 +132,61 @@ describe('ZoneEngine', () => {
     expect(zone.log.at(-1)).toBe('pause');
     zone.finish();
     expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('stop during a load sends the pause, because that load is still going to start', async () => {
+    const { zone, eng } = setup();
+    const send = zone.send.bind(zone);
+    zone.send = (cmd) => {
+      if (cmd.type !== 'play') return send(cmd);
+      zone.log.push('play');
+      return new Promise<PlayerState>(() => {}); // mpv still loading: no answer and no state yet
+    };
+    eng.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    expect(zone.log.at(-1)).toBe('play');
+    eng.stop();
+    await flush();
+    expect(zone.log.at(-1)).toBe('pause');
+  });
+
+  it('stop while the volume is on its way drops the play instead of pausing ahead of it', async () => {
+    const { zone, eng } = setup();
+    let volumeDone = () => {};
+    const send = zone.send.bind(zone);
+    zone.send = async (cmd) => {
+      if (cmd.type === 'volume') await new Promise<void>((r) => { volumeDone = r; });
+      return send(cmd);
+    };
+    eng.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    eng.stop();
+    volumeDone();
+    await flush();
+    expect(zone.log.filter((l) => l.startsWith('play'))).toEqual([]);
+  });
+
+  it('a track that ended by itself sends no pause when the next engine takes over', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    zone.progress(199_000);
+    zone.finish();
+    expect(ended).toHaveBeenCalledTimes(1);
+    eng.stop();
+    await flush();
+    expect(zone.log).not.toContain('pause');
+  });
+
+  it('a load that failed leaves nothing to pause', async () => {
+    const { zone, eng } = setup();
+    zone.fail = true;
+    eng.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    zone.fail = false;
+    eng.stop();
+    await flush();
+    expect(zone.log).not.toContain('pause');
   });
 
   it('polls fast only while the socket is down, then falls back to a 15 s safety poll', async () => {

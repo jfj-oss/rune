@@ -36,6 +36,8 @@ export class ZoneEngine implements Engine {
   private track: Track | null = null;
   private gen = 0;
   private armed = false;
+  /** A play is on its way to the zone: it will start even though `armed` is still false. */
+  private inFlight = false;
   private userPaused = false;
   private maxPlayed = 0;
   private loadedAt = 0;
@@ -70,6 +72,7 @@ export class ZoneEngine implements Engine {
     const gen = ++this.gen;
     this.track = track;
     this.armed = false;
+    this.inFlight = true;
     this.userPaused = !autoplay;
     this.maxPlayed = startMs;
     this.loadedAt = this.now();
@@ -80,10 +83,13 @@ export class ZoneEngine implements Engine {
       try {
         // the zone may have a different volume than the slider (mpv vs the Spotify app): bring it in line
         if (this.serverVolume === null || Math.abs(this.serverVolume - this.volume) > 1) await this.t.send({ type: 'volume', volume: this.volume }).catch(() => undefined);
+        if (gen !== this.gen) return; // stopped or replaced meanwhile: its pause must not land before this play
         const s = await this.t.send({ type: 'play', trackIds: [track.id], startIndex: 0, positionMs: Math.max(0, Math.round(startMs)), paused: !autoplay });
         this.onState(s, gen);
       } catch (e) {
         if (gen === this.gen) this.errorFn(e instanceof Error && e.message ? `Could not start playback — ${e.message}` : 'Could not start playback on that device');
+      } finally {
+        if (gen === this.gen) this.inFlight = false;
       }
     })();
   }
@@ -128,13 +134,16 @@ export class ZoneEngine implements Engine {
 
   stop() {
     const was = this.track;
-    const armed = this.armed;
+    // A load still on its way will start after this: without a pause mpv would come up under the next song. A track
+    // that ended by itself is neither armed nor in flight, so nothing is sent.
+    const sounding = this.armed || this.inFlight;
     this.detach();
     this.gen++;
     this.track = null;
     this.armed = false;
+    this.inFlight = false;
     this.snap = null;
-    if (was && armed) void this.t.send({ type: 'pause' }).catch(() => undefined);
+    if (was && sounding) void this.t.send({ type: 'pause' }).catch(() => undefined);
   }
 
   onEnded(fn: () => void) { this.endedFn = fn; }

@@ -130,6 +130,8 @@ class PcZoneImpl implements PcZone {
   private readonly log: (message: string, err?: unknown) => void;
   private q: QueueState = createQueue();
   private status: PlayerState['status'] = 'stopped';
+  /** A pause came in while a track was loading: that load finishes paused. */
+  private pauseAfterLoad = false;
   private positionMs = 0;
   private volume = 100;
   private readonly listeners = new Set<(s: PlayerState) => void>();
@@ -417,6 +419,9 @@ class PcZoneImpl implements PcZone {
   }
 
   command(cmd: PlayerCommand): Promise<PlayerState> {
+    // Queued behind the load it would come too late: the load would report 'playing' first, and the speaker guard
+    // takes that for a new start and pauses whatever the tab has moved on to.
+    if (cmd.type === 'pause' && this.status === 'loading') this.pauseAfterLoad = true;
     return this.serialize(async () => {
       await this.applyCommand(cmd);
       return this.state();
@@ -871,7 +876,8 @@ class PcZoneImpl implements PcZone {
           await this.appendEntry(upcoming, 'append-play');
         }
       }
-      if (opts.paused) {
+      const paused = opts.paused === true || this.pauseAfterLoad;
+      if (paused) {
         this.props.pause = true;
         await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
       } else {
@@ -880,9 +886,10 @@ class PcZoneImpl implements PcZone {
         this.props.pause = false;
         await ipc.command(['set_property', 'pause', false]).catch(() => undefined);
       }
-      this.status = opts.paused ? 'paused' : 'playing';
+      this.status = paused ? 'paused' : 'playing';
     } finally {
       this.rebuilding = false;
+      this.pauseAfterLoad = false;
     }
     this.emitChange();
   }

@@ -149,6 +149,34 @@ describe('PcZone gapless track switches', () => {
     expect(state.status).toBe('paused');
   });
 
+  it('A pause that arrives during a load finishes it paused, so it never shows as a new start', async () => {
+    const seen: string[] = [];
+    let pausing: Promise<unknown> | undefined;
+    const off = zone.onChange((s) => {
+      seen.push(s.status);
+      if (s.status === 'loading' && !pausing) pausing = zone.command({ type: 'pause' });
+    });
+    await zone.command({ type: 'play', trackIds: ['l:1', 'l:2'], startIndex: 0 });
+    await pausing;
+    off();
+
+    expect(seen).not.toContain('playing'); // the speaker guard would pause the newer Spotify song
+    expect(zone.state().status).toBe('paused');
+    expect(commands()).toContainEqual(['set_property', 'pause', true]);
+  });
+
+  it('A pause during one load does not leak into the next song', async () => {
+    let pausing: Promise<unknown> | undefined;
+    const off = zone.onChange((s) => {
+      if (s.status === 'loading' && !pausing) pausing = zone.command({ type: 'pause' });
+    });
+    await zone.command({ type: 'play', trackIds: ['l:1'], startIndex: 0 });
+    await pausing;
+    off();
+    const state = await zone.command({ type: 'play', trackIds: ['l:2'], startIndex: 0 });
+    expect(state.status).toBe('playing');
+  });
+
   it('A new song after a pause tells mpv to play: its pause flag survives loading a file', async () => {
     await playFive();
     await zone.command({ type: 'pause' });
