@@ -233,7 +233,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   let pcSpotifyDevice: { id: Zone; name: string } | null = null;
   const speakers = createSpeakerGuard(
     { pc: () => pc, spotify: () => (pcSpotifyDevice ? spotify?.zones.get(pcSpotifyDevice.id) : undefined) },
-    (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
+    {
+      onError: (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
+      // 'out' allows one background poll in ten minutes: mpv starting must not add to that.
+      canWake: () => spotify?.api.budgetLevel() !== 'out',
+    },
   );
   const notePcSpotify = (list: { id: Zone; name: string }[]): void => {
     const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();

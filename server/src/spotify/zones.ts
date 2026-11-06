@@ -284,6 +284,7 @@ const FAST_FOLLOW_UP_SECOND_MS = 2000;
  * this limit a single hung request would hold back every later command on the zone until rune restarts.
  */
 const COMMAND_WAIT_MS = 10_000;
+const STARTS_SOUND = new Set<PlayerCommand['type']>(['play', 'resume', 'next', 'prev', 'jump']);
 /** How soon after a track hold or claim runs out the zone looks again. */
 const HOLD_EXPIRY_SLACK_MS = 250;
 /** Poll just after the playing song ends (duration - position + slack), capped. */
@@ -479,6 +480,10 @@ export class SpotifyConnectZone implements PlaybackZone {
   /** Tail of the command queue, null while it is empty (see serialize). */
   private ops: Promise<void> | null = null;
   private claimUntil = 0;
+  /** Last poll that found this device not playing: a start seen after it happened no earlier. */
+  private lastIdleAt = Number.NEGATIVE_INFINITY;
+  /** Last command that starts sound: such a start is seen as it happens, not at a later poll. */
+  private startCommandAt = Number.NEGATIVE_INFINITY;
   private volumeHold: { volume: number; until: number } | null = null;
   /** Same for shuffle / repeat right after they were switched. */
   private toggleHold: { shuffle?: boolean; repeat?: PlayerState['repeat']; until: number } | null = null;
@@ -543,7 +548,18 @@ export class SpotifyConnectZone implements PlaybackZone {
     return run;
   }
 
+  /**
+   * When the current playing began, as near as can be told. Rune's own starts are seen at once. A start found by a poll
+   * lies between the last idle poll and now, and the position dates it unless the song was resumed part-way through.
+   */
+  startedAt(): number {
+    const at = this.now();
+    if (at - this.startCommandAt < CLAIM_MS) return at;
+    return Math.max(this.lastIdleAt, at - this.snapshot.positionMs);
+  }
+
   private async dispatch(cmd: PlayerCommand): Promise<PlayerState> {
+    if (STARTS_SOUND.has(cmd.type)) this.startCommandAt = this.now();
     // A command may change what is up next: the next poll must not reuse a cached queue.
     this.queueDirty = true;
     // Two fast follow-up polls confirm the command in the UI regardless of budget.
@@ -903,6 +919,7 @@ export class SpotifyConnectZone implements PlaybackZone {
       this.snapshot = next;
       for (const cb of this.listeners) cb(next);
     }
+    if (next.status !== 'playing') this.lastIdleAt = this.now();
   }
 
   private ensurePolling(): void {
