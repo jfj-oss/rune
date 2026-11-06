@@ -2,7 +2,7 @@ import type { Track } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
 import { sdkSupportedFor } from '../lib/device';
 import type { PlayItem, ZoneInfo } from '../lib/types';
-import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay, followPcSpeakers } from './routing';
+import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay, followPcSpeakers, noteSounding } from './routing';
 
 const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotify' ? 'sp:alb1' : 'la:a'): PlayItem => ({
   track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
@@ -157,5 +157,32 @@ describe('followPcSpeakers', () => {
     expect(followPcSpeakers({ zone: 'spotify:other', status: 'playing' }, false, idle, pc)).toBe(false);
     expect(followPcSpeakers({ zone: 'pc', status: 'paused' }, false, idle, pc)).toBe(false);
     expect(followPcSpeakers({ zone: 'pc', status: 'playing' }, false, { zone: 'pc', status: 'stopped' }, pc)).toBe(false);
+  });
+});
+
+describe('following the PC speakers through a run of events', () => {
+  const pc = { id: 'pc', spotifyDeviceId: 'dev' };
+  const idle = { zone: 'browser', status: 'paused' };
+  /** Replays zone events the way the store does; returns how many times the page would follow. */
+  const follows = (events: [string, string][]) => {
+    const seen = new Map<string, boolean>();
+    return events.filter(([zone, status]) => followPcSpeakers({ zone, status }, noteSounding(seen, { zone, status }), idle, pc)).length;
+  };
+
+  it('the first event is not a start: a song already playing when the page opened', () => {
+    expect(follows([['pc', 'playing']])).toBe(0);
+    expect(follows([['spotify:dev', 'playing'], ['spotify:dev', 'playing']])).toBe(0);
+  });
+  it('mpv going through loading to the next track is not a start', () => {
+    expect(follows([['pc', 'playing'], ['pc', 'loading'], ['pc', 'playing'], ['pc', 'loading'], ['pc', 'playing']])).toBe(0);
+  });
+  it('a new song on mpv from idle is a start, and only one', () => {
+    expect(follows([['pc', 'stopped'], ['pc', 'loading'], ['pc', 'playing']])).toBe(1);
+    expect(follows([['pc', 'paused'], ['pc', 'loading'], ['pc', 'playing']])).toBe(1);
+    expect(follows([['pc', 'loading'], ['pc', 'playing']])).toBe(1); // no event since the page opened
+  });
+  it('resuming is a start on either player', () => {
+    expect(follows([['pc', 'paused'], ['pc', 'playing']])).toBe(1);
+    expect(follows([['spotify:dev', 'paused'], ['spotify:dev', 'playing']])).toBe(1);
   });
 });

@@ -86,9 +86,21 @@ export function spotifyDeepLink(items: PlayItem[], context?: string): string | n
 }
 
 /**
+ * Note a zone's new status and return whether it was already sounding before. The first event from a zone says
+ * nothing about a start, so it counts as "was already". 'loading' counts as sounding: mpv passes through it on every
+ * new track, and that is not a start.
+ */
+export function noteSounding(seen: Map<string, boolean>, state: { zone: string; status: string }): boolean {
+  const was = seen.get(state.zone) ?? state.status === 'playing';
+  seen.set(state.zone, state.status === 'playing' || state.status === 'loading');
+  return was;
+}
+
+/**
  * Something outside this page started the PC speakers (the voice assistant, another tab, the Spotify app) while this
  * page shows an idle zone: show the PC, or the music cannot be controlled from here. Only on a start, so a page moved
- * away from a playing PC stays where it was put.
+ * away from a playing PC stays where it was put. A start on mpv is seen at 'loading': it never reports 'playing' from
+ * stopped directly.
  */
 export function followPcSpeakers(
   event: { zone: string; status: string },
@@ -96,7 +108,8 @@ export function followPcSpeakers(
   page: { zone: string; status: string },
   pc: Pick<ZoneInfo, 'id' | 'spotifyDeviceId'> | undefined,
 ): boolean {
-  if (!pc || page.zone === pc.id || event.status !== 'playing' || wasPlaying) return false;
+  if (!pc || page.zone === pc.id || wasPlaying) return false;
+  if (event.status !== 'playing' && event.status !== 'loading') return false;
   if (page.status === 'playing' || page.status === 'loading') return false;
   return event.zone === pc.id || (!!pc.spotifyDeviceId && event.zone === `spotify:${pc.spotifyDeviceId}`);
 }
