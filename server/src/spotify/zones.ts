@@ -279,6 +279,11 @@ const SETTLE_GAP_MS = 350;
  */
 const FAST_FOLLOW_UP_FIRST_MS = 1000;
 const FAST_FOLLOW_UP_SECOND_MS = 2000;
+/**
+ * How long a queued command waits for the one ahead of it. Spotify requests have no timeout of their own: without
+ * this limit a single hung request would hold back every later command on the zone until rune restarts.
+ */
+const COMMAND_WAIT_MS = 10_000;
 /** How soon after a track hold or claim runs out the zone looks again. */
 const HOLD_EXPIRY_SLACK_MS = 250;
 /** Poll just after the playing song ends (duration - position + slack), capped. */
@@ -471,6 +476,8 @@ export class SpotifyConnectZone implements PlaybackZone {
   private volumeSending: Promise<void> | null = null;
   private inFlight: Promise<void> | null = null;
   private closed = false;
+  /** Tail of the command queue, null while it is empty (see serialize). */
+  private ops: Promise<void> | null = null;
   private claimUntil = 0;
   private volumeHold: { volume: number; until: number } | null = null;
   /** Same for shuffle / repeat right after they were switched. */
@@ -514,7 +521,29 @@ export class SpotifyConnectZone implements PlaybackZone {
     };
   }
 
-  async command(cmd: PlayerCommand): Promise<PlayerState> {
+  command(cmd: PlayerCommand): Promise<PlayerState> {
+    // Volume stays out of the queue: a slider drag coalesces on its own and must not wait behind a play.
+    return cmd.type === 'volume' ? this.dispatch(cmd) : this.serialize(() => this.dispatch(cmd));
+  }
+
+  /** One command at a time, in the order they came: a pause sent just before a play must not land after it. */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.ops ? this.ops.then(fn, fn) : fn();
+    const tail = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, COMMAND_WAIT_MS);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      run.then(done, done);
+    }).then(() => {
+      if (this.ops === tail) this.ops = null;
+    });
+    this.ops = tail;
+    return run;
+  }
+
+  private async dispatch(cmd: PlayerCommand): Promise<PlayerState> {
     // A command may change what is up next: the next poll must not reuse a cached queue.
     this.queueDirty = true;
     // Two fast follow-up polls confirm the command in the UI regardless of budget.

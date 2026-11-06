@@ -797,6 +797,78 @@ describe('sharedPlaybackReads', () => {
   });
 });
 
+describe('commands on one zone run in order', () => {
+  /** A fake whose pause only finishes when the test says so. */
+  function slowPause() {
+    const api = new FakeZoneApi();
+    let release = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const pause = api.pause.bind(api);
+    api.pause = async (deviceId) => {
+      await gate;
+      await pause(deviceId);
+    };
+    return { api, release };
+  }
+
+  it('a play sent right after a pause waits for it, so the pause cannot land after the play', async () => {
+    const { api, release } = slowPause();
+    api.playback = playbackState(sampleTrack('t1'));
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const pausing = zone.command({ type: 'pause' });
+    const playing = zone.command({ type: 'play', trackIds: ['sp:t1'] });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(callsOf(api, 'play')).toHaveLength(0);
+
+    release();
+    await Promise.all([pausing, playing]);
+    expect(api.calls.filter((c) => c.method === 'pause' || c.method === 'play').map((c) => c.method)).toEqual(['pause', 'play']);
+    await zone.close();
+  });
+
+  it('a failed command does not stop the next one', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    api.pause = async () => { throw new Error('nope'); };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    const failing = zone.command({ type: 'pause' });
+    const next = zone.command({ type: 'next' });
+    await expect(failing).rejects.toThrow('nope');
+    await next;
+    expect(callsOf(api, 'next')).toHaveLength(1);
+    await zone.close();
+  });
+
+  it('volume does not queue behind a command, so a drag keeps its coalescing', async () => {
+    const { api, release } = slowPause();
+    api.playback = playbackState(sampleTrack('t1'));
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    const pausing = zone.command({ type: 'pause' });
+    await zone.command({ type: 'volume', volume: 40 });
+    expect(callsOf(api, 'setVolume')).toHaveLength(1);
+    release();
+    await pausing;
+    await zone.close();
+  });
+
+  it('a hung Spotify request holds the queue only for a while', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    api.pause = () => new Promise<void>(() => {}); // never answers
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    void zone.command({ type: 'pause' });
+    const next = zone.command({ type: 'next' });
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(callsOf(api, 'next')).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_100);
+    await next;
+    expect(callsOf(api, 'next')).toHaveLength(1);
+    await zone.close();
+  });
+});
+
 describe('placeholder queue entries', () => {
   it('fills a blank started entry with what /me/player says about the playing track', () => {
     const placeholder = { queueId: 'spq:0:sp:t1', track: { id: 'sp:t1', albumId: 'sp:unknown', source: 'spotify' as const, title: '', artists: [], disc: 1, number: 1, durationMs: 0 }, album: { id: 'sp:unknown', title: '' } };
