@@ -97,7 +97,6 @@ describe('ZoneEngine', () => {
     await flush();
     zone.progress(170_000);
     tick(300_000);
-    await zone.send({ type: 'pause' });
     await zone.send({ type: 'play', trackIds: ['sp:other'] });
     expect(ended).not.toHaveBeenCalled();
   });
