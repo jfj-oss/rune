@@ -15,6 +15,7 @@ import {
   sharedPlaybackReads,
   type SpotifyZoneApi,
 } from '../src/spotify/zones.js';
+import { HttpError } from '../src/spotify/fetch.js';
 import { mapTrack } from '../src/spotify/map.js';
 import { SIM_DEVICE, playbackState, sampleTrack } from './spotify-helpers.js';
 
@@ -865,6 +866,50 @@ describe('commands on one zone run in order', () => {
     await vi.advanceTimersByTimeAsync(1_100);
     await next;
     expect(callsOf(api, 'next')).toHaveLength(1);
+    await zone.close();
+  });
+});
+
+describe('a command on a state Spotify has already left', () => {
+  const restricted = () => new HttpError('Spotify API 403 for PUT /me/player/pause', 403, '{"error":{"status":403,"message":"Player command failed: Restriction violated","reason":"UNKNOWN"}}');
+
+  it('pausing what is already paused counts as done and refreshes', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { is_playing: false });
+    api.pause = async () => { throw restricted(); };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    const state = await zone.command({ type: 'pause' });
+    expect(state.status).toBe('paused');
+    expect(api.currentPlaybackCalls).toBe(1);
+    await zone.close();
+  });
+
+  it('resuming what already plays counts as done and refreshes, without claiming the device', async () => {
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'));
+    api.play = async () => { throw restricted(); };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    const state = await zone.command({ type: 'resume' });
+    expect(state.status).toBe('playing');
+    expect(api.currentPlaybackCalls).toBe(1);
+    await zone.close();
+  });
+
+  it('any other 403 is still a failure', async () => {
+    const api = new FakeZoneApi();
+    api.pause = async () => { throw new HttpError('Spotify API 403', 403, '{"error":{"status":403,"message":"Premium required"}}'); };
+    api.play = async () => { throw new HttpError('Spotify API 403', 403, '{"error":{"status":403,"message":"Premium required"}}'); };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    await expect(zone.command({ type: 'pause' })).rejects.toThrow('403');
+    await expect(zone.command({ type: 'resume' })).rejects.toThrow('403');
+    await zone.close();
+  });
+
+  it('a Restriction violated on anything but pause and resume is still a failure', async () => {
+    const api = new FakeZoneApi();
+    api.next = async () => { throw restricted(); };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    await expect(zone.command({ type: 'next' })).rejects.toThrow('403');
     await zone.close();
   });
 });

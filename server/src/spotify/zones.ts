@@ -594,10 +594,15 @@ export class SpotifyConnectZone implements PlaybackZone {
         return this.refresh();
       }
       case 'pause':
-        await this.api.pause(device);
+        await this.api.pause(device).catch(unlessAlreadyDone);
         return this.refresh();
       case 'resume':
-        await this.api.play({}, device);
+        try {
+          await this.api.play({}, device);
+        } catch (err) {
+          unlessAlreadyDone(err);
+          return this.refresh();
+        }
         this.claim();
         return this.settle();
       case 'next':
@@ -1037,6 +1042,16 @@ function sameState(a: PlayerState, b: PlayerState): boolean {
 
 function assertNever(x: never): never {
   throw new Error(`Unsupported player command: ${JSON.stringify(x)}`);
+}
+
+/**
+ * Spotify answers 403 "Restriction violated" when the player is already where it was told to go: pausing what is
+ * paused, resuming what plays. Commands sent on a stale state do that, and it is no failure. Anything else is rethrown.
+ */
+function unlessAlreadyDone(err: unknown): void {
+  const { status, body } = err as { status?: number; body?: unknown };
+  if (status === 403 && typeof body === 'string' && /restriction violated/i.test(body)) return;
+  throw err;
 }
 
 /** Run `fn` over `items` with at most `limit` promises in flight, preserving nothing about order. */
