@@ -39,6 +39,8 @@ export class ZoneEngine implements Engine {
   /** A play is on its way to the zone: it will start even though `armed` is still false. */
   private inFlight = false;
   private userPaused = false;
+  /** Another client's song took the zone: this track waits, paused, until the user plays it again. */
+  private displaced = false;
   private maxPlayed = 0;
   private loadedAt = 0;
   private lastUpdated = 0;
@@ -73,6 +75,7 @@ export class ZoneEngine implements Engine {
     this.track = track;
     this.armed = false;
     this.inFlight = true;
+    this.displaced = false;
     this.userPaused = !autoplay;
     this.maxPlayed = startMs;
     this.loadedAt = this.now();
@@ -96,6 +99,8 @@ export class ZoneEngine implements Engine {
 
   play() {
     if (!this.track) return;
+    // the zone holds someone else's song: a resume would only restart that
+    if (this.displaced) { this.load(this.track, this.position() ?? 0, true); return; }
     this.userPaused = false;
     if (this.snap) this.snap = { pos: this.position() ?? this.snap.pos, at: this.now(), playing: true };
     this.command({ type: 'resume' });
@@ -113,6 +118,7 @@ export class ZoneEngine implements Engine {
     if (!this.track) return;
     this.snap = { pos: ms, at: this.now(), playing: this.snap?.playing ?? !this.userPaused };
     this.maxPlayed = Math.max(this.maxPlayed, ms);
+    if (this.displaced) return; // not our song to seek in: play() starts from here
     this.command({ type: 'seek', positionMs: Math.round(ms) });
   }
 
@@ -142,6 +148,7 @@ export class ZoneEngine implements Engine {
     this.track = null;
     this.armed = false;
     this.inFlight = false;
+    this.displaced = false;
     this.snap = null;
     if (was && sounding) void this.t.send({ type: 'pause' }).catch(() => undefined);
   }
@@ -180,7 +187,7 @@ export class ZoneEngine implements Engine {
   /** Feed a zone state in (websocket, poll, or a command's response). Exposed for tests. */
   onState(s: PlayerState, gen = this.gen) {
     const track = this.track;
-    if (!track || gen !== this.gen) return;
+    if (!track || gen !== this.gen || this.displaced) return;
     if (s.updatedAt < this.lastUpdated && this.armed) return; // older than something already applied
     const cur = s.queue[s.index];
     const match = !!cur && sameTrack(cur.track, track);
@@ -203,6 +210,20 @@ export class ZoneEngine implements Engine {
     const dur = track.durationMs;
     const playing = s.status === 'playing';
     if (match && playing) this.maxPlayed = Math.max(this.maxPlayed, s.positionMs);
+
+    // Another song on the zone is the next one only when ours was about to end; earlier it is another client's song,
+    // and sending our next track over it would take the zone back from them.
+    const pos = this.position() ?? this.maxPlayed;
+    const nearEnd = !this.userPaused && dur > 0 && pos >= dur - this.endSlackMs;
+    if (!match && !nearEnd && s.status !== 'stopped') {
+      this.armed = false;
+      this.detach();
+      this.displaced = true;
+      this.userPaused = true;
+      this.snap = { pos, at: t, playing: false };
+      this.syncFn(pos, false);
+      return;
+    }
 
     const finished =
       !match ||

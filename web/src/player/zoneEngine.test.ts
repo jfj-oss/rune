@@ -81,12 +81,78 @@ describe('ZoneEngine', () => {
     expect(ended).not.toHaveBeenCalled();
   });
 
-  it('ends when the zone moved on to a different track', async () => {
+  it('ends when the zone moved on to a different track as ours finished', async () => {
     const { zone, eng, ended } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true);
     await flush();
+    zone.progress(197_000);
     await zone.send({ type: 'play', trackIds: ['sp:other'] });
     expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts time played since the last report: a slow poll may only see the next song', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(170_000);
+    tick(31_500); // Spotify's next poll comes just after the song ended
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('another client’s song mid-track is not our end: it detaches, shows paused and sends nothing', async () => {
+    const { zone, eng, ended, sync } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    const sent = zone.log.length;
+
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(60_000, false);
+    expect(eng.position()).toBe(60_000);
+
+    zone.progress(90_000); // their song goes on: no longer ours to follow
+    eng.seek(70_000); // and not ours to touch
+    eng.stop();
+    await flush();
+    expect(ended).not.toHaveBeenCalled();
+    expect(zone.log.length).toBe(sent);
+  });
+
+  it('play after being displaced loads our track again where it stopped', async () => {
+    const { zone, eng } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+
+    eng.play();
+    await flush();
+    expect(zone.log.at(-1)).toBe('play:sp:1@60000');
+    expect(zone.log).not.toContain('resume');
+  });
+
+  it('a user pause near the end is not an end when another song takes the zone', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(198_000);
+    eng.pause();
+    await flush();
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('a command answered after being displaced raises no error', async () => {
+    const { zone, eng, err, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    tick(60_000);
+    eng.onState(zone.state);
+    expect(err).not.toHaveBeenCalled();
   });
 
   it('ignores the previous track’s state until the zone shows the new one', async () => {
