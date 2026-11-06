@@ -91,6 +91,17 @@ describe('ZoneEngine', () => {
     expect(ended).toHaveBeenCalledTimes(1);
   });
 
+  it('a tab that slept through the end stops instead of starting the next song minutes later', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(170_000);
+    tick(300_000);
+    await zone.send({ type: 'pause' });
+    await zone.send({ type: 'play', trackIds: ['sp:other'] });
+    expect(ended).not.toHaveBeenCalled();
+  });
+
   it('counts time played since the last report: a slow poll may only see the next song', async () => {
     const { zone, eng, ended, tick } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true);

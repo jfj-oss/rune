@@ -45,6 +45,8 @@ export class ZoneEngine implements Engine {
   private loadedAt = 0;
   private lastUpdated = 0;
   private snap: { pos: number; at: number; playing: boolean } | null = null;
+  /** How late a track's end may be noticed and still move on to the next song. */
+  static readonly STALE_END_MS = 60_000;
   private off: (() => void) | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastPollAt = 0;
@@ -232,7 +234,15 @@ export class ZoneEngine implements Engine {
     if (finished) {
       this.armed = false;
       this.detach();
+      // A tab that slept (a closed laptop, a background tab) finds out long after the song ended. It must not start
+      // the next song on the PC out of nowhere minutes later, with nobody there: it stops instead.
+      const overdue = !!this.snap?.playing && t - (this.snap.at + Math.max(0, dur - this.snap.pos)) > ZoneEngine.STALE_END_MS;
       this.snap = { pos: dur, at: t, playing: false };
+      if (overdue) {
+        this.userPaused = true;
+        this.syncFn(dur, false);
+        return;
+      }
       this.endedFn();
       return;
     }
