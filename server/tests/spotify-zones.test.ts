@@ -358,6 +358,30 @@ describe('Spotify Connect zones', () => {
     await zone.close();
   });
 
+  it('after a failed read the next poll takes the capped delay, not the song end from a stale position', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 55_000 });
+    api.playback.item!.duration_ms = 60_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const good = api.currentPlayback.bind(api);
+    api.currentPlayback = async () => {
+      api.currentPlaybackCalls++;
+      throw new Error('spotify is down');
+    };
+    await vi.advanceTimersByTimeAsync(6_500); // the poll at the song's end fails
+    expect(api.currentPlaybackCalls).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(api.currentPlaybackCalls).toBe(2);
+    api.currentPlayback = good;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.currentPlaybackCalls).toBe(3);
+    await zone.close();
+  });
+
   it('schedules the next poll just after the track ends: 40 s left → 30 s, 8 s left → 9.5 s', async () => {
     vi.useFakeTimers();
 

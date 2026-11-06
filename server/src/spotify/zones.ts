@@ -996,13 +996,14 @@ export class SpotifyConnectZone implements PlaybackZone {
     // nothing extra, and stretching it left a finished song on screen for up to 30 s after the next one began.
     let songEnd: number | null = null;
     if (this.snapshot.status === 'playing') {
-      const duration =
-        this.lastPlayback?.item?.duration_ms ?? this.snapshot.queue[this.snapshot.index]?.track.durationMs ?? 0;
-      const position = this.lastPlayback?.progress_ms ?? this.snapshot.positionMs;
-      const remaining = duration > 0 ? Math.max(0, duration - position) : null;
-      const slack = watched ? WATCHED_PLAYING_SLACK_MS : UNWATCHED_PLAYING_SLACK_MS;
       const cap = watched ? WATCHED_PLAYING_MAX_MS : UNWATCHED_PLAYING_MAX_MS;
-      if (remaining === null) delay = watched ? WATCHED_PLAYING_UNKNOWN_MS : UNWATCHED_PLAYING_UNKNOWN_MS;
+      const known = this.lastPlayback;
+      const duration = known?.item?.duration_ms ?? this.snapshot.queue[this.snapshot.index]?.track.durationMs ?? 0;
+      const remaining = duration > 0 ? Math.max(0, duration - (known?.progress_ms ?? this.snapshot.positionMs)) : null;
+      const slack = watched ? WATCHED_PLAYING_SLACK_MS : UNWATCHED_PLAYING_SLACK_MS;
+      // After a failed read the position is stale, and aiming at the song's end from it would poll a failing Spotify fast.
+      if (!known) delay = cap;
+      else if (remaining === null) delay = watched ? WATCHED_PLAYING_UNKNOWN_MS : UNWATCHED_PLAYING_UNKNOWN_MS;
       else {
         delay = cap;
         songEnd = remaining + slack;
