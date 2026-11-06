@@ -279,6 +279,8 @@ const SETTLE_GAP_MS = 350;
  */
 const FAST_FOLLOW_UP_FIRST_MS = 1000;
 const FAST_FOLLOW_UP_SECOND_MS = 2000;
+/** How soon after a track hold or claim runs out the zone looks again. */
+const HOLD_EXPIRY_SLACK_MS = 250;
 /** Poll just after the playing song ends (duration - position + slack), capped. */
 const WATCHED_PLAYING_MAX_MS = 30_000;
 const UNWATCHED_PLAYING_MAX_MS = 60_000;
@@ -910,7 +912,17 @@ export class SpotifyConnectZone implements PlaybackZone {
         return;
       }
     }
-    this.scheduleIn(this.backgroundDelayMs());
+    // The follow-ups land inside the hold and the claim, and the background delay comes from the song before: a song
+    // the device never took would stay on screen as playing until that timer ran out.
+    const held = this.holdExpiryDelayMs();
+    const background = this.backgroundDelayMs();
+    this.scheduleIn(held === null ? background : Math.min(held, background));
+  }
+
+  /** How long until a track hold or claim has run out and a poll can show what Spotify really reports; null if none is pending. */
+  private holdExpiryDelayMs(): number | null {
+    const left = Math.max(this.trackHold?.until ?? 0, this.claimUntil) - this.now();
+    return left > 0 ? left + HOLD_EXPIRY_SLACK_MS : null;
   }
 
   /** One fast poll after a command; the loop schedules the second one. */

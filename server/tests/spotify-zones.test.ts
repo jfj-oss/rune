@@ -301,6 +301,62 @@ describe('Spotify Connect zones', () => {
     await zone.close();
   });
 
+  it('a song another device kept is dropped just after the claim runs out, not at the next background poll', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('old'), { progress_ms: 10_000, device: { ...SIM_DEVICE, id: 'elsewhere' } });
+    api.playback.item!.duration_ms = 300_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    const started = zone.command({ type: 'play', trackIds: ['sp:new'] });
+    await vi.advanceTimersByTimeAsync(1_100); // the settle tries
+    await started;
+    expect(zone.state().status).toBe('playing');
+
+    await vi.advanceTimersByTimeAsync(3_800); // both fast follow-ups, still inside the 5 s claim
+    expect(zone.state().status).toBe('playing');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(zone.state().status).toBe('stopped');
+    await zone.close();
+  });
+
+  it('a song the device ignored gives way to what it reports just after the track hold runs out', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('old'), { progress_ms: 10_000 });
+    api.playback.item!.duration_ms = 300_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+
+    await zone.command({ type: 'play', trackIds: ['sp:new'] });
+    expect(zone.state().queue[zone.state().index]?.track.id).toBe('sp:new');
+
+    await vi.advanceTimersByTimeAsync(3_900); // the follow-ups at 1 s and 3 s are held
+    expect(zone.state().queue[zone.state().index]?.track.id).toBe('sp:new');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(zone.state().queue[zone.state().index]?.track.id).toBe('sp:old');
+    await zone.close();
+  });
+
+  it('an expired hold never turns into fast polling', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('old'), { progress_ms: 10_000 });
+    api.playback.item!.duration_ms = 300_000;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+    zone.onChange(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    await zone.command({ type: 'play', trackIds: ['sp:new'] });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const reads = api.currentPlaybackCalls;
+    await vi.advanceTimersByTimeAsync(29_000); // the 30 s background cap has not come round again
+    expect(api.currentPlaybackCalls).toBe(reads);
+    await zone.close();
+  });
+
   it('schedules the next poll just after the track ends: 40 s left → 30 s, 8 s left → 9.5 s', async () => {
     vi.useFakeTimers();
 
