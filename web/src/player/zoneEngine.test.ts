@@ -1,5 +1,6 @@
 import type { PlayerState } from '@liner/shared';
 import { describe, expect, it, vi } from 'vitest';
+import { HybridEngine } from './hybrid';
 import { FakeZone, mkTrack } from './testkit';
 import { ZoneEngine } from './zoneEngine';
 
@@ -309,6 +310,33 @@ describe('ZoneEngine', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('sends no volume the zone already has', async () => {
+    const { zone, eng } = setup();
+    eng.setVolume(35);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    const sent = zone.log.length;
+    eng.setVolume(35); // HybridEngine does this before every load
+    await flush();
+    expect(zone.log.length).toBe(sent);
+    eng.setVolume(36);
+    await flush();
+    expect(zone.log.at(-1)).toBe('volume:36');
+  });
+
+  it('skipping between two tracks on one engine sends one volume, at the start', async () => {
+    const eng = new ZoneEngine(new FakeZone('pc'));
+    const zone = (eng as unknown as { t: FakeZone }).t;
+    const hybrid = new HybridEngine(eng, new ZoneEngine(new FakeZone('spotify:dev')));
+    hybrid.setVolume(40);
+    hybrid.load(mkTrack('l:1', 'local'), 0, true);
+    await flush();
+    hybrid.load(mkTrack('l:2', 'local'), 0, true);
+    await flush();
+    expect(zone.log.filter((l) => l.startsWith('volume'))).toEqual(['volume:40']);
+    hybrid.stop();
   });
 
   it('brings the zone volume in line before playing, and only talks volume while loaded', async () => {

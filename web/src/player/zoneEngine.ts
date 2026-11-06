@@ -125,7 +125,7 @@ export class ZoneEngine implements Engine {
   setVolume(v: number) {
     this.volume = v;
     // only talk to the zone while it is ours; otherwise load() applies it
-    if (this.track && this.armed) {
+    if (this.track && this.armed && this.serverVolume !== v) {
       this.serverVolume = v;
       void this.t.send({ type: 'volume', volume: v }).catch(() => undefined);
     }
