@@ -194,6 +194,20 @@ describe('PcZone session persistence', () => {
     expect(z2.state().positionMs).toBe(199_800);
   });
 
+  it('keeps the saved position of a restored track whose length is unknown', async () => {
+    db.prepare("UPDATE tracks SET duration_ms = 0 WHERE id = 'l:1'").run();
+    const { zone: z1 } = await makeZone();
+    await z1.command({ type: 'play', trackIds: ['l:1', 'l:2'] });
+    await z1.close();
+    const row = savedSession(db)!;
+    db.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify({ ...row, positionMs: 42_000 }), 'player.pc.session');
+
+    const { zone: z2, fake } = await makeZone();
+    await z2.command({ type: 'resume' });
+    const load = fake.received.map((r) => r.command ?? []).find((c) => c[0] === 'loadfile');
+    expect(String(load?.[4] ?? '')).toContain('start=42');
+  });
+
   it('drops tracks that no longer exist and fixes the index', async () => {
     const { zone: z1 } = await makeZone();
     await z1.command({

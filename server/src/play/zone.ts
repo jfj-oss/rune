@@ -1056,7 +1056,7 @@ class PcZoneImpl implements PcZone {
   /** Where Play picks the current track up. */
   private resumePosition(): number {
     const duration = currentItem(this.q)?.track.durationMs ?? 0;
-    return duration > 0 && this.positionMs < duration - FINISHED_WITHIN_MS ? this.positionMs : 0;
+    return duration > 0 && this.positionMs >= duration - FINISHED_WITHIN_MS ? 0 : this.positionMs;
   }
 
   private async cmdNext(): Promise<void> {
