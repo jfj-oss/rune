@@ -10,8 +10,8 @@ import { LocalBackend } from '../player/local';
 import { PcBackend, type PcDevice } from '../player/pc';
 import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
 import { fitForZone } from '../player/preferLocal';
-import { RemoteBackend, zoneTransport } from '../player/remote';
-import { cantPlayMessage, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
+import { RemoteBackend, socket, zoneTransport } from '../player/remote';
+import { cantPlayMessage, followPcSpeakers, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
 import { emptyState, livePosition, type Backend } from '../player/types';
 import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
 import { loadLocal, saveLocal, useUi } from './ui';
@@ -180,6 +180,16 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async init() {
       if (get().ready) return;
+      if (!isMock) {
+        const playing = new Map<string, boolean>();
+        socket.on((e) => {
+          if (e.type !== 'player') return;
+          const was = playing.get(e.state.zone) ?? false;
+          playing.set(e.state.zone, e.state.status === 'playing');
+          const { zone, state, zones, setZone } = get();
+          if (followPcSpeakers(e.state, was, { zone, status: state.status }, zones.find((z) => z.kind === 'pc'))) void setZone('pc', { handoff: false });
+        });
+      }
       const [zonesRes] = await Promise.all([api.zones().catch(() => FALLBACK_ZONES), useSpotify.getState().init().catch(() => undefined)]);
       const zones = tidyZones(zonesRes.length ? zonesRes : FALLBACK_ZONES);
       const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches;

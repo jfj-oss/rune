@@ -84,3 +84,19 @@ export function spotifyDeepLink(items: PlayItem[], context?: string): string | n
   const uri = first.track.spotifyUri ?? (first.track.id.startsWith('sp:') ? `spotify:track:${first.track.id.slice(3)}` : null);
   return uri;
 }
+
+/**
+ * Something outside this page started the PC speakers (the voice assistant, another tab, the Spotify app) while this
+ * page shows an idle zone: show the PC, or the music cannot be controlled from here. Only on a start, so a page moved
+ * away from a playing PC stays where it was put.
+ */
+export function followPcSpeakers(
+  event: { zone: string; status: string },
+  wasPlaying: boolean,
+  page: { zone: string; status: string },
+  pc: Pick<ZoneInfo, 'id' | 'spotifyDeviceId'> | undefined,
+): boolean {
+  if (!pc || page.zone === pc.id || event.status !== 'playing' || wasPlaying) return false;
+  if (page.status === 'playing' || page.status === 'loading') return false;
+  return event.zone === pc.id || (!!pc.spotifyDeviceId && event.zone === `spotify:${pc.spotifyDeviceId}`);
+}

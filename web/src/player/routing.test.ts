@@ -2,7 +2,7 @@ import type { Track } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
 import { sdkSupportedFor } from '../lib/device';
 import type { PlayItem, ZoneInfo } from '../lib/types';
-import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from './routing';
+import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay, followPcSpeakers } from './routing';
 
 const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotify' ? 'sp:alb1' : 'la:a'): PlayItem => ({
   track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
@@ -139,5 +139,23 @@ describe('pc zone with the PC’s Spotify app', () => {
   it('explains that rune starts the app (no manual “open Spotify” instruction)', () => {
     expect(cantPlayMessage({ kind: 'pc', name: 'Linux PC speakers' }, 'spotify')).toBe('rune starts Spotify on the PC for this');
     expect(cantPlayMessage({ kind: 'spotify', name: 'iPhone' }, 'local')).toContain('iPhone');
+  });
+});
+
+describe('followPcSpeakers', () => {
+  const pc = { id: 'pc', spotifyDeviceId: 'dev' };
+  const idle = { zone: 'browser', status: 'stopped' };
+  it('shows the PC when something else starts it while this page is idle', () => {
+    expect(followPcSpeakers({ zone: 'pc', status: 'playing' }, false, idle, pc)).toBe(true);
+    expect(followPcSpeakers({ zone: 'spotify:dev', status: 'playing' }, false, idle, pc)).toBe(true);
+  });
+  it('leaves a page that is playing, or was moved away from a playing PC', () => {
+    expect(followPcSpeakers({ zone: 'pc', status: 'playing' }, false, { zone: 'browser', status: 'playing' }, pc)).toBe(false);
+    expect(followPcSpeakers({ zone: 'pc', status: 'playing' }, true, idle, pc)).toBe(false);
+  });
+  it('ignores other zones and pauses', () => {
+    expect(followPcSpeakers({ zone: 'spotify:other', status: 'playing' }, false, idle, pc)).toBe(false);
+    expect(followPcSpeakers({ zone: 'pc', status: 'paused' }, false, idle, pc)).toBe(false);
+    expect(followPcSpeakers({ zone: 'pc', status: 'playing' }, false, { zone: 'pc', status: 'stopped' }, pc)).toBe(false);
   });
 });
