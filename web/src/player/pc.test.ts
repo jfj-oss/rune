@@ -233,13 +233,14 @@ describe('PcBackend', () => {
     expect(pc.state.queue[pc.state.index]?.track.id).toBe('sp:1');
   });
 
-  it('mpv playing still beats a paused Spotify song on refresh', async () => {
+  it('mpv playing still beats a paused Spotify song on refresh, when the socket missed it starting', async () => {
     const { pc, zones } = make();
     live = pc;
     const items = [S(1)];
     await pc.send(play(items), items);
     await zones['spotify:dev'].send({ type: 'pause' });
-    await zones['pc'].send({ type: 'play', trackIds: ['l:1'] });
+    const queue = [{ queueId: 'q', ...L(1) }];
+    zones.pc.state = { ...zones.pc.state, queue, index: 0, status: 'playing' }; // no event: only a refresh reads it
 
     await pc.refresh();
     expect(pc.currentMode).toBe('pc');
