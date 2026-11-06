@@ -81,6 +81,8 @@ const DEVICE_ALIASES = new Set(['auto', 'pipewire', 'pulse', 'alsa']);
 const GRAPH_RATE_PROBE_INTERVAL_MS = 5_000;
 
 const POSITION_EMIT_INTERVAL_MS = 1_000;
+/** A track this close to its end has finished: Play starts it over rather than at its last moment. */
+const FINISHED_WITHIN_MS = 100;
 const MAX_RESPAWN_ATTEMPTS = 5;
 
 /** app_state row holding the PC zone session (same key/value table the settings use). */
@@ -289,6 +291,7 @@ class PcZoneImpl implements PcZone {
     const current = index >= 0 ? items[index] : undefined;
     if (current && current.track.durationMs > 0) {
       positionMs = Math.min(current.track.durationMs, Math.max(0, positionMs));
+      if (positionMs >= current.track.durationMs - FINISHED_WITHIN_MS) positionMs = 0;
     } else if (!current) {
       positionMs = 0;
     }
@@ -855,13 +858,16 @@ class PcZoneImpl implements PcZone {
       await ipc.command(['playlist-clear']).catch(() => undefined);
       this.window = [];
       this.currentMpvPos = -1;
-      if (!item) {
+      if (!item || !trackPath(item.track)) {
         this.status = 'stopped';
+        this.rebuilding = false;
+        this.emitChange(); // clients were told 'loading'
         return;
       }
-      if (!trackPath(item.track)) {
-        this.status = 'stopped';
-        return;
+      // Before the file, or its first moments sound until the pause lands.
+      if (opts.paused) {
+        this.props.pause = true;
+        await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
       }
       // Start position is passed as a per-file option (an immediate seek command can
       // be ignored while mpv is still opening the file).
@@ -877,14 +883,11 @@ class PcZoneImpl implements PcZone {
         }
       }
       const paused = opts.paused === true || this.pauseAfterLoad;
-      if (paused) {
-        this.props.pause = true;
-        await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
-      } else {
+      if (!opts.paused) {
         // mpv keeps its pause flag across loadfile: after any pause the new song would sit silent at 0:00
         // while rune showed it playing.
-        this.props.pause = false;
-        await ipc.command(['set_property', 'pause', false]).catch(() => undefined);
+        this.props.pause = paused;
+        await ipc.command(['set_property', 'pause', paused]).catch(() => undefined);
       }
       this.status = paused ? 'paused' : 'playing';
     } finally {
@@ -1036,7 +1039,7 @@ class PcZoneImpl implements PcZone {
       // Restored after a restart: mpv is idle, so there is nothing to unpause —
       // load the current track at the saved position instead.
       if (this.restorePending || this.window.length === 0) {
-        await this.startPlayback({ positionMs: this.positionMs });
+        await this.startPlayback({ positionMs: this.resumePosition() });
         return;
       }
       this.props.pause = false;
@@ -1046,10 +1049,14 @@ class PcZoneImpl implements PcZone {
       return;
     }
     if (this.status === 'stopped' && this.q.index >= 0) {
-      const item = currentItem(this.q);
-      const atEnd = item ? this.positionMs >= item.track.durationMs - 100 : true;
-      await this.startPlayback({ positionMs: atEnd ? 0 : this.positionMs });
+      await this.startPlayback({ positionMs: this.resumePosition() });
     }
+  }
+
+  /** Where Play picks the current track up. */
+  private resumePosition(): number {
+    const duration = currentItem(this.q)?.track.durationMs ?? 0;
+    return duration > 0 && this.positionMs < duration - FINISHED_WITHIN_MS ? this.positionMs : 0;
   }
 
   private async cmdNext(): Promise<void> {

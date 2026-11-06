@@ -149,6 +149,26 @@ describe('PcZone gapless track switches', () => {
     expect(state.status).toBe('paused');
   });
 
+  it('A paused start pauses mpv before it loads the file, so nothing sounds', async () => {
+    await zone.command({ type: 'play', trackIds: ['l:1', 'l:2'], startIndex: 0, paused: true });
+
+    const sent = commands();
+    const pausedAt = sent.findIndex((c) => c[0] === 'set_property' && c[1] === 'pause' && c[2] === true);
+    expect(pausedAt).toBeGreaterThanOrEqual(0);
+    expect(pausedAt).toBeLessThan(sent.findIndex((c) => c[0] === 'loadfile'));
+    expect(sent).not.toContainEqual(['set_property', 'pause', false]);
+    expect(zone.state().status).toBe('paused');
+  });
+
+  it('A load with nothing to play tells clients it stopped', async () => {
+    await zone.command({ type: 'clear' });
+    const seen: string[] = [];
+    const off = zone.onChange((s) => seen.push(s.status));
+    await (zone as unknown as { startPlayback(): Promise<void> }).startPlayback();
+    off();
+    expect(seen).toEqual(['loading', 'stopped']);
+  });
+
   it('A pause that arrives during a load finishes it paused, so it never shows as a new start', async () => {
     const seen: string[] = [];
     let pausing: Promise<unknown> | undefined;

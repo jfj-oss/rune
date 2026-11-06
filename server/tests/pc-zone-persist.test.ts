@@ -169,6 +169,31 @@ describe('PcZone session persistence', () => {
     expect(load?.command).toContain('start=42');
   });
 
+  it('starts a restored queue over when it had finished, within 100 ms of the end', async () => {
+    const { zone: z1 } = await makeZone();
+    await z1.command({ type: 'play', trackIds: ['l:1', 'l:2'] });
+    await z1.close();
+    const row = savedSession(db)!;
+    db.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify({ ...row, positionMs: 199_950 }), 'player.pc.session');
+
+    const { zone: z2, fake } = await makeZone();
+    expect(z2.state().positionMs).toBe(0);
+    await z2.command({ type: 'resume' });
+    const load = fake.received.map((r) => r.command ?? []).find((c) => c[0] === 'loadfile');
+    expect(String(load?.[4] ?? '')).not.toContain('start=');
+  });
+
+  it('keeps the position of a restored queue that is not that close to the end', async () => {
+    const { zone: z1 } = await makeZone();
+    await z1.command({ type: 'play', trackIds: ['l:1', 'l:2'] });
+    await z1.close();
+    const row = savedSession(db)!;
+    db.prepare('UPDATE app_state SET value = ? WHERE key = ?').run(JSON.stringify({ ...row, positionMs: 199_800 }), 'player.pc.session');
+
+    const { zone: z2 } = await makeZone();
+    expect(z2.state().positionMs).toBe(199_800);
+  });
+
   it('drops tracks that no longer exist and fixes the index', async () => {
     const { zone: z1 } = await makeZone();
     await z1.command({
