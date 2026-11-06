@@ -229,12 +229,14 @@ export interface ArtistStats {
 
 /** Album title for matching across catalogues: no case, punctuation or edition suffix ("(Deluxe)", "- Remastered"). */
 export function discogTitleKey(title: string): string {
-  return title
+  const key = title
     .replace(/\s*[([][^)\]]*(?:deluxe|remaster|expanded|edition|anniversary|bonus)[^)\]]*[)\]]/gi, ' ')
     .replace(/\s+-\s+.*(?:deluxe|remaster|expanded|edition|anniversary).*$/i, ' ')
     .normalize('NFKD')
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '');
+  // a title of symbols only ("÷", "×") leaves nothing: every such album would count as the same one
+  return key || title.trim().toLowerCase();
 }
 
 /**

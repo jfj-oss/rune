@@ -200,4 +200,17 @@ describe('placeAlbums: the MusicBrainz list and the albums rune can open', () =>
   it('matches across punctuation', () => {
     expect(discogTitleKey('Open Season ‐ Lost Tracks')).toBe(discogTitleKey('Open Season - Lost Tracks'));
   });
+  it('tells titles of symbols alone apart', () => {
+    expect(discogTitleKey('÷')).toBe('÷');
+    expect(discogTitleKey(' ÷ ')).toBe('÷');
+    expect(discogTitleKey('×')).not.toBe(discogTitleKey('÷'));
+    expect(discogTitleKey('')).toBe('');
+  });
+  it('does not take one symbol album for another', () => {
+    const divide = { id: 'sp:1', title: '÷' };
+    const multiply = { id: 'sp:2', title: '×' };
+    const r = placeAlbums([g('m1', '÷')], [divide, multiply]);
+    expect(r.playable.get('m1')).toBe(divide);
+    expect(r.extras).toEqual([multiply]);
+  });
 });
