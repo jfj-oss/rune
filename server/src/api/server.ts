@@ -230,15 +230,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     lastState.set(state.zone, state);
   };
   // The Spotify app on this PC and mpv share the speakers: only one may sound (play/oneSpeaker.ts).
-  let pcSpotifyZoneId: Zone | null = null;
+  let pcSpotifyDevice: { id: Zone; name: string } | null = null;
   const speakers = createSpeakerGuard(
-    { pc: () => pc, spotify: () => (pcSpotifyZoneId ? spotify?.zones.get(pcSpotifyZoneId) : undefined) },
+    { pc: () => pc, spotify: () => (pcSpotifyDevice ? spotify?.zones.get(pcSpotifyDevice.id) : undefined) },
     (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
   );
   const notePcSpotify = (list: { id: Zone; name: string }[]): void => {
     const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();
     const match = list.find((z) => z.name.toLowerCase() === wanted) ?? (wanted ? list.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
-    pcSpotifyZoneId = match?.id ?? null;
+    pcSpotifyDevice = match ? { id: match.id, name: match.name } : null;
   };
   pc?.onChange((state) => speakers.changed('pc', state));
   pc?.onChange((state) => {
@@ -420,7 +420,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (watched?.zone === z) return z;
     watched?.off();
     const off = z.onChange((state) => {
-      if (id === pcSpotifyZoneId) speakers.changed('spotify', state);
+      if (id === pcSpotifyDevice?.id) speakers.changed('spotify', state);
       recordHistory(state);
       broadcast({ type: 'player', state: sanitize(state) });
     });
@@ -1069,10 +1069,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           spotifyDeviceId?: string;
           spotifyDeviceName?: string;
         }[] = [];
-        let spotifyZones: { id: Zone; name: string; kind: 'pc' | 'browser' | 'spotify' }[] = [];
-        if (spotify && (await spotify.auth.status()).connected) {
+        const spotifyConnected = !!spotify && (await spotify.auth.status()).connected;
+        if (spotifyConnected) {
           try {
-            spotifyZones = await spotify.zones.listZones();
+            const spotifyZones = await spotify.zones.listZones();
             notePcSpotify(spotifyZones);
             for (const z of spotifyZones) watchSpotifyZone(z.id);
             zones.push(...spotifyZones);
@@ -1082,13 +1082,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }
         if (pc) {
           const entry: (typeof zones)[number] = { id: 'pc', name: 'Linux PC speakers', kind: 'pc' };
-          // cfg.pcSpotifyDevice defaults to 'HORSE', the Spotify desktop app on
-          // this machine. Exact (case-insensitive) match first, then substring,
-          // because Spotify appends the OS/device type on some platforms.
-          const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();
-          const match =
-            spotifyZones.find((z) => z.name.toLowerCase() === wanted) ??
-            (wanted ? spotifyZones.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
+          // The device notePcSpotify matched (cfg.pcSpotifyDevice, default 'HORSE': the Spotify desktop app on this
+          // machine). After a failed list it is still the last one known: an answer without it means "the app went
+          // away" to the page, which then throws out a mixed queue.
+          const match = spotifyConnected ? pcSpotifyDevice : null;
           if (match) {
             const deviceId = match.id.startsWith('spotify:') ? match.id.slice('spotify:'.length) : match.id;
             entry.spotifyDeviceId = deviceId;
