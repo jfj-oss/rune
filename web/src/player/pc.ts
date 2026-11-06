@@ -98,7 +98,11 @@ export class PcBackend implements Backend {
     const pcOn = this.pc.state.queue.length > 0 && this.pc.state.status !== 'stopped';
     const spOn = !!this.sp && this.sp.state.status !== 'stopped';
     const spPlaying = this.sp?.state.status === 'playing' && this.pc.state.status !== 'playing';
-    const want: PcMode = spPlaying ? 'spotify' : pcOn ? 'pc' : spOn ? 'spotify' : this.mode;
+    const pcPlaying = this.pc.state.status === 'playing' && this.sp?.state.status !== 'playing';
+    // Whatever sounds wins; otherwise stay put: a paused Spotify song must not lose to mpv's old queue, or a handoff
+    // would move the wrong song.
+    const stay = this.mode === 'pc' ? pcOn : spOn;
+    const want: PcMode = spPlaying ? 'spotify' : pcPlaying ? 'pc' : stay ? this.mode : pcOn ? 'pc' : spOn ? 'spotify' : this.mode;
     if (want !== this.mode) this.mode = want;
     this.emit();
   }

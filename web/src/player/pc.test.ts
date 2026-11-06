@@ -220,6 +220,43 @@ describe('PcBackend', () => {
     expect(pc.currentMode).toBe('pc');
   });
 
+  it('a paused Spotify song stays the active one on refresh, whatever queue mpv still holds', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    const items = [S(1)];
+    await pc.send(play(items), items);
+    await zones['pc'].send({ type: 'play', trackIds: ['l:1'], paused: true }); // mpv's old queue, paused
+    await zones['spotify:dev'].send({ type: 'pause' });
+
+    await pc.refresh();
+    expect(pc.currentMode).toBe('spotify');
+    expect(pc.state.queue[pc.state.index]?.track.id).toBe('sp:1');
+  });
+
+  it('mpv playing still beats a paused Spotify song on refresh', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    const items = [S(1)];
+    await pc.send(play(items), items);
+    await zones['spotify:dev'].send({ type: 'pause' });
+    await zones['pc'].send({ type: 'play', trackIds: ['l:1'] });
+
+    await pc.refresh();
+    expect(pc.currentMode).toBe('pc');
+  });
+
+  it('leaves a player that has stopped for the one that still holds something', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    const items = [S(1)];
+    await pc.send(play(items), items);
+    await zones['pc'].send({ type: 'play', trackIds: ['l:1'], paused: true });
+    zones['spotify:dev'].setUnknown();
+
+    await pc.refresh();
+    expect(pc.currentMode).toBe('pc');
+  });
+
   it('a paused queue restored on mpv does not hide what Spotify is playing', async () => {
     const { pc, zones } = make();
     live = pc;
