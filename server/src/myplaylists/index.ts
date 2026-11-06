@@ -10,7 +10,7 @@
 // src/api/server.ts; the main session should call the exported
 // `listAllPlaylists(db)` / `getPlaylistDetail(db, id)` there instead of adding
 // duplicate routes (see the report for the exact two-line change).
-import { playlistImageUrl } from './image.js';
+import { clearPlaylistImage, playlistImageUrl } from './image.js';
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { PlaylistDetail, PlaylistSummary, PlaylistTrack, Track } from '@liner/shared';
@@ -821,6 +821,8 @@ function importBody(body: unknown): { content: string; name?: string; descriptio
 export interface MyPlaylistRouteOptions {
   /** Adds Spotify songs to a synced Spotify playlist on Spotify itself (and mirrors it locally). */
   addToSpotifyPlaylist?(playlistId: string, trackIds: string[]): Promise<void>;
+  /** Where chosen playlist pictures live, so a deleted playlist can take its picture with it. */
+  dataDir?: string;
 }
 
 export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db, opts: MyPlaylistRouteOptions = {}): void {
@@ -870,6 +872,7 @@ export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db, opts: MyP
   app.delete<{ Params: { id: string } }>('/playlists/:id', (request, reply) => {
     try {
       deletePlaylist(db, request.params.id);
+      if (opts.dataDir) clearPlaylistImage(db, opts.dataDir, request.params.id);
       return { deleted: true, id: request.params.id };
     } catch (err) {
       return sendInputError(reply, err);

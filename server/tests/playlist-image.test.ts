@@ -1,9 +1,10 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openDb } from '../src/db/index.js';
-import { createPlaylist, getPlaylistDetail, listAllPlaylists } from '../src/myplaylists/index.js';
+import { createPlaylist, getPlaylistDetail, listAllPlaylists, registerMyPlaylistRoutes } from '../src/myplaylists/index.js';
 import { clearPlaylistImage, isSupportedImage, playlistImageFile, savePlaylistImage } from '../src/myplaylists/image.js';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
@@ -39,5 +40,33 @@ describe('a picture chosen for a playlist', () => {
     expect(isSupportedImage(m3u)).toBe(false);
     expect(await savePlaylistImage(db, dataDir(), p.id, m3u)).toBe(false);
     expect(getPlaylistDetail(db, p.id)?.imageUrl).toBeUndefined();
+  });
+  it('goes with the playlist when a rune playlist is deleted', async () => {
+    const db = openDb(':memory:');
+    const dir = dataDir();
+    const p = createPlaylist(db, { name: 'Mine' });
+    await savePlaylistImage(db, dir, p.id, PNG, 9);
+    const app = Fastify();
+    registerMyPlaylistRoutes(app, db, { dataDir: dir });
+
+    const res = await app.inject({ method: 'DELETE', url: `/playlists/${encodeURIComponent(p.id)}` });
+    expect(res.statusCode).toBe(200);
+    expect(existsSync(playlistImageFile(dir, p.id))).toBe(false);
+    expect(db.prepare('SELECT 1 FROM playlist_images WHERE playlist_id = ?').get(p.id)).toBeUndefined();
+    await app.close();
+  });
+  it('stays when the delete is refused', async () => {
+    const db = openDb(':memory:');
+    const dir = dataDir();
+    const p = createPlaylist(db, { name: 'Mine' });
+    await savePlaylistImage(db, dir, p.id, PNG, 9);
+    db.prepare("UPDATE playlists SET source = 'spotify' WHERE id = ?").run(p.id);
+    const app = Fastify();
+    registerMyPlaylistRoutes(app, db, { dataDir: dir });
+
+    const res = await app.inject({ method: 'DELETE', url: `/playlists/${encodeURIComponent(p.id)}` });
+    expect(res.statusCode).toBe(409);
+    expect(existsSync(playlistImageFile(dir, p.id))).toBe(true);
+    await app.close();
   });
 });

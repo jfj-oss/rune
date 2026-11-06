@@ -881,6 +881,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       registerRadioRoutes(r, radio);
       registerRadioStationRoutes(r, iradio);
       registerMyPlaylistRoutes(r, db, {
+        dataDir: cfg.dataDir,
         addToSpotifyPlaylist: async (playlistId, trackIds) => {
           if (!spotify || !(await spotify.auth.status()).connected) {
             throw new PlaylistConflictError('Spotify is not connected');
