@@ -83,6 +83,8 @@ export interface AppOptions {
   backups?: boolean;
   /** Inject the flatpak/qdbus runner behind the on-demand Spotify start route (tests). */
   pcSpotify?: PcSpotifyOptions;
+  /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
+  artistWaitMs?: number;
   webDist?: string;
 }
 
@@ -153,6 +155,22 @@ export function parseHotkeys(v: unknown): Hotkeys | null {
     out[k] = { id: e.id, name: e.name };
   }
   return { albumKey, playlistKeys: out };
+}
+
+/** How long a linked local artist page waits for Spotify before it answers with what rune has. */
+const ARTIST_WAIT_MS = 2_000;
+/** A failed Spotify artist fetch is not tried again for a while: each page would wait on it for nothing. */
+const ARTIST_FAILURE_MEMORY_MS = 60_000;
+const ARTIST_FAILURES_KEPT = 500;
+
+/** The promise's value, or null if it takes longer than `ms`. Its later failure is not lost: the race has handled it. */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+    timer.unref();
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<BuiltApp> {
@@ -231,6 +249,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   };
   // The Spotify app on this PC and mpv share the speakers: only one may sound (play/oneSpeaker.ts).
   let pcSpotifyDevice: { id: Zone; name: string } | null = null;
+  /** Linked Spotify artist id -> until when not to ask for it again. */
+  const artistFailedUntil = new Map<string, number>();
   const speakers = createSpeakerGuard(
     { pc: () => pc, spotify: () => (pcSpotifyDevice ? spotify?.zones.get(pcSpotifyDevice.id) : undefined) },
     {
@@ -965,11 +985,26 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         // Spotify artists (search results, playlist artists) and local artists linked to one: add the Spotify
         // discography. A local artist only uses it under the same name, in case the stored link is wrong.
         const linked = spotify && a ? (db.prepare('SELECT spotify_id AS id FROM artists WHERE id = ?').get(req.params.id) as { id: string | null } | undefined)?.id : null;
-        const remote = spotify?.artistPage(linked ? `ar:sp:${linked}` : req.params.id);
-        if (remote) {
-          try {
-            if ((await spotify!.auth.status()).connected) {
-              const sp = await remote;
+        // A linked local artist has a page without Spotify, so Spotify may add to it but never hold it up.
+        const hasLocalPage = !!(linked && a);
+        if (hasLocalPage) {
+          const level = spotify!.api.budgetLevel();
+          if (level === 'low' || level === 'out' || (artistFailedUntil.get(linked!) ?? 0) > Date.now()) return a;
+        }
+        try {
+          if (spotify && (await spotify.auth.status()).connected) {
+            const remote = spotify.artistPage(linked ? `ar:sp:${linked}` : req.params.id);
+            if (remote) {
+              if (hasLocalPage) {
+                // Even after the page has been answered: a late failure still spares the next page the wait.
+                remote.catch(() => {
+                  if (artistFailedUntil.size >= ARTIST_FAILURES_KEPT) artistFailedUntil.clear();
+                  artistFailedUntil.set(linked!, Date.now() + ARTIST_FAILURE_MEMORY_MS);
+                });
+              }
+              // Past the wait the fetch keeps going and fills the cache, so the next visit has the full page.
+              const sp = hasLocalPage ? await within(remote, opts.artistWaitMs ?? ARTIST_WAIT_MS) : await remote;
+              if (!sp) return a;
               if (linked && a && normArtist(sp.name) !== normArtist(a.name)) return a;
               const have = new Set([...(a?.albums ?? []), ...(a?.appearsOn ?? [])].map((x) => x.id));
               return {
@@ -982,9 +1017,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
                 ...(a?.musicbrainzArtistId ? { musicbrainzArtistId: a.musicbrainzArtistId } : {}),
               };
             }
-          } catch (err) {
-            app.log.warn({ err, artistId: req.params.id }, 'spotify artist fetch failed');
           }
+        } catch (err) {
+          app.log.warn({ err, artistId: req.params.id }, 'spotify artist fetch failed');
         }
         return a ?? reply.code(404).send({ error: 'not found' });
       });
