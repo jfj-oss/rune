@@ -1170,7 +1170,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const z = await zoneFor(req.params.zone);
         if (!z) return reply.code(404).send({ error: 'unknown zone' });
         try {
-          if (req.params.zone.startsWith('spotify:')) app.log.warn({ zone: req.params.zone, cmd: parsed.command.type }, 'spotify command');
+          // Who sent it: music that starts by itself has to be traceable to a tab, phone or the voice assistant.
+          const ua = String(req.headers['user-agent'] ?? '');
+          const from = /iPhone|iPad/.test(ua) ? 'iPhone' : /Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux browser' : ua.slice(0, 24) || 'unknown';
+          if (req.params.zone.startsWith('spotify:') || ['play', 'resume', 'next', 'jump'].includes(parsed.command.type)) {
+            app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, from }, 'player command');
+          }
           return sanitize(await z.command(parsed.command));
         } catch (e) {
           if (e instanceof HttpError && e.status === 429) {
