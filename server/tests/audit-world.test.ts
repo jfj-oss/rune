@@ -206,7 +206,7 @@ describe('world', () => {
     }
   });
 
-  it('KNOWN BUG W8 cost of one volume change (a voice duck is two)', async () => {
+  it('W8 a volume change costs one PUT and no reads (a voice duck is two PUTs)', async () => {
     const { w, b, items, zone } = stack('normal');
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
     await run(20_000);
@@ -215,7 +215,10 @@ describe('world', () => {
     await zone.command({ type: 'volume', volume: 20 });
     await run(5_000);
     console.log(`\n=== W8 one volume change: PUT 1, GET /me/player ${w.polls.length - before}, GET queue ${q.mock.calls.length}`);
-    expect(w.polls.length - before).toBeGreaterThanOrEqual(2);
+    expect(w.polls.length - before).toBe(0);
+    expect(q).not.toHaveBeenCalled();
+    expect(w.log.filter((l) => l.includes('PUT volume 20'))).toHaveLength(1);
+    expect(zone.state().volume).toBe(20);
     b.dispose(); await zone.close();
   });
 });

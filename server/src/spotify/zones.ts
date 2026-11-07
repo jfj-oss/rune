@@ -527,8 +527,9 @@ export class SpotifyConnectZone implements PlaybackZone {
   }
 
   command(cmd: PlayerCommand): Promise<PlayerState> {
-    // Volume stays out of the queue: a slider drag coalesces on its own and must not wait behind a play.
-    return cmd.type === 'volume' ? this.dispatch(cmd) : this.serialize(() => this.dispatch(cmd));
+    // Volume stays out of the queue: a slider drag coalesces on its own and must not wait behind a play. It reads
+    // nothing back either: the level is already shown, and a voice duck (two changes) must not cost four polls.
+    return cmd.type === 'volume' ? this.runCommand(cmd) : this.serialize(() => this.dispatch(cmd));
   }
 
   /** One command at a time, in the order they came: a pause sent just before a play must not land after it. */
