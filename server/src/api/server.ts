@@ -309,7 +309,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       })
     : undefined;
   spotify?.registerRoutes(app);
-  /** One live subscription per zone id; the zone object can be replaced (Connect ↔ go-librespot). */
+  /** One live subscription per Connect zone id. */
   const spotifyListeners = new Map<Zone, { zone: PlaybackZone; off: () => void }>();
   /**
    * Background Spotify work (syncs, linking, discovery warm-ups) is deferred when the

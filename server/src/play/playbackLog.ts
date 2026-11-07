@@ -12,7 +12,7 @@ const MAX_BYTES = 512 * 1024;
 export const PLAYBACK_LOG_FILE = 'playback-log.jsonl';
 
 const MPRIS_ARGS = ['org.mpris.MediaPlayer2.spotify', '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player'];
-/** Stream properties that name the app; the flatpak and go-librespot fill in different ones. */
+/** Stream properties that name the app (the flatpak fills in some of them). */
 const STREAM_APP_KEYS = ['application.name', 'application.process.binary', 'application.id', 'pipewire.access.portal.app_id'];
 
 /** Run a read-only command and give its stdout, or null if that failed. Swapped for a fake in tests. */
@@ -114,7 +114,7 @@ export function parseStreams(inputsText: string | null, sinksText: string | null
   const sinkList = Array.isArray(sinks) ? sinks.filter(isRecord) : [];
   return inputs.filter(isRecord).flatMap((input) => {
     const props = isRecord(input.properties) ? input.properties : {};
-    if (!STREAM_APP_KEYS.some((k) => /spotify|librespot/i.test(String(props[k] ?? '')))) return [];
+    if (!STREAM_APP_KEYS.some((k) => /spotify/i.test(String(props[k] ?? '')))) return [];
     const sink = sinkList.find((s) => s.index === input.sink);
     return [{
       sink: typeof sink?.name === 'string' ? sink.name : null,

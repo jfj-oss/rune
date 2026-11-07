@@ -135,8 +135,6 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     blockedUntil: () => api.blockedUntil(),
     // Background polls slow down as the rolling daily budget fills up.
     budgetLevel: () => api.budgetLevel(),
-    // The PC's own speaker (go-librespot) is driven locally, costing no Web API requests.
-    librespotUrl: cfg.librespotUrl,
     ...opts,
     localPlayback,
   });

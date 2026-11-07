@@ -8,7 +8,6 @@ import {
   registerPcSpotifyRoutes,
   type CommandResult,
   type CommandRunner,
-  type LibrespotProbe,
   type PcSpotify,
 } from '../src/play/pcSpotify.js';
 
@@ -63,8 +62,6 @@ function service(
   overrides: {
     now?: () => number;
     setTimeout?: (fn: () => void, ms: number) => unknown;
-    librespotUrl?: string;
-    librespotProbe?: LibrespotProbe;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'liner-pc-spotify-'));
@@ -73,11 +70,10 @@ function service(
   let t = 1_000_000;
   const scheduled: { fn: () => void; ms: number }[] = [];
   const pcSpotify = createPcSpotify(
-    { dataDir: dir, librespotUrl: overrides.librespotUrl },
+    { dataDir: dir },
     {
       runner,
       now: overrides.now ?? (() => t),
-      librespotProbe: overrides.librespotProbe,
       setTimeout:
         overrides.setTimeout ??
         ((fn, ms) => {
@@ -98,31 +94,6 @@ async function routeApp(pcSpotify: PcSpotify): Promise<FastifyInstance> {
 }
 
 describe('createPcSpotify', () => {
-  it('does not launch the flatpak when go-librespot already answers', async () => {
-    const probes: string[] = [];
-    const { runner, pcSpotify } = service({
-      librespotUrl: 'http://librespot.test/',
-      librespotProbe: async (url) => {
-        probes.push(url);
-        return { status: 200 };
-      },
-    });
-
-    expect(await pcSpotify.start()).toEqual({ started: false, running: true });
-    expect(probes).toEqual(['http://librespot.test/status']);
-    expect(runner.launches).toEqual([]);
-    expect(runner.qdbusCalls('loadScript')).toEqual([]);
-  });
-
-  it('still launches the flatpak when go-librespot is not up', async () => {
-    const { runner, pcSpotify } = service({
-      librespotUrl: 'http://librespot.test',
-      librespotProbe: async () => ({ status: 204 }),
-    });
-    expect(await pcSpotify.start()).toEqual({ started: true, running: false });
-    expect(runner.launches).toEqual([['flatpak', 'run', '--socket=x11', '--nosocket=wayland', 'com.spotify.Client', '--ozone-platform=x11']]);
-  });
-
   it('reports running from flatpak ps without starting anything', async () => {
     const { runner, pcSpotify } = service();
     runner.running = true;
