@@ -549,6 +549,36 @@ describe('Spotify Connect zones', () => {
     await zone.close();
   });
 
+  it('a zone nobody views makes no background reads; a command still confirms, and viewing it reads it at once', async () => {
+    vi.useFakeTimers();
+    const api = new FakeZoneApi();
+    api.playback = playbackState(sampleTrack('t1'), { progress_ms: 0 });
+    api.playback.item!.duration_ms = 600_000;
+    let viewed = false;
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone', { viewed: (z) => viewed && z === 'spotify:dev1' });
+    zone.onChange(() => {});
+    zone.wake();
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(api.currentPlaybackCalls).toBe(0);
+
+    // A command is read back (the fast follow-ups), then the zone goes quiet again.
+    await zone.command({ type: 'pause' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    const afterCommand = api.currentPlaybackCalls;
+    expect(afterCommand).toBeGreaterThanOrEqual(2);
+    await vi.advanceTimersByTimeAsync(3_600_000);
+    expect(api.currentPlaybackCalls).toBe(afterCommand);
+
+    // Someone views it: read now, and on the normal schedule from then on.
+    viewed = true;
+    zone.wake();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.currentPlaybackCalls).toBe(afterCommand + 1);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(api.currentPlaybackCalls).toBeGreaterThan(afterCommand + 1);
+    await zone.close();
+  });
+
   it('does not poll Spotify while the quota circuit breaker is open, then resumes', async () => {
     vi.useFakeTimers();
     const api = new FakeZoneApi();

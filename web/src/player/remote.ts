@@ -47,6 +47,36 @@ class Socket {
     this.send({ type: 'presence', visible });
   }
 
+  /** Zones this tab shows or drives, counted: the server makes no background Spotify reads for a zone nobody views. */
+  private viewed = new Map<string, number>();
+  private viewingQueued = false;
+  /** This tab views `zone` until the returned function is called. */
+  view(zone: string): () => void {
+    this.viewed.set(zone, (this.viewed.get(zone) ?? 0) + 1);
+    this.queueViewing();
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const n = (this.viewed.get(zone) ?? 1) - 1;
+      if (n > 0) this.viewed.set(zone, n);
+      else this.viewed.delete(zone);
+      this.queueViewing();
+    };
+  }
+  /** One message for a burst of changes (a zone switch releases one zone and views another). */
+  private queueViewing() {
+    if (this.viewingQueued) return;
+    this.viewingQueued = true;
+    queueMicrotask(() => {
+      this.viewingQueued = false;
+      this.sendViewing();
+    });
+  }
+  sendViewing() {
+    this.send({ type: 'viewing', zones: [...this.viewed.keys()] });
+  }
+
   /** Last full queue per zone and its fingerprint, to fill in slim player events. */
   private queues = new Map<string, { rev: string; queue: PlayerState['queue'] }>();
   private fetching = new Set<string>();
@@ -84,6 +114,7 @@ class Socket {
       this.retry = 0;
       this.connected = true;
       this.sendPresence();
+      this.sendViewing();
       if (this.everOpen) for (const f of this.reconnectFns) f();
       this.everOpen = true;
     };
@@ -124,9 +155,11 @@ export class RemoteBackend implements Backend {
   private subs = new Set<(s: PlayerState) => void>();
   private off: () => void;
   private offReconnect: () => void;
+  private unview: () => void;
 
   constructor(readonly zone: string) {
     this.state = emptyState(zone);
+    this.unview = socket.view(zone);
     this.off = socket.on((e) => {
       if (e.type === 'player' && e.state.zone === this.zone) this.apply(e.state);
     });
@@ -146,7 +179,7 @@ export class RemoteBackend implements Backend {
   async refresh() {
     try { this.apply(await api.playerState(this.zone)); } catch { /* server offline; keep last */ }
   }
-  dispose() { this.off(); this.offReconnect(); this.subs.clear(); }
+  dispose() { this.off(); this.offReconnect(); this.unview(); this.subs.clear(); }
 
   async send(cmd: ExtCommand, _items?: PlayItem[]): Promise<void> {
     const s = this.state;
@@ -172,7 +205,12 @@ export function zoneTransport(zone: string): ZoneTransport {
   return {
     send: (cmd) => api.playerSend(zone, cmd),
     get: () => api.playerState(zone),
-    subscribe: (fn) => socket.on((e) => { if (e.type === 'player' && e.state.zone === zone) fn(e.state); }),
+    subscribe: (fn) => {
+      // A tab driving the zone (the pc zone's Spotify app in a mixed queue) needs its song ends seen.
+      const unview = socket.view(zone);
+      const off = socket.on((e) => { if (e.type === 'player' && e.state.zone === zone) fn(e.state); });
+      return () => { off(); unview(); };
+    },
     connected: () => socket.connected,
   };
 }

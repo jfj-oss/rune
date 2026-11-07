@@ -11,7 +11,9 @@ class FakeWS {
   onmessage: ((m: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  sent: string[] = [];
   constructor(public url: string) { FakeWS.last = this; }
+  send(s: string) { this.sent.push(s); }
   close() {}
   push(e: unknown) { this.onmessage?.({ data: JSON.stringify(e) }); }
 }
@@ -39,4 +41,31 @@ describe('live socket: slim player events', () => {
     expect(got.at(-1)).toEqual({ n: 5, pos: 900 });
     expect(api.playerState).toHaveBeenCalledTimes(1);
   });
+
+describe('live socket: the zones this tab views', () => {
+  it('sends them once per burst of changes, counts repeats, and again on reconnect', async () => {
+    const { socket, zoneTransport } = await import('./remote');
+    socket.on(() => undefined);
+    const ws = FakeWS.last;
+    const viewing = () => ws.sent.map((m) => JSON.parse(m) as { type: string; zones?: string[] }).filter((m) => m.type === 'viewing').map((m) => m.zones);
+    const offA = socket.view('spotify:a');
+    const offA2 = socket.view('spotify:a');
+    const offB = zoneTransport('spotify:b').subscribe(() => undefined);
+    await Promise.resolve();
+    expect(viewing()).toEqual([['spotify:a', 'spotify:b']]);
+    offA(); offA();                                   // a second call is a no-op
+    await Promise.resolve();
+    expect(viewing().at(-1)).toEqual(['spotify:a', 'spotify:b']); // still viewed once
+    offA2(); offB();
+    await Promise.resolve();
+    expect(viewing().at(-1)).toEqual([]);
+    expect(viewing()).toHaveLength(3);
+    const keep = socket.view('pc');
+    await Promise.resolve();
+    ws.sent.length = 0;
+    ws.onopen?.();
+    expect(viewing()).toEqual([['pc']]);
+    keep();
+  });
+});
 });

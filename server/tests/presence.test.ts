@@ -40,4 +40,23 @@ describe('client presence', () => {
     expect(presence.setVisible(client, true)).toBe(false); // already visible: no extra wake
     expect(presence.hasVisible()).toBe(true);
   });
+
+  it('views: a client that never says views every zone; one that says views only those, while visible', () => {
+    const presence = createClientPresence();
+    const old = {};
+    const tab = {};
+    presence.add(old);
+    expect(presence.viewing('spotify:a')).toBe(true);
+    presence.remove(old);
+    presence.add(tab);
+    expect(presence.setViewing(tab, ['pc', 'spotify:a'])).toEqual([]); // it viewed everything before
+    expect(presence.viewing('spotify:a')).toBe(true);
+    expect(presence.viewing('spotify:b')).toBe(false);
+    expect(presence.setViewing(tab, ['spotify:b'])).toEqual(['spotify:b']); // newly viewed: wake it
+    expect(presence.viewing('spotify:a')).toBe(false);
+    presence.setVisible(tab, false);
+    expect(presence.viewing('spotify:b')).toBe(false);
+    presence.remove(tab);
+    expect(presence.viewing('spotify:b')).toBe(false);
+  });
 });

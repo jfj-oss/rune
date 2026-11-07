@@ -188,6 +188,8 @@ export interface SdkPlaybackTrack {
 export type ClientEvent =
   /** A tab says whether it is actually on screen. Hidden tabs do not count as watching. */
   | { type: 'presence'; visible: boolean }
+  /** The zones a tab shows or drives. Spotify Connect zones nobody views make no background reads. */
+  | { type: 'viewing'; zones: string[] }
   /** The browser's Web Playback SDK device reports its own state (local calls, no Web API quota). */
   | {
       type: 'sdk-state';

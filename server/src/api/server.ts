@@ -288,6 +288,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         // Connect zones poll just after each song ends while somebody is watching;
         // with no live socket they poll slower still and skip the queue.
         hasClients: () => presence.hasVisible(),
+        // Only a zone some visible tab shows or drives is polled in the background, and the PC's own Spotify app
+        // always (the speaker guard and history need it). Every other Connect device costs no reads until viewed.
+        viewed: (zone) => zone === pcSpotifyDevice?.id || presence.viewing(zone),
         // Budget-level changes get one warn line each.
         logger: app.log,
         // One line per hour of Spotify traffic: enough to see a runaway poller.
@@ -769,11 +772,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             return; // garbage
           }
           if (!msg || typeof msg !== 'object') return;
-          const m = msg as { type?: unknown; visible?: unknown };
+          const m = msg as { type?: unknown; visible?: unknown; zones?: unknown };
           if (m.type === 'presence') {
             if (typeof m.visible !== 'boolean') return;
             // Hidden → visible: the zones poll again now.
             if (presence.setVisible(socket, m.visible)) spotify?.zones.wake();
+          } else if (m.type === 'viewing') {
+            if (!Array.isArray(m.zones) || !m.zones.every((z) => typeof z === 'string' && z.length <= 200)) return;
+            // A zone a tab starts showing is read now, not at its next (possibly far-off) poll.
+            for (const z of presence.setViewing(socket, m.zones as string[])) spotify?.zones.get(z)?.wake();
           } else if (m.type === 'sdk-state') {
             spotify?.reportLocalPlayback(msg);
           }

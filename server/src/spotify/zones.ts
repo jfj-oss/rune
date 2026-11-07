@@ -41,6 +41,11 @@ export interface SpotifyZoneApi {
 export interface ConnectZoneOptions {
   /** Whether at least one websocket client is visible. Undefined = always watched. */
   hasClients?: () => boolean;
+  /**
+   * Whether anyone views this zone (a visible tab shows or drives it). An unviewed zone makes no background reads: only
+   * a command, or wake() once someone views it, reads it. Undefined = always viewed.
+   */
+  viewed?: (zone: Zone) => boolean;
   /** Rolling daily budget level; background polls slow down as it fills (default normal). */
   budgetLevel?: () => SpotifyBudgetLevel;
   /** Songs rune already has (title, artists, album, cover) by 'sp:' id: shown at once, no Spotify lookup. */
@@ -469,6 +474,7 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   private readonly api: SpotifyZoneApi;
   private readonly hasClients: (() => boolean) | undefined;
+  private readonly viewed: ((zone: Zone) => boolean) | undefined;
   private readonly budgetLevel: (() => SpotifyBudgetLevel) | undefined;
   private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
   private readonly blockedUntil: (() => number | null) | undefined;
@@ -518,6 +524,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.name = name;
     this.zone = `spotify:${deviceId}`;
     this.hasClients = opts.hasClients;
+    this.viewed = opts.viewed;
     this.budgetLevel = opts.budgetLevel;
     this.knownTracks = opts.knownTracks;
     this.blockedUntil = opts.blockedUntil;
@@ -997,12 +1004,18 @@ export class SpotifyConnectZone implements PlaybackZone {
     if (!this.inFlight) void this.loop();
   }
 
+  private isViewed(): boolean {
+    return this.viewed ? this.viewed(this.zone) : true;
+  }
+
   private clientsWatching(): boolean {
     return this.hasClients ? this.hasClients() : true;
   }
 
   private async loop(): Promise<void> {
     if (this.closed || this.listeners.size === 0) return;
+    // Nobody views this zone and no command is owed a read: no background polls until wake().
+    if (this.fastPolls === 0 && !this.isViewed()) return;
     // Spotify is out of quota: park the loop until the breaker expires (+1 s slack),
     // without touching the network at all.
     const blocked = this.blockedUntil?.() ?? null;
