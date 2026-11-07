@@ -1,0 +1,241 @@
+// Audit repros. A test named KNOWN BUG still asserts the buggy behaviour (a pass means the bug is there); the rest assert the fix.
+import type { PlayerState } from '@liner/shared';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import type { ExtCommand, PlayItem } from '../lib/types';
+import { HybridEngine } from './hybrid';
+import { LocalBackend } from './local';
+import { PcBackend } from './pc';
+import { FakeZone, mkItem, mkTrack } from './testkit';
+import { emptyState, type Backend } from './types';
+import { ZoneEngine, type ZoneTransport } from './zoneEngine';
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+function setup(opts = {}) {
+  const zone = new FakeZone('spotify:dev');
+  let now = 10_000;
+  const eng = new ZoneEngine(zone, { now: () => now, pollMs: 60_000, startTimeoutMs: 5000, ...opts });
+  const ended = vi.fn(), err = vi.fn(), sync = vi.fn();
+  eng.onEnded(ended); eng.onError(err); eng.onSync(sync);
+  return { zone, eng, ended, err, sync, tick: (ms: number) => { now += ms; } };
+}
+
+describe('Z: ZoneEngine', () => {
+  it('Z1 a pause in the Spotify app, seen late by a sparse poll, is a pause: it keeps its position and no next song starts', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();   // 200 s song
+    zone.progress(60_000);                  // last poll: 60 s in
+    tick(30_000);                           // user pauses in the Spotify app at 90 s; no poll sees it
+    zone.state.positionMs = 90_000;
+    tick(105_000);                          // the poll aimed at the song's end, t=195 s
+    zone.externalPause();                   // Spotify honestly says: paused at 90 s, NOT rewound
+    expect(zone.state.positionMs).toBe(90_000);
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(90_000, false);
+    expect(eng.position()).toBe(90_000);
+  });
+
+  it('Z2 seek forward then back: the end seen on the way does not count, so an outside pause later is only a pause', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(10_000);
+    eng.seek(198_000); await flush();   // peek at the end
+    eng.seek(20_000); await flush();    // come back
+    zone.progress(21_000);
+    tick(1000);
+    zone.externalPause();               // speaker guard / voice "pause" / phone: mid-song at 21 s
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(21_000, false);
+  });
+
+  it('Z3 a pause in the last 5 s from outside the tab (voice "pause", guard) does not start the next song', async () => {
+    const { zone, eng, ended, sync } = setup();
+    eng.load(mkTrack('l:1', 'local'), 0, true); await flush();
+    zone.progress(196_000);
+    zone.externalPause();
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(196_000, false);
+  });
+
+  it('Z3b the song ending after such a pause is still seen, once it was resumed: the pause did not stick', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(196_000);
+    zone.externalPause();
+    zone.progress(196_000);              // resumed from the Spotify app
+    tick(5000);
+    zone.finishPaused();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('Z4 Pause pressed while the play is still on its way is dropped: the song starts anyway', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { ...zone, send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => false };
+    const eng = new ZoneEngine(slow, { pollMs: 60_000 });
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    eng.pause();                         // user changes their mind
+    release(); await flush(); await flush();
+    expect(zone.log.filter((l) => l === 'pause')).toHaveLength(0);
+    expect(zone.state.status).toBe('playing');
+  });
+
+  it('Z5 after the "overdue" stop, Play talks to a dead engine: no subscription, so the end of that song is never seen', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(100_000);
+    tick(400_000);                       // slept past the end
+    zone.finishPaused();                 // overdue: tab stops, shows the end, paused
+    expect(ended).not.toHaveBeenCalled();
+    eng.play(); await flush();           // the user presses Play on the rune page
+    expect(zone.log.at(-1)).toBe('resume');   // resumes the OLD song, does not move to the next
+    zone.progress(1000);                 // websocket event: nobody listens any more
+    tick(250_000);
+    zone.finishPaused();
+    zone.finish();
+    expect(ended).not.toHaveBeenCalled();     // queue silently dead
+  });
+
+  it('Z6 start timeout gives up without silencing the zone: the song starts later with the page showing paused', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => true };
+    let now = 0;
+    const eng = new ZoneEngine(slow, { now: () => now, pollMs: 60_000, startTimeoutMs: 12_000 });
+    const err = vi.fn(); eng.onError(err);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    now = 13_000;
+    eng.onState({ ...emptyState('spotify:dev'), updatedAt: 5 });    // any zone event after 12 s
+    expect(err).toHaveBeenCalledTimes(1);                          // page: "did not start", paused
+    release(); await flush(); await flush();
+    expect(zone.state.status).toBe('playing');                     // ...and now it sounds
+    expect(zone.log).not.toContain('pause');
+    eng.pause(); await flush();
+    expect(zone.log).not.toContain('pause');                       // Pause on the page cannot reach it
+  });
+
+  it('Z7 a tab that wakes within 60 s of the end sees another client\'s new song and overwrites it', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(150_000);
+    tick(70_000);    // song ended 20 s ago; the phone has started something else
+    zone.state = { ...zone.state, queue: [{ queueId: 'x', track: mkTrack('sp:phone', 'spotify'), album: { id: 'a', title: 'b' } }], index: 0, positionMs: 3000, status: 'playing', updatedAt: Date.now() + 1 };
+    eng.onState(zone.state);
+    expect(ended).toHaveBeenCalledTimes(1);  // tab now sends its next track over the phone's choice
+  });
+});
+
+class FakeRemote implements Backend {
+  state: PlayerState;
+  sent: string[] = [];
+  private subs = new Set<(s: PlayerState) => void>();
+  constructor(readonly zone: string, public z: FakeZone) {
+    this.state = z.state;
+    z.subscribe((s) => { this.state = s; for (const f of this.subs) f(s); });
+  }
+  subscribe(fn: (s: PlayerState) => void) { this.subs.add(fn); return () => { this.subs.delete(fn); }; }
+  async send(cmd: ExtCommand, _items?: PlayItem[]) { this.sent.push(cmd.type); if (cmd.type !== 'clear' && cmd.type !== 'move') await this.z.send(cmd); }
+  async refresh() { this.state = this.z.state; }
+  dispose() {}
+}
+function make(pre?: (z: { pc: FakeZone; sp: FakeZone }) => void) {
+  const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
+  pre?.({ pc: pcz, sp: spz });
+  const zones = { pc: pcz, 'spotify:dev': spz };
+  const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], notice: vi.fn() }, { id: 'dev', name: 'HORSE' });
+  return { pc, pcz, spz };
+}
+const L = (n: number) => mkItem(mkTrack(`l:${n}`, 'local'));
+const S = (n: number) => mkItem(mkTrack(`sp:${n}`, 'spotify'));
+const play = (items: PlayItem[], extra: object = {}): ExtCommand => ({ type: 'play', trackIds: items.map((i) => i.track.id), startIndex: 0, ...extra });
+let live: PcBackend | null = null;
+afterEach(() => { live?.dispose(); live = null; });
+
+describe('P: PcBackend', () => {
+  it('KNOWN BUG P1 one /zones answer without the Spotify device throws the mixed queue away and stops the music', async () => {
+    const { pc, spz } = make(); live = pc;
+    await pc.send(play([S(1), L(2), S(3)]), [S(1), L(2), S(3)]); await flush();
+    spz.progress(5000);
+    expect(pc.state.queue).toHaveLength(3);
+    pc.setDevice(null); await flush();                    // one flap
+    pc.setDevice({ id: 'dev', name: 'HORSE' }); await flush(); // back a moment later
+    expect(spz.log).toContain('pause');
+    expect(pc.currentMode).toBe('pc');
+    expect(pc.state.queue.length).toBeLessThan(3);        // queue gone
+  });
+
+  it('KNOWN BUG P2 a flap in Spotify mode pauses the song on the speakers', async () => {
+    const { pc, spz } = make(); live = pc;
+    await pc.send(play([S(1), S(2)]), [S(1), S(2)]); await flush();
+    expect(pc.currentMode).toBe('spotify');
+    pc.setDevice(null); await flush();
+    expect(spz.log).toContain('pause');
+  });
+
+  it('KNOWN BUG P3 a tab in mixed mode never follows another client: stale now-playing, and its Play overwrites them', async () => {
+    const { pc, spz } = make(); live = pc;
+    await pc.send(play([S(1), L(2)]), [S(1), L(2)]); await flush();
+    spz.progress(30_000);
+    await spz.send({ type: 'play', trackIds: ['sp:other'], startIndex: 0 }); await flush();  // phone starts another song
+    expect(pc.currentMode).toBe('mixed');
+    expect(pc.state.queue[pc.state.index]?.track.id).toBe('sp:1');   // page still shows the old song
+    expect(pc.state.status).toBe('paused');                          // while sp:other is playing
+    expect(spz.state.status).toBe('playing');
+    await pc.send({ type: 'resume' }); await flush();
+    expect(spz.log.at(-1)).toContain('play:sp:1');                   // Play takes the speakers back
+  });
+
+  it('KNOWN BUG P4 fresh page: a paused Spotify song loses to mpv\'s old restored queue (refresh() is never called at start)', async () => {
+    const { pc, pcz, spz } = make(({ pc: p, sp }) => {
+      p.state = { ...emptyState('pc'), status: 'paused', queue: [{ queueId: 'o', track: mkTrack('l:old', 'local'), album: { id: 'a', title: 'x' } }], index: 0 };
+      sp.state = { ...emptyState('spotify:dev'), status: 'paused', queue: [{ queueId: 'n', track: mkTrack('sp:now', 'spotify'), album: { id: 'a', title: 'x' } }], index: 0 };
+    }); live = pc;
+    await flush();
+    expect(pc.currentMode).toBe('pc');
+    expect(pc.state.queue[0]?.track.id).toBe('l:old');
+    await pc.send({ type: 'resume' }); await flush();
+    expect(pcz.log).toContain('resume');    // space bar starts yesterday's mpv song
+    expect(spz.log).not.toContain('resume');
+  });
+
+  it('P5 starting Spotify while the voice assistant has mpv ducked copies the ducked level to Spotify for good', async () => {
+    const { pc, pcz, spz } = make(); live = pc;
+    await pc.send(play([L(1)]), [L(1)]); await flush();
+    await pcz.send({ type: 'volume', volume: 100 });
+    await pcz.send({ type: 'volume', volume: 20 });   // voice: wake word heard (also on a false wake)
+    await flush();
+    await spz.send({ type: 'volume', volume: 100 });
+    await pc.send(play([S(1)]), [S(1)]); await flush();
+    expect(spz.state.volume).toBe(20);                // Spotify at 20
+    await pcz.send({ type: 'volume', volume: 100 });  // voice restores the zone it ducked: pc only
+    expect(spz.state.volume).toBe(20);                // Spotify stays at 20; "10 % = silent" per the code comment
+  });
+
+  it('P6 a mixed queue created during a duck pins the whole queue to the ducked level', async () => {
+    const { pc, pcz, spz } = make(); live = pc;
+    await pcz.send({ type: 'volume', volume: 20 }); await flush();
+    await pc.send(play([S(1), L(2)]), [S(1), L(2)]); await flush();
+    expect(spz.log).toContain('volume:20');
+    await pcz.send({ type: 'volume', volume: 100 });  // duck over
+    spz.finishPaused(); spz.finish(); await flush(); await flush();
+    expect(pcz.log.filter((l) => l === 'volume:20').length).toBeGreaterThan(0); // next song drags mpv back down
+  });
+});
+
+describe('L: LocalBackend', () => {
+  it('L1 the 4 s window: status flips back to playing after Pause was dropped', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => false };
+    const engine = new HybridEngine(new ZoneEngine(new FakeZone('pc'), { pollMs: 60_000 }), new ZoneEngine(slow, { pollMs: 60_000 }));
+    const b = new LocalBackend('pc', engine);
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, [S(1), L(2)]); await flush();
+    await b.send({ type: 'pause' });
+    expect(b.state.status).toBe('paused');
+    release(); await flush(); await flush();
+    expect(b.state.status).toBe('playing');   // the page un-pauses itself and the song sounds
+    b.dispose();
+  });
+});

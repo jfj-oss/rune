@@ -19,11 +19,13 @@ export interface ZoneEngineOptions {
   safetyPollMs?: number;
   /** Give up waiting for the zone to start the track after this long. */
   startTimeoutMs?: number;
-  /** Paused this close to the end (after playing up to there) counts as "finished". */
+  /** How near the end the song must be, by the clock, for the zone's report to count as "finished". */
   endSlackMs?: number;
 }
 
 const sameTrack = (a: Track, b: Track) => a.id === b.id || (!!a.spotifyUri && a.spotifyUri === b.spotifyUri);
+/** Spotify reports a finished song as paused at about 0; a real pause keeps its position. */
+const REWOUND_MS = 2000;
 
 /**
  * An Engine whose "speaker" is a server zone: one track at a time is loaded into the zone, and the
@@ -41,7 +43,6 @@ export class ZoneEngine implements Engine {
   private userPaused = false;
   /** Another client's song took the zone: this track waits, paused, until the user plays it again. */
   private displaced = false;
-  private maxPlayed = 0;
   private loadedAt = 0;
   private lastUpdated = 0;
   private snap: { pos: number; at: number; playing: boolean } | null = null;
@@ -79,7 +80,6 @@ export class ZoneEngine implements Engine {
     this.inFlight = true;
     this.displaced = false;
     this.userPaused = !autoplay;
-    this.maxPlayed = startMs;
     this.loadedAt = this.now();
     this.lastUpdated = 0;
     this.snap = null;
@@ -119,7 +119,6 @@ export class ZoneEngine implements Engine {
   seek(ms: number) {
     if (!this.track) return;
     this.snap = { pos: ms, at: this.now(), playing: this.snap?.playing ?? !this.userPaused };
-    this.maxPlayed = Math.max(this.maxPlayed, ms);
     if (this.displaced) return; // not our song to seek in: play() starts from here
     this.command({ type: 'seek', positionMs: Math.round(ms) });
   }
@@ -213,17 +212,12 @@ export class ZoneEngine implements Engine {
 
     const dur = track.durationMs;
     const playing = s.status === 'playing';
-    if (match && playing) this.maxPlayed = Math.max(this.maxPlayed, s.positionMs);
-    // Polls can be two minutes apart, and Spotify reports a finished song as paused, not stopped: going by the last
-    // position it reported, the song looks paused halfway. Count the time played since that report too.
-    if (match && !playing && this.snap?.playing) {
-      this.maxPlayed = Math.max(this.maxPlayed, this.snap.pos + (t - this.snap.at));
-    }
-
+    // Where the song should be by now if nobody touched it: polls can be two minutes apart, and a seek back moves this
+    // back too. It says the time is up, never that the song ended: a pause nobody polled looks just the same.
+    const pos = this.position() ?? s.positionMs;
+    const nearEnd = !this.userPaused && dur > 0 && pos >= dur - this.endSlackMs;
     // Another song on the zone is the next one only when ours was about to end; earlier it is another client's song,
     // and sending our next track over it would take the zone back from them.
-    const pos = this.position() ?? this.maxPlayed;
-    const nearEnd = !this.userPaused && dur > 0 && pos >= dur - this.endSlackMs;
     if (!match && !nearEnd && s.status !== 'stopped') {
       this.armed = false;
       this.detach();
@@ -237,7 +231,8 @@ export class ZoneEngine implements Engine {
     const finished =
       !match ||
       s.status === 'stopped' ||
-      (s.status === 'paused' && !this.userPaused && dur > 0 && this.maxPlayed >= dur - this.endSlackMs);
+      // Spotify's way of ending. A pause keeps its position, so one from outside is never this, even in the last seconds.
+      (s.status === 'paused' && s.positionMs <= REWOUND_MS && !!this.snap?.playing && nearEnd);
     if (finished) {
       this.armed = false;
       this.detach();
