@@ -2,6 +2,7 @@ import type { PlayerState, QueueItem } from '@liner/shared';
 import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import type { Engine } from './engine';
+import type { TabChannel } from './oneTab';
 import { emptyState, livePosition, type Backend } from './types';
 
 let qn = 0;
@@ -24,8 +25,12 @@ export class LocalBackend implements Backend {
     private onNotice?: (m: string) => void,
     /** The queue ran out naturally (not repeat): browser/mock auto-radio hangs off this. */
     private onQueueEnd?: () => void,
+    /** The browser zone: one tab of this browser sounds at a time (oneTab.ts). */
+    private tabs?: TabChannel | null,
   ) {
     this.state = { ...emptyState(zone), ...init, zone };
+    // Another tab started to play: this one pauses, as if its Pause had been pressed.
+    this.tabs?.onOtherStarted(() => { if (this.state.status === 'playing') void this.send({ type: 'pause' }); });
     this.engine.onEnded(() => this.advance());
     this.engine.onError((m) => {
       this.onNotice?.(m);
@@ -41,10 +46,12 @@ export class LocalBackend implements Backend {
     return () => { this.subs.delete(fn); };
   }
   async refresh() {}
-  dispose() { clearInterval(this.timer); this.engine.stop(); this.subs.clear(); }
+  dispose() { clearInterval(this.timer); this.engine.stop(); this.subs.clear(); this.tabs?.close(); }
 
   private set(patch: Partial<PlayerState>) {
+    const was = this.state.status;
     this.state = { ...this.state, ...patch };
+    if (this.state.status === 'playing' && was !== 'playing') this.tabs?.started();
     for (const f of this.subs) f(this.state);
   }
   private snapshot(): Pick<PlayerState, 'positionMs' | 'updatedAt'> {

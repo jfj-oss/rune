@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngine } from './engine';
 import { LocalBackend } from './local';
+import { createTabChannel } from './oneTab';
 import { mkItem, mkTrack } from './testkit';
 
 class FakeAudio {
@@ -36,12 +37,46 @@ describe('browser zone', () => {
     b.dispose();
   });
 
-  it('KNOWN BUG B2 two tabs on the browser zone: two engines, nothing tells them about each other (each plays)', async () => {
-    const mk = () => new LocalBackend('browser', new AudioEngine());
+  it('B2 two tabs on the browser zone: Play in one pauses the other, and back again', async () => {
+    const name = `rune-test-${Math.random()}`;
+    const mk = () => new LocalBackend('browser', new AudioEngine(), undefined, undefined, undefined, createTabChannel(name));
+    const a = mk(), c = mk();
+    await a.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:1', 'local'))]);
+    await vi.waitFor(() => expect(FakeAudio.all.filter((e) => !e.paused)).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 5));      // a later click: the newer start wins
+    await c.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:2', 'local'))]);
+    await vi.waitFor(() => expect(a.state.status).toBe('paused'));
+    expect(c.state.status).toBe('playing');
+    const sounding = FakeAudio.all.filter((e) => !e.paused);
+    expect(sounding).toHaveLength(1);
+    expect(sounding[0]!.src).toContain('l%3A2');
+    await new Promise((r) => setTimeout(r, 5));
+    await a.send({ type: 'resume' });
+    await vi.waitFor(() => expect(c.state.status).toBe('paused'));
+    expect(a.state.status).toBe('playing');
+    a.dispose(); c.dispose();
+  });
+
+  it('B2 two tabs pressing Play in the same instant: exactly one keeps playing', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(1_800_000_000_000);
+    const name = `rune-test-${Math.random()}`;
+    const mk = () => new LocalBackend('browser', new AudioEngine(), undefined, undefined, undefined, createTabChannel(name));
     const a = mk(), c = mk();
     await a.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:1', 'local'))]);
     await c.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:2', 'local'))]);
-    expect(FakeAudio.all.filter((e) => !e.paused)).toHaveLength(2);
+    await vi.waitFor(() => expect([a.state.status, c.state.status].sort()).toEqual(['paused', 'playing']));
+    vi.useRealTimers();
     a.dispose(); c.dispose();
+  });
+
+  it('B2 a tab is not paused by its own start, nor by another browser zone channel', async () => {
+    const a = new LocalBackend('browser', new AudioEngine(), undefined, undefined, undefined, createTabChannel(`rune-test-${Math.random()}`));
+    const other = new LocalBackend('browser', new AudioEngine(), undefined, undefined, undefined, createTabChannel(`rune-test-${Math.random()}`));
+    await a.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:1', 'local'))]);
+    await other.send({ type: 'play', trackIds: [], startIndex: 0 }, [mkItem(mkTrack('l:2', 'local'))]);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(a.state.status).toBe('playing');
+    expect(other.state.status).toBe('playing');
+    a.dispose(); other.dispose();
   });
 });

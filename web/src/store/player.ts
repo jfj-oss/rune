@@ -7,6 +7,7 @@ import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
 import { AudioEngine, MockEngine } from '../player/engine';
 import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
+import { createTabChannel } from '../player/oneTab';
 import { PcBackend, type PcDevice } from '../player/pc';
 import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
 import { fitForZone } from '../player/preferLocal';
@@ -70,7 +71,7 @@ function backendFor(z: ZoneInfo): Backend {
   const onQueueEnd = () => { void import('../lib/radio').then((m) => m.continueRadio()).catch(() => undefined); };
   let b: Backend;
   if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice, onQueueEnd);
-  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd);
+  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd, createTabChannel());
   else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, notice }, pcDevice(z));
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
