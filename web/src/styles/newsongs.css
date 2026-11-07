@@ -116,9 +116,9 @@
 /* ---------- row menu affordances on rows we added a menu to ---------- */
 .tlist__row { grid-template-columns: 44px minmax(0, 1fr) auto 52px 36px; }
 .tlist__menu .btn-icon { opacity: 0; }
-.tlist__row:hover .tlist__menu .btn-icon, .tlist__menu .btn-icon:focus-visible, .tlist__menu:has(.pop__panel) .btn-icon { opacity: 1; }
+.tlist__row:hover .tlist__menu .btn-icon, .tlist__menu .btn-icon:focus-visible, .tlist__menu:has(.pop--open) .btn-icon { opacity: 1; }
 .qrow__menu .btn-icon { opacity: 0; }
-.qrow:hover .qrow__menu .btn-icon, .qrow__menu .btn-icon:focus-visible, .qrow__menu:has(.pop__panel) .btn-icon { opacity: 1; }
+.qrow:hover .qrow__menu .btn-icon, .qrow__menu .btn-icon:focus-visible, .qrow__menu:has(.pop--open) .btn-icon { opacity: 1; }
 
 @media (max-width: 899px) {
   .seg--tabs { padding: 2px; }

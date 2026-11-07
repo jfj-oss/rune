@@ -27,7 +27,7 @@
 .prow__album { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: fit-content; max-width: 100%; }
 .prow__dur { text-align: right; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; padding-right: 8px; }
 .prow .trow__menu .btn-icon { opacity: 0; }
-.prow:hover .trow__menu .btn-icon, .prow .trow__menu .btn-icon:focus-visible, .prow .trow__menu:has(.pop__panel) .btn-icon { opacity: 1; }
+.prow:hover .trow__menu .btn-icon, .prow .trow__menu .btn-icon:focus-visible, .prow .trow__menu:has(.pop--open) .btn-icon { opacity: 1; }
 @media (max-width: 899px) {
   .prow { grid-template-columns: 30px minmax(0, 1fr) 40px; height: 60px; padding: 0 2px; }
   .prow--head { grid-template-columns: 30px minmax(0, 1fr) 40px; }

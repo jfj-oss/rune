@@ -209,9 +209,6 @@
 
 /* virtual lists position each row as its own layer, so later rows paint over an open row menu (and take
    its clicks): lift the row whose menu is open */
-.qrow:has(.pop__panel), .prow:has(.pop__panel), .tklayer:has(.pop__panel), .vgrid__row:has(.pop__panel), .vgrid__list:has(.pop__panel) { z-index: 20; }
-/* inside the blurred queue drawer a menu's own blur has nothing to sample, so its glass shows the rows
-   through the text: give menus there a solid background */
-.drawer .pop__panel, .qrow .pop__panel { background: #1b1c22; }
+.qrow:has(.pop--open), .prow:has(.pop--open), .tklayer:has(.pop--open), .vgrid__row:has(.pop--open), .vgrid__list:has(.pop--open) { z-index: 20; }
 /* the mark: a canvas of fine dithered dots (see Logo.tsx) */
 .dotlogo { display: block; flex: none; image-rendering: pixelated; }
