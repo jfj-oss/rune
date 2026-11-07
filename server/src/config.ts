@@ -25,6 +25,10 @@ export interface Config {
     /** Read this PC's Spotify app over MPRIS instead of polling GET /me/player for it (default true). false brings
      *  the polling back. */
     mprisReads?: boolean;
+    /** Phase 3 (default false): the pc zone's queue lives on the server (play/driver.ts) and plays local songs on mpv
+     *  and Spotify songs in this PC's Spotify app with no tab open; the page is a plain remote for it. Off keeps the
+     *  tab-driven mixed queue. */
+    serverQueue?: boolean;
   };
   /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
   lastfmApiKey?: string;

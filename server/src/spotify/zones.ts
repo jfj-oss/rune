@@ -1289,6 +1289,12 @@ export class SpotifyZones {
     return this.zones.get(zoneId);
   }
 
+  /** The API the zones command through (shared reads, and every write noted for MPRIS): the server queue's Spotify
+   *  output sends its plays this way too. */
+  get controlApi(): SpotifyZoneApi {
+    return this.api;
+  }
+
   /** A client connected: every zone polls at once again and returns to the watched schedule. */
   wake(): void {
     for (const zone of this.zones.values()) zone.wake();

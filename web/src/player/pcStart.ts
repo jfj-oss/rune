@@ -18,7 +18,8 @@ export const itemsHaveSpotify = (items: PlayItem[]): boolean => items.some((i) =
 
 /** Would playing these items on this zone need the app the PC does not have yet? */
 export function needsPcSpotify(zone: ZoneInfo | undefined, items: PlayItem[]): boolean {
-  return !!zone && zone.kind === 'pc' && !zone.spotifyDeviceId && itemsHaveSpotify(items);
+  // A server-owned pc queue starts the app itself when it reaches a Spotify song.
+  return !!zone && zone.kind === 'pc' && !zone.serverQueue && !zone.spotifyDeviceId && itemsHaveSpotify(items);
 }
 
 export interface PcStartDeps {

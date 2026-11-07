@@ -287,7 +287,7 @@ let live: PcBackend | null = null;
 afterEach(() => { live?.dispose(); live = null; });
 
 describe('P: PcBackend', () => {
-  it('KNOWN BUG P1 one /zones answer without the Spotify device throws the mixed queue away and stops the music', async () => {
+  it('KNOWN BUG (serverQueue off; closed with it on in server/tests/driver.test.ts) P1 one /zones answer without the Spotify device throws the mixed queue away and stops the music', async () => {
     const { pc, spz } = make(); live = pc;
     await pc.send(play([S(1), L(2), S(3)]), [S(1), L(2), S(3)]); await flush();
     spz.progress(5000);
@@ -299,7 +299,7 @@ describe('P: PcBackend', () => {
     expect(pc.state.queue.length).toBeLessThan(3);        // queue gone
   });
 
-  it('KNOWN BUG P2 a flap in Spotify mode pauses the song on the speakers', async () => {
+  it('KNOWN BUG (serverQueue off; closed with it on in server/tests/driver.test.ts) P2 a flap in Spotify mode pauses the song on the speakers', async () => {
     const { pc, spz } = make(); live = pc;
     await pc.send(play([S(1), S(2)]), [S(1), S(2)]); await flush();
     expect(pc.currentMode).toBe('spotify');
@@ -307,7 +307,7 @@ describe('P: PcBackend', () => {
     expect(spz.log).toContain('pause');
   });
 
-  it('KNOWN BUG P3 a tab in mixed mode never follows another client: stale now-playing, and its Play overwrites them', async () => {
+  it('KNOWN BUG (serverQueue off; closed with it on in server/tests/driver.test.ts) P3 a tab in mixed mode never follows another client: stale now-playing, and its Play overwrites them', async () => {
     const { pc, spz } = make(); live = pc;
     await pc.send(play([S(1), L(2)]), [S(1), L(2)]); await flush();
     spz.progress(30_000);
@@ -320,7 +320,7 @@ describe('P: PcBackend', () => {
     expect(spz.log.at(-1)).toContain('play:sp:1');                   // Play takes the speakers back
   });
 
-  it('KNOWN BUG P4 fresh page: a paused Spotify song loses to mpv\'s old restored queue (refresh() is never called at start)', async () => {
+  it('KNOWN BUG (serverQueue off; closed with it on in server/tests/driver.test.ts) P4 fresh page: a paused Spotify song loses to mpv\'s old restored queue (refresh() is never called at start)', async () => {
     const { pc, pcz, spz } = make(({ pc: p, sp }) => {
       p.state = { ...emptyState('pc'), status: 'paused', queue: [{ queueId: 'o', track: mkTrack('l:old', 'local'), album: { id: 'a', title: 'x' } }], index: 0 };
       sp.state = { ...emptyState('spotify:dev'), status: 'paused', queue: [{ queueId: 'n', track: mkTrack('sp:now', 'spotify'), album: { id: 'a', title: 'x' } }], index: 0 };

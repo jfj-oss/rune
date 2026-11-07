@@ -62,8 +62,12 @@ export class World implements SpotifyZoneApi {
   appPos = 0;
   private endTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(opts: { mpris?: boolean } = {}) {
+  /** A PUT play of several URIs plays them in order, as the real Spotify does (off: only the named song, as the
+   *  older tests assume). */
+  uriLists = false;
+  constructor(opts: { mpris?: boolean; uriLists?: boolean } = {}) {
     if (opts.mpris) this.mpris = new FakeMprisBus(this);
+    this.uriLists = opts.uriLists === true;
   }
   at() { return ((Date.now() - this.t0) / 1000).toFixed(1).padStart(7); }
   note(s: string) { this.log.push(`${this.at()}s ${s}`); }
@@ -136,6 +140,11 @@ export class World implements SpotifyZoneApi {
     else this.signal({ ev: 'signal', status: 'Paused' });
     this.arm();
   }
+  /** The app starts (rune launched it): its MPRIS name appears, with nothing playing. */
+  openApp() {
+    this.appOpen = true; this.note('[app] Spotify app started');
+    this.mpris?.emit({ ev: 'owner', owned: true });
+  }
   closeApp() {
     this.appOpen = false; this.note('[user] closed the Spotify app');
     if (this.device === DEV) { this.settle(); this.basePos = this.pos(); this.playing = false; this.device = null; this.cur = null; }
@@ -191,7 +200,11 @@ export class World implements SpotifyZoneApi {
     this.settle();
     const was = this.cur?.id;
     const wasPlaying = this.playing && this.device === DEV;
-    if (body.uris?.length) { const id = body.uris[body.offset?.position ?? 0]!.split(':').pop()!; this.cur = this.songs.get(id)!; this.basePos = body.position_ms ?? 0; this.context = null; this.note(`[rune] PUT play ${id} on ${device}`); }
+    if (body.uris?.length) {
+      const id = body.uris[body.offset?.position ?? 0]!.split(':').pop()!; this.cur = this.songs.get(id)!; this.basePos = body.position_ms ?? 0;
+      this.context = this.uriLists && body.uris.length > 1 ? body.uris.map((u) => u.split(':').pop()!) : null;
+      this.note(`[rune] PUT play ${id} on ${device}${this.context ? ` (+${this.context.length - 1} more)` : ''}`);
+    }
     else { this.note('[rune] PUT play (resume)'); }
     this.device = device ?? this.device; this.baseAt = Date.now(); this.playing = true; this.pausedAt = null;
     this.remember();

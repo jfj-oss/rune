@@ -14,6 +14,7 @@ import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
 import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
 import { emptyState, livePosition, type Backend } from '../player/types';
+import { helloAction, holdNotice, RELOAD_NOTICE, usesServerQueue } from '../player/serverQueue';
 import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
 import { loadLocal, saveLocal, useUi } from './ui';
 
@@ -72,6 +73,8 @@ function backendFor(z: ZoneInfo): Backend {
   let b: Backend;
   if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice, onQueueEnd);
   else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd, createTabChannel());
+  // A server-owned pc queue (server config spotify.serverQueue) needs no driving from here: a plain remote.
+  else if (usesServerQueue(z)) b = new RemoteBackend(z.id);
   else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, notice }, pcDevice(z));
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
@@ -137,7 +140,13 @@ export const usePlayer = create<PlayerStore>((set, get) => {
   const rec = { albumId: null as string | null };
   const attach = (b: Backend) => {
     unsub?.();
-    unsub = b.subscribe((s) => { set({ state: s }); recordPlayed(s, rec); });
+    unsub = b.subscribe((s) => {
+      // The server queue says why it stopped by itself (rate limit, another player took over, no Spotify app).
+      const hold = holdNotice(get().state, s);
+      set({ state: s });
+      recordPlayed(s, rec);
+      if (hold) useUi.getState().toast(hold);
+    });
     set({ state: b.state, zone: b.zone });
   };
 
@@ -184,6 +193,19 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       if (!isMock) {
         const playing = new Map<string, boolean>();
         socket.on((e) => {
+          if (e.type === 'hello') {
+            const pcBackend = backends.get('pc');
+            const st = get();
+            const action = helloAction(e, {
+              build: __RUNE_BUILD__,
+              pcServerQueue: pcBackend instanceof PcBackend ? false : pcBackend ? true : null,
+              playingHere: st.zone === 'browser' && st.state.status === 'playing',
+              dev: import.meta.env.DEV,
+            });
+            if (action === 'reload') location.reload();
+            else if (action === 'notice') useUi.getState().toast(RELOAD_NOTICE);
+            return;
+          }
           if (e.type !== 'player') return;
           const was = noteSounding(playing, e.state);
           const { zone, state, zones, setZone } = get();
@@ -269,7 +291,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
               // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
               if (volume > 0 && Math.abs(b.state.volume - volume) > 1) await b.send({ type: 'volume', volume }).catch(() => undefined);
               if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${target.name})`);
-              else if (target.kind === 'pc' && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
+              else if (target.kind === 'pc' && !usesServerQueue(target) && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
               return;
             }
           }

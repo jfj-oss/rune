@@ -22,7 +22,7 @@ describe('misc', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('KNOWN BUG X1 a paused start on Spotify really starts the song, then pauses: an audible blip (mpv had this fixed)', async () => {
+  it('KNOWN BUG (Connect zones; the server queue sends nothing for it, tests/driver.test.ts) X1 a paused start on Spotify really starts the song, then pauses: an audible blip (mpv had this fixed)', async () => {
     const { api, calls } = fakeApi();
     const z = new SpotifyConnectZone(api, 'd', 'HORSE');
     const p = z.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0, paused: true });

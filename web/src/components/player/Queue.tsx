@@ -129,7 +129,8 @@ export function QueuePanel({ onClose }: { onClose(): void }) {
   const queue = usePlayer((s) => s.state.queue);
   const index = usePlayer((s) => s.state.index);
   const command = usePlayer((s) => s.command);
-  const onPc = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind === 'pc');
+  // A server-owned pc queue plays a mixed queue with no tab open: no note then.
+  const onPc = usePlayer((s) => { const z = s.zones.find((x) => x.id === s.zone); return z?.kind === 'pc' && !z.serverQueue; });
   const body = useRef<HTMLDivElement>(null);
   const total = queue.reduce((n, q) => n + q.track.durationMs, 0);
   const save = () => usePlaylistUi.getState().openPicker({

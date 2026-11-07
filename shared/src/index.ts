@@ -143,7 +143,21 @@ export interface PlayerState {
   nowPlaying?: { title?: string; artist?: string; station?: string };
   /** A Spotify zone that stopped because playback moved to another device: the song did not end here. */
   elsewhere?: boolean;
+  /** Server-owned queue (pc zone, config spotify.serverQueue): bumped on every queue edit or move of the cursor. */
+  rev?: number;
+  /** Server-owned queue: which player sounds the current song (mpv or the Spotify app); null when none does. */
+  output?: 'mpv' | 'spotify' | null;
+  /** Server-owned queue: why it is not playing on its own (rate limit, another player took over, the app is missing). */
+  hold?: PlayerHold;
   updatedAt: number;
+}
+
+export interface PlayerHold {
+  reason: 'rate-limited' | 'takeover' | 'spotify-unavailable' | 'output-failed';
+  /** One sentence for the page. */
+  message: string;
+  /** rate-limited: when Spotify songs play again (epoch ms). */
+  until?: number;
 }
 
 export type PlayerCommand =
@@ -170,6 +184,9 @@ export type ServerEvent =
   /** `queueRev` fingerprints `state.queue`. Clients that connect with `/api/ws?slim=1` get the queue only
    *  when it changed; otherwise `state.queue` is absent on the wire and the client reuses its copy. */
   | { type: 'player'; state: PlayerState; queueRev?: string }
+  /** First message on every connection: the web build the server serves now (a tab built from another one reloads)
+   *  and whether the pc zone's queue lives on the server. */
+  | { type: 'hello'; build: string | null; serverQueue: boolean }
   | { type: 'scan'; progress: ScanProgress }
   | { type: 'library-changed' };
 

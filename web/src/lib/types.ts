@@ -15,6 +15,9 @@ export interface ZoneInfo {
    */
   spotifyDeviceId?: string;
   spotifyDeviceName?: string;
+  /** pc zone only: its queue lives on the server (server config spotify.serverQueue), which also starts the Spotify
+   *  app when a Spotify song needs it. The page is then a plain remote, and a mixed queue needs no open tab. */
+  serverQueue?: boolean;
 }
 
 /** A track plus just enough album context to put it in a queue. */

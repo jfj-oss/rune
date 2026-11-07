@@ -231,6 +231,7 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
 /** What a zone can play, as a one-line hint under its name. */
 export function zoneHint(z: ZoneInfo, mixed: boolean): string | null {
   if (z.kind !== 'pc') return null;
+  if (z.serverQueue) return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)` : 'Local + Spotify (rune starts the Spotify app)';
   if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)`;
   return 'Local files · open the Spotify app on the PC for Spotify';
 }

@@ -36,10 +36,24 @@ import {
 import { loadQueueItems, trackPath } from './rows.js';
 
 /** Extra diagnostics exposed for the smoke script (not part of PlaybackZone). */
-export interface PcZone extends PlaybackZone {
+export interface PcZone extends PlaybackZone, MpvRunZone {
   readonly socketPath: string;
   /** PID of the current mpv process, if running. */
   mpvPid(): number | undefined;
+}
+
+/**
+ * What the server-owned queue (play/driver.ts) needs from mpv: a run of local songs, played gaplessly in the order
+ * given, under the driver's own queue ids. mpv's own queue then only ever holds that run.
+ */
+export interface MpvRunZone {
+  state(): PlayerState;
+  onChange(cb: (s: PlayerState) => void): () => void;
+  command(cmd: PlayerCommand): Promise<PlayerState>;
+  /** Play `items` from the first one, at `positionMs` (paused: loaded silent). */
+  loadRun(items: QueueItem[], opts: { positionMs: number; paused: boolean }): Promise<PlayerState>;
+  /** Keep the song now playing and replace everything after it (a queue edit): gapless preloads follow. */
+  setUpcoming(items: QueueItem[]): Promise<PlayerState>;
 }
 
 export type CreatePcZone = (db: Db, cfg: Config, opts?: PcZoneOptions) => Promise<PcZone>;
@@ -47,6 +61,9 @@ export type CreatePcZone = (db: Db, cfg: Config, opts?: PcZoneOptions) => Promis
 export interface PcZoneOptions {
   /** Warning sink for a session that cannot be read back (defaults to console.warn). */
   log?: (message: string, err?: unknown) => void;
+  /** Restore and save player.pc.session (default true). The server-owned queue keeps its own row instead, and
+   *  leaves this one as it was. */
+  session?: boolean;
 }
 
 interface MpvParams {
@@ -86,7 +103,7 @@ const FINISHED_WITHIN_MS = 100;
 const MAX_RESPAWN_ATTEMPTS = 5;
 
 /** app_state row holding the PC zone session (same key/value table the settings use). */
-const SESSION_KEY = 'player.pc.session';
+export const SESSION_KEY = 'player.pc.session';
 const SESSION_VERSION = 1;
 /** Queue/transport changes are written after a short pause; position ticks slower. */
 const SAVE_DEBOUNCE_MS = 1_000;
@@ -94,12 +111,12 @@ const POSITION_SAVE_INTERVAL_MS = 5_000;
 /** A corrupt row claiming a million entries must not stall startup. */
 const MAX_SAVED_QUEUE = 20_000;
 
-interface SavedQueueEntry {
+export interface SavedQueueEntry {
   queueId: string;
   trackId: string;
 }
 
-interface SavedSession {
+export interface SavedSession {
   v: typeof SESSION_VERSION;
   queue: SavedQueueEntry[];
   index: number;
@@ -118,7 +135,7 @@ export async function createPcZone(
   // The zone reads gains directly from track_loudness; make sure the table
   // exists even when the loudness worker has not been created yet.
   ensureLoudnessSchema(db);
-  const zone = new PcZoneImpl(db, cfg, opts.log ?? ((message, err) => console.warn(message, err)));
+  const zone = new PcZoneImpl(db, cfg, opts.log ?? ((message, err) => console.warn(message, err)), opts.session !== false);
   await zone.init();
   return zone;
 }
@@ -195,12 +212,13 @@ class PcZoneImpl implements PcZone {
     db: Db,
     cfg: Config,
     log: (message: string, err?: unknown) => void = () => undefined,
+    private readonly session = true,
   ) {
     this.db = db;
     this.cfg = cfg;
     this.log = log;
     this.socketPath = join(cfg.dataDir, 'mpv.sock');
-    this.restoreSession();
+    if (session) this.restoreSession();
   }
 
   async init(): Promise<void> {
@@ -347,7 +365,7 @@ class PcZoneImpl implements PcZone {
 
   /** Queue/transport changes save after a pause; position-only ticks at most every 5 s. */
   private scheduleSessionSave(change: boolean): void {
-    if (this.closed) return;
+    if (this.closed || !this.session) return;
     const delay = change ? SAVE_DEBOUNCE_MS : POSITION_SAVE_INTERVAL_MS;
     const due = Date.now() + delay;
     // Never postpone an already-scheduled earlier write, so bursts still land.
@@ -363,6 +381,7 @@ class PcZoneImpl implements PcZone {
 
   /** Write the session now. Never throws: persistence must not break playback. */
   private persistSession(): void {
+    if (!this.session) return;
     try {
       const session: SavedSession = {
         v: SESSION_VERSION,
@@ -419,6 +438,33 @@ class PcZoneImpl implements PcZone {
 
   mpvPid(): number | undefined {
     return this.mpv?.pid;
+  }
+
+  loadRun(items: QueueItem[], opts: { positionMs: number; paused: boolean }): Promise<PlayerState> {
+    return this.serialize(async () => {
+      const playable = this.playable(items);
+      // A run is played in the order given: mpv's own shuffle and repeat stay off (the driver orders the queue).
+      this.q = queuePlay({ ...createQueue(), repeat: 'off', shuffle: false }, playable, 0);
+      if (playable.length === 0) {
+        await this.stopPlayback();
+        this.emitChange();
+        return this.state();
+      }
+      await this.startPlayback({ positionMs: Math.max(0, Math.round(opts.positionMs)), paused: opts.paused });
+      return this.state();
+    });
+  }
+
+  setUpcoming(items: QueueItem[]): Promise<PlayerState> {
+    return this.serialize(async () => {
+      if (this.q.index < 0) return this.state();
+      const head = this.q.items.slice(0, this.q.index + 1);
+      const all = [...head, ...this.playable(items)];
+      this.q = { ...this.q, items: all, order: all.map((_, i) => i), shuffle: false, repeat: 'off' };
+      if (this.status === 'playing' || this.status === 'paused') await this.syncWindow();
+      this.emitChange();
+      return this.state();
+    });
   }
 
   command(cmd: PlayerCommand): Promise<PlayerState> {
@@ -1484,7 +1530,7 @@ function isId(value: unknown, max: number): value is string {
  * hand-edited JSON, a half-written value) is rejected so startup falls back to
  * an empty zone instead of crashing on it.
  */
-function parseSavedSession(value: unknown): SavedSession | undefined {
+export function parseSavedSession(value: unknown): SavedSession | undefined {
   if (!isStringRecord(value) || value.v !== SESSION_VERSION) return undefined;
   const rawQueue = value.queue;
   if (!Array.isArray(rawQueue) || rawQueue.length > MAX_SAVED_QUEUE) return undefined;
