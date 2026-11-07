@@ -11,6 +11,12 @@
 // a pause longer than `pauseSplitMs` ends it, and the resume starts a new one.
 // Repeat-one/one-track-repeat wraps are detected when the position jumps from
 // the end back to the start and produce a separate play for each loop.
+//
+// Spotify Connect zones are read seconds or minutes apart, so the last read of a
+// song is rarely at its end. For them (see `estimate`) the time between the last
+// read that saw it playing and the read that saw it gone counts as heard, up to
+// the song's end; and Spotify's own way of ending a song (paused, rewound to the
+// start, its time up) closes it as completed.
 import type { PlayerState, QueueItem } from '@liner/shared';
 
 export interface RecordedPlay {
@@ -32,12 +38,16 @@ export interface PlayCounterOptions {
   seekToleranceMs?: number;
   /** How close to duration counts as "reached the end". */
   endSlackMs?: number;
+  /** Zones whose unseen time between reads is estimated (default: Spotify Connect zones, `spotify:…`). */
+  estimate?: (zone: string) => boolean;
 }
 
 const DEFAULT_PAUSE_SPLIT_MS = 5 * 60_000;
 const DEFAULT_SEEK_TOLERANCE_MS = 2_000;
 const DEFAULT_END_SLACK_MS = 2_000;
 const MIN_PLAY_MS = 30_000;
+/** Spotify reports a finished song as paused at about 0. */
+const REWOUND_MS = 2_000;
 
 interface ActivePlay {
   trackId: string;
@@ -82,6 +92,7 @@ export class PlayCounter {
   private readonly pauseSplitMs: number;
   private readonly seekToleranceMs: number;
   private readonly endSlackMs: number;
+  private readonly estimate: (zone: string) => boolean;
 
   constructor(
     private readonly sink: (play: RecordedPlay) => void,
@@ -90,6 +101,7 @@ export class PlayCounter {
     this.pauseSplitMs = opts.pauseSplitMs ?? DEFAULT_PAUSE_SPLIT_MS;
     this.seekToleranceMs = opts.seekToleranceMs ?? DEFAULT_SEEK_TOLERANCE_MS;
     this.endSlackMs = opts.endSlackMs ?? DEFAULT_END_SLACK_MS;
+    this.estimate = opts.estimate ?? ((zone) => zone.startsWith('spotify:'));
   }
 
   /**
@@ -147,7 +159,22 @@ export class PlayCounter {
       nextItem.queueId === prevItem.queueId &&
       nextItem.track.id === z.active.trackId;
 
+    const estimating = this.estimate(next.zone);
     if (sameEntry && z.active && nextItem) {
+      // A just-started Spotify queue shows placeholders first; the song's length arrives with a later state.
+      if (z.active.durationMs <= 0) z.active.durationMs = durationOf(nextItem);
+      // Spotify's end of a song: paused and rewound, with the song's time up since the last read.
+      if (estimating && prev.status === 'playing' && next.status === 'paused' && next.positionMs <= REWOUND_MS && z.active.durationMs > 0) {
+        const wall = Math.max(0, next.updatedAt - prev.updatedAt);
+        const left = Math.max(0, z.active.durationMs - prev.positionMs);
+        if (wall >= left - this.endSlackMs) {
+          z.active.heardMs = Math.min(z.active.durationMs, z.active.heardMs + Math.min(wall, left));
+          this.finish(z.active, true, next.zone);
+          z.active = null;
+          return;
+        }
+      }
+
       // Repeat-one loop: the same queue entry wrapped from (near) the end to the start.
       if (
         prev.status === 'playing' &&
@@ -213,12 +240,20 @@ export class PlayCounter {
     // Track/entry change, stop, or queue replacement: close the current play.
     if (z.active) {
       const duration = z.active.durationMs;
-      const reachedEnd =
+      let reachedEnd =
         prevItem !== undefined &&
         prev.status !== 'stopped' &&
         prevItem.track.id === z.active.trackId &&
         duration > 0 &&
         prev.positionMs >= duration - this.endSlackMs;
+      // Not read since it was seen playing: it played on until this read, or to its end if that came first. Not when
+      // it moved to another device: that device's own zone counts the rest.
+      if (estimating && !next.elsewhere && prev.status === 'playing' && prevItem?.track.id === z.active.trackId && duration > 0) {
+        const wall = Math.max(0, next.updatedAt - prev.updatedAt);
+        const left = Math.max(0, duration - prev.positionMs);
+        z.active.heardMs = Math.min(duration, z.active.heardMs + Math.min(wall, left));
+        if (wall >= left - this.endSlackMs) reachedEnd = true;
+      }
       this.finish(z.active, reachedEnd, next.zone);
       z.active = null;
     }

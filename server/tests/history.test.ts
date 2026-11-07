@@ -339,6 +339,72 @@ describe('play counting rule', () => {
   });
 });
 
+describe('Spotify Connect zones: the time between reads is estimated', () => {
+  const SP = 'spotify:dev';
+  const fresh = () => {
+    const db = openDb(':memory:');
+    return { db, history: createHistory(db) };
+  };
+
+  it('a song read every 30 s and then seen rewound (Spotify\'s end) is one completed play of its length', () => {
+    const { db, history } = fresh();
+    const a = track('sp:a', 200_000);
+    const b = track('sp:b', 100_000);
+    feed(history, [
+      ...[0, 30, 60, 90, 120, 150, 180].map((t) => ({ zone: SP, track: a, positionMs: t * 1000, status: 'playing' as const, at: t })),
+      { zone: SP, track: a, positionMs: 0, status: 'paused', at: 201.5 },
+      { zone: SP, track: b, positionMs: 0, status: 'playing', at: 201.5 },
+      { zone: SP, track: b, positionMs: 30_000, status: 'playing', at: 231.5 },
+    ]);
+    expect(plays(db).map((p) => [p.trackId, p.playedMs, p.completed])).toEqual([['sp:a', 200_000, 1]]);
+  });
+
+  it('a next song seen late counts the unseen time up to the end only', () => {
+    const { db, history } = fresh();
+    const a = track('sp:a', 200_000);
+    const b = track('sp:b', 100_000);
+    feed(history, [
+      ...[0, 60, 120, 180].map((t) => ({ zone: SP, track: a, positionMs: t * 1000, status: 'playing' as const, at: t })),
+      { zone: SP, track: b, positionMs: 40_000, status: 'playing', at: 240 },
+    ]);
+    expect(plays(db).map((p) => [p.trackId, p.playedMs, p.completed])).toEqual([['sp:a', 200_000, 1]]);
+  });
+
+  it('a skip mid-song counts the time since the last read, not the rest of the song', () => {
+    const { db, history } = fresh();
+    const a = track('sp:a', 200_000);
+    const b = track('sp:b', 100_000);
+    feed(history, [
+      { zone: SP, track: a, positionMs: 0, status: 'playing', at: 0 },
+      { zone: SP, track: a, positionMs: 30_000, status: 'playing', at: 30 },
+      { zone: SP, track: b, positionMs: 0, status: 'playing', at: 50 },
+    ]);
+    expect(plays(db).map((p) => [p.trackId, p.playedMs, p.completed])).toEqual([['sp:a', 50_000, 0]]);
+  });
+
+  it('a song moved to another device is not counted past the last read here', () => {
+    const { db, history } = fresh();
+    const a = track('sp:a', 200_000);
+    const prev = state({ zone: SP, track: a, positionMs: 40_000, status: 'playing', at: 40 });
+    history.recordFromState(stopped(SP, -1), state({ zone: SP, track: a, positionMs: 0, status: 'playing', at: 0 }));
+    history.recordFromState(stopped(SP, -1), prev);
+    history.recordFromState(prev, { ...stopped(SP, 120), elsewhere: true });
+    expect(plays(db).map((p) => [p.trackId, p.playedMs, p.completed])).toEqual([['sp:a', 40_000, 0]]);
+  });
+
+  it('the PC zone is not estimated: it reports its own position', () => {
+    const { db, history } = fresh();
+    const a = track('l:a', 200_000);
+    const b = track('l:b', 100_000);
+    feed(history, [
+      { zone: 'pc', track: a, positionMs: 0, status: 'playing', at: 0 },
+      { zone: 'pc', track: a, positionMs: 40_000, status: 'playing', at: 40 },
+      { zone: 'pc', track: b, positionMs: 0, status: 'playing', at: 120 },
+    ]);
+    expect(plays(db).map((p) => [p.trackId, p.playedMs, p.completed])).toEqual([['l:a', 40_000, 0]]);
+  });
+});
+
 describe('recent albums', () => {
   it('orders by last played and aggregates plays', () => {
     const db = openDb(':memory:');

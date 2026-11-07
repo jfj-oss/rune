@@ -195,13 +195,17 @@ describe('world', () => {
     b.dispose(); await zone.close();
   });
 
-  it('KNOWN BUG W7 history at each budget', async () => {
+  it('W7 history at each budget: every song heard to the end is one completed play of about its length', async () => {
     for (const level of ['normal', 'tight', 'low'] as const) {
       const { w, b, items, zone, plays } = stack(level);
       await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
       await run(830_000);
       console.log(`\n=== W7 ${level}: heard every song to the end`, plays.map((p) => `${p.trackId} played_ms=${p.playedMs} completed=${p.completed}`));
-      expect(plays.every((p) => !p.completed)).toBe(true);
+      expect(plays.map((p) => p.trackId)).toEqual(['sp:s1', 'sp:s2', 'sp:s3', 'sp:s4']);
+      for (const p of plays) {
+        expect(p.completed).toBe(true);
+        expect(Math.abs(p.playedMs - w.songs.get(p.trackId.slice(3))!.duration_ms)).toBeLessThan(3000);
+      }
       b.dispose(); await zone.close();
     }
   });
