@@ -29,12 +29,20 @@ describe('misc', () => {
     await z.close();
   });
 
-  it('KNOWN BUG X2 the server passes any number of URIs to Spotify; only kind=spotify zones are windowed, and the PC zone is kind=pc', async () => {
-    const { api, calls } = fakeApi();
+  it('X2 the server sends Spotify at most 100 URIs, from the starting song on, whichever zone kind asked', async () => {
+    const sent: { uris?: string[]; offset?: { position: number } }[] = [];
+    const { api, calls } = fakeApi({ play: async (b: { uris?: string[]; offset?: { position: number } }) => { sent.push(b); calls.push(`play(${b.uris?.length ?? 'resume'} uris)`); } } as never);
     const z = new SpotifyConnectZone(api, 'd', 'HORSE');
-    const p = z.command({ type: 'play', trackIds: Array.from({ length: 700 }, (_, i) => `sp:t${i}`), startIndex: 0 });
+    const p = z.command({ type: 'play', trackIds: Array.from({ length: 700 }, (_, i) => `sp:t${i}`), startIndex: 250 });
     await vi.advanceTimersByTimeAsync(5000); await p;
-    expect(calls[0]).toBe('play(700 uris)');
+    expect(calls[0]).toBe('play(100 uris)');
+    expect(sent[0]!.uris![0]).toBe('spotify:track:t250');
+    expect(sent[0]!.offset).toEqual({ position: 0 });
+    expect(z.state().queue[z.state().index]!.track.id).toBe('sp:t250');
+    const short = z.command({ type: 'play', trackIds: ['sp:a', 'sp:b', 'sp:c'], startIndex: 2 });
+    await vi.advanceTimersByTimeAsync(5000); await short;
+    expect(sent[1]!.uris).toHaveLength(3);
+    expect(sent[1]!.offset).toEqual({ position: 2 });
     await z.close();
   });
 

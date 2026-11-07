@@ -278,6 +278,15 @@ const FAST_FOLLOW_UP_SECOND_MS = 2000;
  */
 const COMMAND_WAIT_MS = 10_000;
 const STARTS_SOUND = new Set<PlayerCommand['type']>(['play', 'resume', 'next', 'prev', 'jump']);
+/** Spotify's play call takes at most this many URIs: a longer list is sent as a window from the starting song. */
+export const MAX_PLAY_URIS = 100;
+
+/** The part of a list Spotify can take: up to MAX_PLAY_URIS songs from `start` on (as the web client windows them). */
+export function playWindow<T>(list: T[], start: number): { list: T[]; start: number } {
+  const at = Math.max(0, Math.min(start, list.length - 1));
+  if (list.length <= MAX_PLAY_URIS) return { list, start: at };
+  return { list: list.slice(at, at + MAX_PLAY_URIS), start: 0 };
+}
 /** How soon after a track hold or claim runs out the zone looks again. */
 const HOLD_EXPIRY_SLACK_MS = 250;
 /** Poll just after the playing song ends (duration - position + slack), capped. */
@@ -578,19 +587,20 @@ export class SpotifyConnectZone implements PlaybackZone {
     const device = this.deviceId;
     switch (cmd.type) {
       case 'play': {
-        const spotifyIds = cmd.trackIds.map((id) => this.requireSpotifyTrack(id));
+        const window = playWindow(cmd.trackIds.map((id) => this.requireSpotifyTrack(id)), cmd.startIndex ?? 0);
+        const spotifyIds = window.list;
         const uris = spotifyIds.map((id) => `spotify:track:${id}`);
         const body: SpotifyPlayBody = { uris };
         // always name the first song: with Spotify's shuffle on, a list without an offset starts on a
         // random one (rune shuffles before sending, so the order it sends is the order it wants)
-        if (uris.length > 0) body.offset = { position: Math.max(0, Math.min(cmd.startIndex ?? 0, uris.length - 1)) };
+        if (uris.length > 0) body.offset = { position: window.start };
         if (cmd.positionMs && cmd.positionMs > 0) body.position_ms = Math.round(cmd.positionMs);
         await this.api.play(body, device);
         this.claim();
         if (cmd.paused) await this.api.pause(device).catch(() => undefined);
         // Show the picked song and the queue we sent at once; Spotify's metadata for those
         // songs is fetched in the background (the command must not wait for it).
-        const start = Math.max(0, Math.min(cmd.startIndex ?? 0, spotifyIds.length - 1));
+        const start = window.start;
         if (!cmd.paused) this.playSent = { trackId: spotifyTrackId(spotifyIds[start] ?? '') };
         const rev = ++this.startedRev;
         this.startedQueue = this.seedQueue(spotifyIds);
@@ -640,9 +650,10 @@ export class SpotifyConnectZone implements PlaybackZone {
         if (!item.track.spotifyUri) throw new Error(`Queue item ${cmd.index} has no Spotify URI.`);
         // replay the whole queue starting at the picked song (an explicit offset: with shuffle on,
         // Spotify would otherwise start on a random song), so the queue and Previous stay intact
-        const playable = this.snapshot.queue.filter((q) => !!q.track.spotifyUri);
-        const uris = playable.map((q) => q.track.spotifyUri as string);
-        const position = playable.indexOf(item);
+        const all = this.snapshot.queue.filter((q) => !!q.track.spotifyUri);
+        const picked = playWindow(all, all.indexOf(item));
+        const uris = picked.list.map((q) => q.track.spotifyUri as string);
+        const position = picked.start;
         this.expectSong(cmd.index);
         await this.api.play({ uris, offset: { position } }, device);
         this.claim();
