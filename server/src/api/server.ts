@@ -343,7 +343,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const getState = (k: string) => (db.prepare('SELECT value FROM app_state WHERE key = ?').get(k) as { value: string } | undefined)?.value;
   const setState = (k: string, v: string) =>
     db.prepare('INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(k, v);
-  // Auto-radio: keep the PC zone playing when its queue runs out (default on).
+  // Auto-radio: keep the PC zone playing when its queue runs out (off by default).
   const AUTO_RADIO_KEY = 'settings.autoRadio';
   const HIDDEN_ZONES_KEY = 'zones.hiddenNames';
   const hiddenZoneNames = (): string[] => {
@@ -354,7 +354,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       return [];
     }
   };
-  const autoRadioEnabled = (): boolean => getState(AUTO_RADIO_KEY) !== '0';
+  // Off unless switched on: it starts music on the speakers with nobody asking.
+  const autoRadioEnabled = (): boolean => getState(AUTO_RADIO_KEY) === '1';
   const SYNC_MIN_GAP_MS = 25 * 60_000;
   let spotifySyncInFlight: Promise<void> | null = null;
   function runSpotifySync(opts: { force?: boolean } = {}): Promise<void> {
@@ -656,7 +657,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     }
     if (!pc || autoRunning || !autoRadioEnabled()) return;
     if (!prev || (prev.status !== 'playing' && prev.status !== 'loading')) return;
-    if (state.status !== 'stopped' || state.queue.length === 0) return;
+    // A one-track queue is a tab driving mpv song by song (a mixed queue): that song ending is not the queue running out.
+    if (state.status !== 'stopped' || state.queue.length < 2) return;
     const zone = pc;
     const seedIds = state.queue.map((q) => q.track.id);
     let fresh: string[];
@@ -681,7 +683,8 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         await zone.command({ type: 'enqueue', trackIds: fresh });
         await zone.command({ type: 'jump', index: appendAt });
         await zone.command({ type: 'resume' });
-        app.log.info({ added: fresh.length }, 'auto-radio appended');
+        // warn: rune runs at LOG_LEVEL=warn, and music that starts by itself has to be traceable
+        app.log.warn({ reason: 'queue ran out', queueLength: appendAt, added: fresh.length, trackId: fresh[0] }, 'auto-radio started a song');
       } catch (e) {
         app.log.warn({ err: e }, 'auto-radio failed');
       } finally {

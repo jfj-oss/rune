@@ -127,7 +127,7 @@ function nextPicks(trackIds: string[], recent: string[]): RadioPick[] {
 }
 
 // ---------- state ----------
-let autoRadioOn = true;
+let autoRadioOn = false;
 let normalizeMode: NormalizeMode = 'album';
 
 export const mockListen = {

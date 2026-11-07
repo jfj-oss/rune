@@ -18,7 +18,7 @@ interface RadioStore {
   loadAutoRadio(): Promise<void>;
 }
 
-const initialAuto = loadLocal<boolean>('rune.autoRadio', true);
+const initialAuto = loadLocal<boolean>('rune.autoRadio', false);
 
 export const useRadio = create<RadioStore>((set, get) => ({
   reasons: {},
