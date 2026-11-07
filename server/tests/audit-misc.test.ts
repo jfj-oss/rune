@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerState } from '@liner/shared';
 import { createSpeakerGuard, type SpeakerZone } from '../src/play/oneSpeaker.js';
-import { SpotifyConnectZone, type SpotifyZoneApi } from '../src/spotify/zones.js';
+import { SpotifyConnectZone, SpotifyZones, type SpotifyZoneApi } from '../src/spotify/zones.js';
+import { MprisPlaybackSource } from '../src/spotify/mpris.js';
+import { DEV, World, sp } from './support/spotify-world.js';
 import { playbackState, sampleTrack } from './spotify-helpers.js';
 
 function fakeApi(over: Partial<SpotifyZoneApi> = {}) {
@@ -69,7 +71,7 @@ describe('misc', () => {
     await z.close();
   });
 
-  it('KNOWN BUG X4 guard: resuming in the Spotify app AFTER mpv started loses; the newest action gets paused', async () => {
+  it('KNOWN BUG X4 (MPRIS reads off) guard: resuming in the Spotify app AFTER mpv started loses; the newest action gets paused', async () => {
     const pc = { status: 'playing' as PlayerState['status'], state() { return { status: this.status } as PlayerState; }, command: vi.fn(async () => undefined) };
     const sp = { status: 'paused' as PlayerState['status'], state() { return { status: this.status } as PlayerState; }, command: vi.fn(async () => undefined),
       startedAt: () => Date.now() - 120_000 /* position 120 s: "began" 2 min ago by the guard's arithmetic */ };
@@ -80,5 +82,52 @@ describe('misc', () => {
     g.changed('spotify', { status: 'playing' } as PlayerState);
     expect(sp.command).toHaveBeenCalledWith({ type: 'pause' });
     expect(pc.command).not.toHaveBeenCalled();
+  });
+
+  it('X4 guard with MPRIS: resuming in the Spotify app after mpv started wins, and mpv is the one paused', async () => {
+    const w = new World({ mpris: true });
+    w.songs.set('s1', sp('s1', 300_000));
+    const source = new MprisPlaybackSource(w.mpris!, { deviceId: () => DEV });
+    const zones = new SpotifyZones(w, { mpris: source });
+    const zone = zones.ensureZone(DEV, 'HORSE');
+    const pc = { status: 'stopped' as PlayerState['status'], state() { return { status: this.status, queue: [], index: -1 } as unknown as PlayerState; }, command: vi.fn(async () => { pc.status = 'paused'; }) };
+    // No wake when mpv starts (budget out): only the app's own signal can date the resume.
+    const g = createSpeakerGuard({ pc: () => pc as unknown as SpeakerZone, spotify: () => zone }, { canWake: () => false });
+    zone.onChange((s) => g.changed('spotify', s));
+    await w.play({ uris: ['spotify:track:s1'] }, DEV);   // the song plays in the app...
+    await vi.advanceTimersByTimeAsync(120_000);
+    w.externalPause();                                    // ...and is paused at 2:00
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(zone.state().status).toBe('paused');
+    pc.status = 'playing';
+    g.changed('pc', { status: 'playing' } as PlayerState); // mpv started
+    await vi.advanceTimersByTimeAsync(5_000);
+    w.externalResume();                                   // seconds later the user resumes the app at 2:00
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(zone.state().status).toBe('playing');
+    expect(pc.command).toHaveBeenCalledWith({ type: 'pause' });
+    expect(w.log.some((l) => l.includes('PUT pause'))).toBe(false);
+    await zones.close(); source.close(); w.dispose();
+  });
+
+  it('X4b guard with MPRIS: a Spotify song still playing from before mpv started is the one paused', async () => {
+    const w = new World({ mpris: true });
+    w.songs.set('s1', sp('s1', 300_000));
+    const source = new MprisPlaybackSource(w.mpris!, { deviceId: () => DEV });
+    const zones = new SpotifyZones(w, { mpris: source });
+    const zone = zones.ensureZone(DEV, 'HORSE');
+    const pc = { status: 'stopped' as PlayerState['status'], state() { return { status: this.status, queue: [], index: -1 } as unknown as PlayerState; }, command: vi.fn(async () => undefined) };
+    const g = createSpeakerGuard({ pc: () => pc as unknown as SpeakerZone, spotify: () => zone });
+    zone.onChange((s) => g.changed('spotify', s));
+    await vi.advanceTimersByTimeAsync(1_000);
+    await w.play({ uris: ['spotify:track:s1'] }, DEV);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(zone.state().status).toBe('playing');
+    pc.status = 'playing';
+    g.changed('pc', { status: 'playing' } as PlayerState);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(pc.command).not.toHaveBeenCalled();
+    expect(w.log.some((l) => l.includes('PUT pause'))).toBe(true);
+    await zones.close(); source.close(); w.dispose();
   });
 });

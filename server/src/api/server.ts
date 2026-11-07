@@ -19,7 +19,7 @@ import {
   type PcSpotifyOptions,
   type PcZone,
 } from '../play/index.js';
-import { createSpotify, type CreateSpotifyOptions } from '../spotify/index.js';
+import { createSpotify, type CreateSpotifyOptions, type SpotifyBudgetLevel } from '../spotify/index.js';
 import { HttpError } from '../spotify/fetch.js';
 import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
@@ -33,6 +33,8 @@ import { registerBrowseRoutes } from './browse.js';
 import { createSpeakerGuard } from '../play/oneSpeaker.js';
 import { createPlaybackLog, startsSound, type PlaybackProbe } from '../play/playbackLog.js';
 import { createSpotifyWatch, type SpotifyWatchOptions } from '../play/spotifyWatch.js';
+import { createMprisBus, MprisPlaybackSource, type MprisBus, type MprisBusOptions } from '../spotify/mpris.js';
+import { loadQueueItems } from '../play/rows.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
@@ -90,6 +92,9 @@ export interface AppOptions {
   /** Log MPRIS, the PipeWire stream and the Connect zone of this PC's Spotify app side by side (main.ts enables;
    *  tests pass fakes). It only listens. */
   spotifyWatch?: boolean | Partial<SpotifyWatchOptions>;
+  /** Read this PC's Spotify app over MPRIS instead of polling /me/player for it (main.ts enables; config
+   *  spotify.mprisReads: false turns it off). Tests pass a fake bus. */
+  mpris?: boolean | { bus: MprisBus } | MprisBusOptions;
   /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
   artistWaitMs?: number;
   webDist?: string;
@@ -266,12 +271,26 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     { pc: () => pc, spotify: () => (pcSpotifyDevice ? spotify?.zones.get(pcSpotifyDevice.id) : undefined) },
     {
       onError: (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
-      // 'out' allows one background poll in ten minutes: mpv starting must not add to that.
-      canWake: () => spotify?.api.budgetLevel() !== 'out',
+      // 'out' allows one background poll in ten minutes: mpv starting must not add to that (an MPRIS read is free).
+      canWake: () =>
+        spotify?.api.budgetLevel() !== 'out' || (!!pcSpotifyDevice && !!mpris?.readsFree(pcSpotifyDevice.id.slice('spotify:'.length))),
       // warn: rune runs at LOG_LEVEL=warn, and this is how a silent song gets explained
       onPause: (info) => app.log.warn(info, 'speaker guard paused a player'),
     },
   );
+  // Phase 2: the Spotify app on this PC is read over MPRIS (free) instead of GET /me/player; commands stay on the Web API.
+  const mpris: MprisPlaybackSource | undefined =
+    opts.mpris && cfg.spotifyClientId && cfg.spotify?.mprisReads !== false
+      ? new MprisPlaybackSource(
+          typeof opts.mpris === 'object' && 'bus' in opts.mpris ? opts.mpris.bus : createMprisBus({ logger: app.log, ...(typeof opts.mpris === 'object' ? opts.mpris : {}) }),
+          {
+            deviceId: () => (pcSpotifyDevice ? pcSpotifyDevice.id.slice('spotify:'.length) : null),
+            knownTracks: (ids) => loadQueueItems(db, ids),
+            budgetLevel: (): SpotifyBudgetLevel => spotify?.api.budgetLevel() ?? 'normal',
+            logger: app.log,
+          },
+        )
+      : undefined;
   const notePcSpotify = (list: { id: Zone; name: string }[]): void => {
     const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();
     const match = list.find((z) => z.name.toLowerCase() === wanted) ?? (wanted ? list.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
@@ -291,6 +310,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         // Only a zone some visible tab shows or drives is polled in the background, and the PC's own Spotify app
         // always (the speaker guard and history need it). Every other Connect device costs no reads until viewed.
         viewed: (zone) => zone === pcSpotifyDevice?.id || presence.viewing(zone),
+        // Spotify's queue is read only for a zone a visible tab shows (the PC's own app included).
+        shown: (zone) => presence.viewing(zone),
+        mpris,
         // Budget-level changes get one warn line each.
         logger: app.log,
         // One line per hour of Spotify traffic: enough to see a runaway poller.
@@ -1333,6 +1355,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     iradio.close();
     await settleJobs();
     spotifyWatch?.close();
+    mpris?.close();
     for (const watched of spotifyListeners.values()) watched.off();
     await spotify?.zones.close();
     spotify?.close();
@@ -1358,6 +1381,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       { name: 'iradio-close', run: () => iradio.close() },
       { name: 'playback-log-close', run: () => playbackLog.close() },
       { name: 'spotify-watch-close', run: () => spotifyWatch?.close() },
+      { name: 'mpris-close', run: () => mpris?.close() },
       { name: 'spotify-zones-close', run: () => spotify?.zones.close() },
       { name: 'spotify-usage-flush', run: () => spotify?.close() },
       { name: 'http-close', run: () => app.close() },

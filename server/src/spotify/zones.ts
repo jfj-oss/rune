@@ -18,6 +18,7 @@ import {
   mapTrack,
   spotifyTrackId,
 } from './map.js';
+import type { MprisPlaybackSource, MprisPlaybackState } from './mpris.js';
 
 /** Subset of SpotifyApi used by zones (a fake is injected in tests). */
 export interface SpotifyZoneApi {
@@ -25,7 +26,10 @@ export interface SpotifyZoneApi {
   tracks(ids: string[], opts?: { maxSingles?: number }): Promise<SpotifyTrack[]>;
   /** One track by id (GET /tracks/{id}). Dev-mode apps may not use the batch endpoint. */
   track(id: string): Promise<SpotifyTrack>;
-  currentPlayback(): Promise<SpotifyPlaybackState | null>;
+  /** The account's /me/player. `forDevice` names the zone asking, so a free source for that device can answer. */
+  currentPlayback(forDevice?: string): Promise<SpotifyPlaybackState | null>;
+  /** Will the next read for this device cost no Spotify request (MPRIS)? Then budget and breaker need not slow it. */
+  readsFree?(deviceId: string): boolean;
   queue(): Promise<SpotifyQueue>;
   play(body: SpotifyPlayBody, deviceId?: string): Promise<void>;
   pause(deviceId?: string): Promise<void>;
@@ -46,6 +50,8 @@ export interface ConnectZoneOptions {
    * a command, or wake() once someone views it, reads it. Undefined = always viewed.
    */
   viewed?: (zone: Zone) => boolean;
+  /** Whether a visible tab shows this zone: only then is its Spotify queue read. Undefined = whenever a client is visible. */
+  shown?: (zone: Zone) => boolean;
   /** Rolling daily budget level; background polls slow down as it fills (default normal). */
   budgetLevel?: () => SpotifyBudgetLevel;
   /** Songs rune already has (title, artists, album, cover) by 'sp:' id: shown at once, no Spotify lookup. */
@@ -55,6 +61,8 @@ export interface ConnectZoneOptions {
   now?: () => number;
   /** Latest playback report from a browser's Web Playback SDK (a free /me/player substitute). */
   localPlayback?: LocalPlaybackSource;
+  /** This PC's Spotify app over MPRIS: a free /me/player substitute for its own device (phase 2). */
+  mpris?: MprisPlaybackSource;
   /** Gets one line per play: what the first poll after it found (track ids only). */
   logger?: SpotifyBudgetLogger;
 }
@@ -342,6 +350,9 @@ export function emptyPlayerState(zone: Zone, now: () => number = Date.now): Play
 }
 
 function queueItemFromSpotify(sp: SpotifyTrack, position: number): QueueItem {
+  // An answer built from MPRIS carries rune's own row for the song (titles, cover, artist links).
+  const own = (sp as SpotifyTrack & { rune?: QueueItem }).rune;
+  if (own) return { ...own, queueId: `spq:${position}:${own.track.id}` };
   const track = mapTrack(sp);
   return {
     queueId: `spq:${position}:${track.id}`,
@@ -475,6 +486,7 @@ export class SpotifyConnectZone implements PlaybackZone {
   private readonly api: SpotifyZoneApi;
   private readonly hasClients: (() => boolean) | undefined;
   private readonly viewed: ((zone: Zone) => boolean) | undefined;
+  private readonly shown: ((zone: Zone) => boolean) | undefined;
   private readonly budgetLevel: (() => SpotifyBudgetLevel) | undefined;
   private readonly knownTracks: ((ids: string[]) => QueueItem[]) | undefined;
   private readonly blockedUntil: (() => number | null) | undefined;
@@ -525,6 +537,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.zone = `spotify:${deviceId}`;
     this.hasClients = opts.hasClients;
     this.viewed = opts.viewed;
+    this.shown = opts.shown;
     this.budgetLevel = opts.budgetLevel;
     this.knownTracks = opts.knownTracks;
     this.blockedUntil = opts.blockedUntil;
@@ -577,6 +590,12 @@ export class SpotifyConnectZone implements PlaybackZone {
     const at = this.now();
     if (at - this.startCommandAt < CLAIM_MS) return at;
     return Math.max(this.lastIdleAt, at - this.snapshot.positionMs);
+  }
+
+  /** rune's description of a song this zone holds (the queue it started, or the one it shows), for a free read source. */
+  knownItem(trackId: string): QueueItem | undefined {
+    const titled = (q: QueueItem) => q.track.id === trackId && !!q.track.title;
+    return this.startedQueue.find(titled) ?? this.snapshot.queue.find(titled);
   }
 
   private async dispatch(cmd: PlayerCommand): Promise<PlayerState> {
@@ -914,7 +933,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     const sent = this.playSent;
     let playback: SpotifyPlaybackState | null;
     try {
-      playback = await this.api.currentPlayback();
+      playback = await this.api.currentPlayback(this.deviceId);
     } catch {
       // Do not schedule from a stale position: a failed read falls back to the capped delay.
       this.lastPlayback = null;
@@ -923,13 +942,14 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.lastPlayback = playback;
     if (sent && sent === this.playSent) this.logPlaySent(sent, playback);
     // Reuse the last queue unless the playing item changed, a command ran, or the read went
-    // stale (5 min). With no connected client there is nobody to show it to: do not fetch it.
+    // stale (5 min). Only a zone a visible tab shows needs it: nobody else sees the queue.
     let queue: SpotifyQueue | undefined = this.lastQueue;
     if (playback && (!playback.device?.id || playback.device.id === this.deviceId)) {
       const itemId = playback.item?.id ?? null;
-      const stale = this.now() - this.lastQueueAt >= QUEUE_STALE_MS;
+      // A paused player's up-next list does not move on by itself: only a playing one goes stale.
+      const stale = playback.is_playing && this.now() - this.lastQueueAt >= QUEUE_STALE_MS;
       const itemChanged = itemId !== this.lastQueueItemId;
-      if (this.clientsWatching() && (this.queueDirty || itemChanged || stale || !this.lastQueue)) {
+      if (this.isShown() && (this.queueDirty || itemChanged || stale || !this.lastQueue)) {
         try {
           queue = await this.api.queue();
           this.lastQueue = queue;
@@ -985,6 +1005,10 @@ export class SpotifyConnectZone implements PlaybackZone {
       if (this.now() >= hold.until || Math.abs(next.volume - hold.volume) <= 1) this.volumeHold = null;
       else next = { ...next, volume: hold.volume };
     }
+    // MPRIS saw the start as it happened: it began then, not when the position says (a resume at 2:00 is new). Set
+    // before the listeners hear of it: the speaker guard asks startedAt() as it does.
+    const since = (playback as MprisPlaybackState | null)?.playingSince;
+    if (next.status === 'playing' && typeof since === 'number') this.lastIdleAt = Math.max(this.lastIdleAt, since);
     if (!sameState(next, this.snapshot)) {
       this.snapshot = next;
       for (const cb of this.listeners) cb(next);
@@ -1012,6 +1036,16 @@ export class SpotifyConnectZone implements PlaybackZone {
     return this.hasClients ? this.hasClients() : true;
   }
 
+  /** Someone looks at this zone's queue: worth a Spotify read of it. */
+  private isShown(): boolean {
+    return this.shown ? this.clientsWatching() && this.shown(this.zone) : this.clientsWatching();
+  }
+
+  /** The next read of this device costs nothing (MPRIS): the budget and the breaker do not apply to it. */
+  private readsFree(): boolean {
+    return this.api.readsFree?.(this.deviceId) ?? false;
+  }
+
   private async loop(): Promise<void> {
     if (this.closed || this.listeners.size === 0) return;
     // Nobody views this zone and no command is owed a read: no background polls until wake().
@@ -1019,7 +1053,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     // Spotify is out of quota: park the loop until the breaker expires (+1 s slack),
     // without touching the network at all.
     const blocked = this.blockedUntil?.() ?? null;
-    if (blocked !== null && blocked > this.now()) {
+    if (blocked !== null && blocked > this.now() && !this.readsFree()) {
       this.parkWhileBlocked(blocked);
       return;
     }
@@ -1027,7 +1061,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     if (this.closed || this.listeners.size === 0) return;
     // The poll may just have discovered the quota block.
     const nowBlocked = this.blockedUntil?.() ?? null;
-    if (nowBlocked !== null && nowBlocked > this.now()) {
+    if (nowBlocked !== null && nowBlocked > this.now() && !this.readsFree()) {
       this.parkWhileBlocked(nowBlocked);
       return;
     }
@@ -1093,7 +1127,8 @@ export class SpotifyConnectZone implements PlaybackZone {
    */
   private backgroundDelayMs(): number {
     const watched = this.clientsWatching();
-    const level = this.budgetLevel?.() ?? 'normal';
+    // A free read (MPRIS) spends no budget: it keeps the normal schedule whatever the level.
+    const level = this.readsFree() ? 'normal' : (this.budgetLevel?.() ?? 'normal');
     const multiplier = level === 'out' ? 1 : BUDGET_DELAY_MULTIPLIER[level];
     let delay: number;
     // The poll aimed at the song's end. Never stretched by the budget: it replaces a periodic poll, so it costs
@@ -1213,10 +1248,19 @@ export class SpotifyZones {
   ) {
     // /me/player describes the whole account, so every zone polling it can share one answer.
     this.now = opts.now ?? Date.now;
-    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback);
+    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris);
     // A local report that changes what is playing wakes every zone: they update from the
     // synthetic (free) answer immediately.
     opts.localPlayback?.setWake(() => this.wake());
+    // An MPRIS signal wakes only this PC's own zone: every other zone would spend a real read on it.
+    opts.mpris?.setWake(() => {
+      const id = opts.mpris?.deviceId();
+      if (id) this.zones.get(`spotify:${id}`)?.wake();
+    });
+    opts.mpris?.setKnown((trackId) => {
+      const id = opts.mpris?.deviceId();
+      return id ? this.zones.get(`spotify:${id}`)?.knownItem(trackId) : undefined;
+    });
   }
 
   /** Devices for GET /zones; shapes merge cleanly with the PC/browser zones. */
@@ -1327,6 +1371,7 @@ export function sharedPlaybackReads(
   api: SpotifyZoneApi,
   now: () => number = Date.now,
   local?: LocalPlaybackSource,
+  mpris?: MprisPlaybackSource,
 ): SpotifyZoneApi {
   type Slot<T> = { at: number; value: Promise<T> } | null;
   let playback: Slot<SpotifyPlaybackState | null> = null;
@@ -1347,11 +1392,14 @@ export function sharedPlaybackReads(
     value.catch(() => undefined);
     return value;
   };
-  const write = async <T>(fn: () => Promise<T>, deviceId?: string): Promise<T> => {
+  /** `signals`: the app shows this change over MPRIS (play, pause, skip, seek), so a read after it can wait for that. */
+  const write = async <T>(fn: () => Promise<T>, deviceId?: string, signals = true): Promise<T> => {
+    const sentAt = now();
     try {
       return await fn();
     } finally {
       local?.noteCommand(deviceId);
+      mpris?.noteCommand(deviceId, sentAt, signals);
       // Commands can add/remove/rename a device (and change playback/queue): drop everything.
       playback = null;
       queue = null;
@@ -1386,19 +1434,27 @@ export function sharedPlaybackReads(
       ),
     tracks: (ids, o) => api.tracks(ids, o),
     track: (id) => api.track(id),
-    currentPlayback: () => {
+    currentPlayback: (forDevice) => {
+      const real = () =>
+        read(playback, (s) => (playback = s), async () => {
+          const answer = await api.currentPlayback();
+          mpris?.noteReal(answer);
+          return answer;
+        });
+      if (mpris && forDevice && forDevice === mpris.deviceId()) return mpris.answer(real);
       const localAnswer = synthetic();
-      return localAnswer ? Promise.resolve(localAnswer) : read(playback, (s) => (playback = s), () => api.currentPlayback());
+      return localAnswer ? Promise.resolve(localAnswer) : real();
     },
+    readsFree: (deviceId) => mpris?.readsFree(deviceId) ?? false,
     queue: () => read(queue, (s) => (queue = s), () => api.queue()),
     play: (body, deviceId) => write(() => api.play(body, deviceId), deviceId),
     pause: (deviceId) => write(() => api.pause(deviceId), deviceId),
     next: (deviceId) => write(() => api.next(deviceId), deviceId),
     previous: (deviceId) => write(() => api.previous(deviceId), deviceId),
     seek: (ms, deviceId) => write(() => api.seek(ms, deviceId), deviceId),
-    setVolume: (v, deviceId) => write(() => api.setVolume(v, deviceId), deviceId),
+    setVolume: (v, deviceId) => write(() => api.setVolume(v, deviceId), deviceId, false),
     setShuffle: (on, deviceId) => write(() => api.setShuffle(on, deviceId), deviceId),
     setRepeat: (mode, deviceId) => write(() => api.setRepeat(mode, deviceId), deviceId),
-    enqueue: (uri, deviceId) => write(() => api.enqueue(uri, deviceId), deviceId),
+    enqueue: (uri, deviceId) => write(() => api.enqueue(uri, deviceId), deviceId, false),
   };
 }

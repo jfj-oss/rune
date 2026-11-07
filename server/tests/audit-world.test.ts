@@ -1,76 +1,41 @@
 // AUDIT: full stack on a virtual clock. Real SpotifyConnectZone + real ZoneEngine + HybridEngine + LocalBackend + PlayCounter.
 // Only Spotify itself is simulated (no network). The World follows the behaviour rune's own comments record:
-// a finished single-URI song = paused + rewound; ~10 min later the player is dropped (204).
+// a finished single-URI song = paused + rewound; ~10 min later the player is dropped (204). With `mpris` the desktop
+// app's MPRIS view of it is simulated too (phase 2), as the phase 0 session recorded it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerState } from '@liner/shared';
-import type { SpotifyBudgetLevel, SpotifyPlaybackState, SpotifyPlayBody, SpotifyQueue, SpotifyTrack, SpotifyDevice } from '../src/spotify/api.js';
-import { SpotifyConnectZone, type SpotifyZoneApi } from '../src/spotify/zones.js';
+import type { SpotifyBudgetLevel } from '../src/spotify/api.js';
+import { SpotifyConnectZone, SpotifyZones } from '../src/spotify/zones.js';
+import { MprisPlaybackSource } from '../src/spotify/mpris.js';
 import { PlayCounter, type RecordedPlay } from '../src/history/plays.js';
 import { ZoneEngine, type ZoneTransport } from '../../web/src/player/zoneEngine.js';
 import { HybridEngine } from '../../web/src/player/hybrid.js';
 import { LocalBackend } from '../../web/src/player/local.js';
 import { FakeZone, mkItem, mkTrack } from '../../web/src/player/testkit.js';
+import { DEV, World, sp } from './support/spotify-world.js';
 
-const DEV = 'horse';
-const DROP_MS = 600_000;
-const sp = (id: string, dur: number): SpotifyTrack => ({ id, name: id, uri: `spotify:track:${id}`, duration_ms: dur, disc_number: 1, track_number: 1, artists: [{ id: 'a', name: 'A' }], album: { id: 'alb', name: 'Alb', artists: [], images: [] } } as unknown as SpotifyTrack);
-
-class World implements SpotifyZoneApi {
-  songs = new Map<string, SpotifyTrack>();
-  cur: SpotifyTrack | null = null;
-  device: string | null = null;
-  playing = false; basePos = 0; baseAt = 0; pausedAt: number | null = null;
-  volume = 100; log: string[] = []; polls: number[] = []; t0 = Date.now();
-  /** Next N reads of /me/player answer 204, as Spotify does before a dormant device is active. */
-  nullReads = 0;
-  at() { return ((Date.now() - this.t0) / 1000).toFixed(1).padStart(7); }
-  note(s: string) { this.log.push(`${this.at()}s ${s}`); }
-  private settle() {
-    if (this.playing && this.cur) {
-      const end = this.baseAt + (this.cur.duration_ms - this.basePos);
-      if (Date.now() >= end) { this.playing = false; this.basePos = 0; this.pausedAt = end; this.note(`[spotify] ${this.cur.id} finished: paused, rewound`); }
-    }
-    if (!this.playing && this.pausedAt !== null && Date.now() - this.pausedAt > DROP_MS) { this.note('[spotify] player dropped'); this.cur = null; this.device = null; this.pausedAt = null; }
-  }
-  pos() { return this.playing ? this.basePos + Date.now() - this.baseAt : this.basePos; }
-  externalPause() { this.settle(); const p = this.pos(); this.playing = false; this.basePos = p; this.pausedAt = Date.now(); this.note(`[user] paused in the Spotify app at ${(p / 1000).toFixed(0)}s`); }
-  otherDevice(id: string) { this.settle(); this.basePos = this.pos(); this.baseAt = Date.now(); this.device = id; this.note(`[user] moved playback to ${id}`); }
-  async devices(): Promise<SpotifyDevice[]> { return []; }
-  async tracks(ids: string[]) { return ids.map((i) => this.songs.get(i)!).filter(Boolean); }
-  async track(id: string) { return this.songs.get(id)!; }
-  async currentPlayback(): Promise<SpotifyPlaybackState | null> {
-    this.polls.push(Date.now() - this.t0);
-    this.settle();
-    if (this.nullReads > 0) { this.nullReads--; this.note('[spotify] GET /me/player -> 204'); return undefined as unknown as null; }
-    if (!this.cur || !this.device) return null;
-    return { device: { id: this.device, is_active: true, is_private_session: false, is_restricted: false, name: 'x', type: 'Computer', volume_percent: this.volume }, repeat_state: 'off', shuffle_state: false, timestamp: Date.now(), progress_ms: Math.round(this.pos()), is_playing: this.playing, item: this.cur } as SpotifyPlaybackState;
-  }
-  async queue(): Promise<SpotifyQueue> { return { currently_playing: null, queue: [] }; }
-  async play(body: SpotifyPlayBody, device?: string) {
-    this.settle();
-    if (body.uris?.length) { const id = body.uris[body.offset?.position ?? 0]!.split(':').pop()!; this.cur = this.songs.get(id)!; this.basePos = body.position_ms ?? 0; this.note(`[rune] PUT play ${id} on ${device}`); }
-    else { this.note('[rune] PUT play (resume)'); }
-    this.device = device ?? this.device; this.baseAt = Date.now(); this.playing = true; this.pausedAt = null;
-  }
-  async pause() { this.settle(); this.basePos = this.pos(); this.playing = false; this.pausedAt = Date.now(); this.note('[rune] PUT pause'); }
-  async next() {} async previous() {} async seek() {} async setShuffle() {} async setRepeat() {} async enqueue() {}
-  async setVolume(v: number) { this.volume = v; this.note(`[rune] PUT volume ${v}`); }
-}
-
-function stack(level: SpotifyBudgetLevel, watched = true) {
-  const w = new World();
-  for (const [id, d] of [['s1', 230_000], ['s2', 180_000], ['s3', 200_000], ['s4', 210_000]] as const) w.songs.set(id, sp(id, d));
+function stack(level: SpotifyBudgetLevel, watched = true, opts: { mpris?: boolean; blockedUntil?: () => number | null; known?: boolean; songs?: number; shown?: boolean } = {}) {
+  const w = new World({ mpris: opts.mpris });
+  const lengths = [230_000, 180_000, 200_000, 210_000];
+  for (let i = 1; i <= (opts.songs ?? 4); i++) w.songs.set(`s${i}`, sp(`s${i}`, lengths[(i - 1) % 4]!));
   let lvl = level;
-  const zone = new SpotifyConnectZone(w, DEV, 'HORSE', { budgetLevel: () => lvl, hasClients: () => watched });
+  // known: the songs are in rune's database (titles and covers without a Spotify lookup).
+  const knownTracks = opts.known ? (ids: string[]) => ids.filter((id) => w.songs.has(id.slice(3))).map((id) => mkItem({ ...mkTrack(id, 'spotify'), durationMs: w.songs.get(id.slice(3))!.duration_ms })).map((p, i) => ({ ...p, queueId: `k${i}` })) : undefined;
+  const zoneOpts = { budgetLevel: () => lvl, hasClients: () => watched, blockedUntil: opts.blockedUntil, knownTracks, shown: opts.shown === undefined ? undefined : () => opts.shown! };
+  // With MPRIS the zone is built the way the server builds it: SpotifyZones wires the source to this device's zone.
+  const source = w.mpris ? new MprisPlaybackSource(w.mpris, { deviceId: () => DEV, budgetLevel: () => lvl, knownTracks }) : undefined;
+  const zones = source ? new SpotifyZones(w, { ...zoneOpts, mpris: source }) : undefined;
+  const zone: SpotifyConnectZone = zones ? zones.ensureZone(DEV, 'HORSE') : new SpotifyConnectZone(w, DEV, 'HORSE', zoneOpts);
   const plays: RecordedPlay[] = [];
   const counter = new PlayCounter((p) => plays.push(p));
   let prev: PlayerState | null = null;
   zone.onChange((s) => { if (prev) counter.recordFromState(prev, s); prev = s; });
   const transport: ZoneTransport = { send: (c) => zone.command(c), get: async () => zone.state(), subscribe: (f) => zone.onChange(f), connected: () => true };
   const pcz = new FakeZone('pc');
-  const items = ['s1', 's2', 's3', 's4'].map((id) => mkItem({ ...mkTrack(`sp:${id}`, 'spotify'), durationMs: w.songs.get(id)!.duration_ms }));
+  const items = [...w.songs.keys()].map((id) => mkItem({ ...mkTrack(`sp:${id}`, 'spotify'), durationMs: w.songs.get(id)!.duration_ms }));
   const b = new LocalBackend('pc', new HybridEngine(new ZoneEngine(pcz), new ZoneEngine(transport)));
-  return { w, zone, b, items, plays, pcz, setLevel: (l: SpotifyBudgetLevel) => { lvl = l; } };
+  const dispose = async () => { b.dispose(); await zone.close(); source?.close(); w.dispose(); };
+  return { w, zone, b, items, plays, pcz, source, dispose, setLevel: (l: SpotifyBudgetLevel) => { lvl = l; } };
 }
 const run = (ms: number) => vi.advanceTimersByTimeAsync(ms);
 const dump = (name: string, w: World, extra = '') => console.log(`\n=== ${name}\n${w.log.join('\n')}${extra ? `\n${extra}` : ''}`);
@@ -91,7 +56,7 @@ describe('world', () => {
     });
   }
 
-  it('KNOWN BUG W1 budget out: a Spotify song ends and the page keeps saying playing for up to 10 minutes; queue then dies', async () => {
+  it('KNOWN BUG W1 (MPRIS reads off) budget out: a Spotify song ends and the page keeps saying playing for up to 10 minutes; queue then dies', async () => {
     const { w, b, items, zone } = stack('out');
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
     await run(232_000);
@@ -224,5 +189,255 @@ describe('world', () => {
     expect(w.log.filter((l) => l.includes('PUT volume 20'))).toHaveLength(1);
     expect(zone.state().volume).toBe(20);
     b.dispose(); await zone.close();
+  });
+});
+
+// Phase 2: the desktop app's MPRIS is the read source for its own zone. The same stories, read from a fake MPRIS.
+describe('world with MPRIS', () => {
+  const reads = (w: World) => w.requests.get('GET /me/player') ?? 0;
+
+  for (const level of ['normal', 'tight', 'low', 'out'] as const) {
+    it(`W0m ${level}: songs follow each other, each seen as it ends, with no /me/player poll in between`, async () => {
+      const { w, b, items, dispose } = stack(level, true, { mpris: true });
+      await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+      await run(830_000);
+      dump(`W0m ${level}: plain queue over MPRIS`, w, `GET /me/player in 830 s: ${reads(w)}; requests ${JSON.stringify(Object.fromEntries(w.requests))}`);
+      expect(w.log.filter((l) => l.includes('PUT play s')).length).toBe(4);
+      // The one read that first confirms the device; the rest is MPRIS.
+      expect(reads(w)).toBeLessThanOrEqual(2);
+      await dispose();
+    });
+  }
+
+  it('W1 budget out: a Spotify song ends and the next one starts at once; the queue goes on', async () => {
+    const { w, b, items, dispose } = stack('out', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(232_000);
+    const during = nowPlaying(b);
+    await run(620_000);
+    dump('W1 out over MPRIS', w, `at 232 s (song over 2 s ago) ${during}\nat 852 s ${nowPlaying(b)}`);
+    expect(during).toContain('s2 playing');
+    const s2 = w.log.find((l) => l.includes('PUT play s2'))!;
+    expect(Number(s2.trim().split('s ')[0])).toBeLessThan(232);
+    expect(w.log.filter((l) => l.includes('PUT play s')).length).toBe(4);
+    await dispose();
+  });
+
+  it('W1b breaker up: MPRIS still shows the song ending, and nothing calls Spotify to read', async () => {
+    const until = Date.now() + 9 * 3600_000;
+    let blocked = false;
+    const { w, b, items, zone, dispose } = stack('normal', true, { mpris: true, blockedUntil: () => (blocked ? until : null) });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(20_000);
+    blocked = true;
+    const seen: string[] = [];
+    zone.onChange((st) => seen.push(`${st.queue[st.index]?.track.id} ${st.status}@${Math.round(st.positionMs / 1000)}`));
+    const before = reads(w);
+    await run(212_000);                    // s1 ends at 230 s
+    // The end is seen as it happens (the fake World takes the page's next play: the real one would refuse it).
+    expect(seen).toContain('sp:s1 paused@0');
+    expect(seen.some((x) => x.startsWith('sp:s1 paused@23'))).toBe(false);
+    expect(reads(w)).toBe(before);
+    await dispose();
+  });
+
+  it('W2m low: pause in the Spotify app stays a pause, seen within a second', async () => {
+    const { w, b, items, zone, dispose } = stack('low', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(130_000);
+    w.externalPause();
+    await run(1_000);
+    expect(zone.state().status).toBe('paused');
+    await run(110_000);
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    expect(nowPlaying(b)).toContain('s1 paused');
+    await dispose();
+  });
+
+  it('W3m a pause just before the end stays a pause', async () => {
+    const { w, b, items, dispose } = stack('normal', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(228_500);
+    w.externalPause();
+    await run(40_000);
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    expect(nowPlaying(b)).toContain('s1 paused');
+    await dispose();
+  });
+
+  it('W4m playback moved to the phone: the app goes quiet, nothing is pulled back, no next song', async () => {
+    const { w, b, items, dispose } = stack('normal', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(60_000);
+    w.otherDevice('phone');
+    await run(40_000);
+    expect(w.device).toBe('phone');
+    expect(nowPlaying(b)).toContain('s1 paused');
+    await run(300_000);
+    expect(w.log.filter((l) => l.includes('[rune]') && !l.includes('volume'))).toHaveLength(1);
+    await dispose();
+  });
+
+  it('W4n an app that mirrors the phone (says Playing, makes no sound here): one Spotify read finds the phone', async () => {
+    const { w, b, items, zone, dispose, source } = stack('normal', true, { mpris: true });
+    w.mirrorsOtherDevice = true;
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(60_000);
+    const before = reads(w);
+    w.otherDevice('phone');
+    await run(40_000);
+    dump('W4n mirrored phone', w, `${nowPlaying(b)}; zone ${zone.state().status} elsewhere=${zone.state().elsewhere}; reads ${reads(w) - before}; ${JSON.stringify(source!.counts)}`);
+    expect(zone.state().elsewhere).toBe(true);
+    expect(w.device).toBe('phone');
+    expect(nowPlaying(b)).toContain('s1 paused');
+    expect(w.log.filter((l) => l.includes('[rune]') && !l.includes('volume'))).toHaveLength(1);
+    await run(300_000);
+    expect(w.log.filter((l) => l.includes('[rune]') && !l.includes('volume'))).toHaveLength(1);
+    await dispose();
+  });
+
+  it('W4o back from the phone: pressing play in the desktop app is seen at once, with no Spotify read', async () => {
+    const { w, b, items, zone, dispose } = stack('normal', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(60_000);
+    w.otherDevice('phone');
+    await run(40_000);
+    const before = reads(w);
+    w.externalResume();
+    await run(3_000);
+    expect(zone.state().status).toBe('playing');
+    expect(zone.state().elsewhere).toBeUndefined();
+    expect(reads(w) - before).toBe(0);
+    await dispose();
+  });
+
+  it('W5m the app closed mid-song: Spotify is asked, the zone stops, the queue does not move on', async () => {
+    const { w, b, items, zone, dispose } = stack('normal', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(60_000);
+    const before = reads(w);
+    w.closeApp();
+    await run(15_000);
+    expect(zone.state().status).toBe('stopped');
+    // One read right away, and the zone's usual confirmation of an empty answer a few seconds later.
+    expect(reads(w) - before).toBeGreaterThanOrEqual(1);
+    expect(reads(w) - before).toBeLessThanOrEqual(3);
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    await dispose();
+  });
+
+  it('W6m an album playing from the app: twenty minutes cost two Spotify reads (another device may have taken over)', async () => {
+    const { w, zone, dispose, source } = stack('normal', true, { mpris: true, known: true });
+    w.context = ['s1', 's2', 's3', 's4', 's1', 's2', 's3', 's4'];
+    zone.onChange(() => undefined);
+    await w.play({ uris: ['spotify:track:s1'] }, DEV);
+    w.context = ['s1', 's2', 's3', 's4', 's1', 's2', 's3', 's4'];
+    await run(5_000);
+    const before = reads(w);
+    await run(1_300_000);
+    console.log('\n=== W6m', JSON.stringify(source!.counts), 'reads at', w.polls.map((t) => Math.round(t / 1000)));
+    expect(w.log.filter((l) => l.includes('next in context')).length).toBeGreaterThanOrEqual(6);
+    expect(zone.state().status).toBe('playing');
+    expect(reads(w) - before).toBe(2);
+    await dispose();
+  });
+
+  it('W7m history at each budget: every song heard to the end is one completed play of about its length', async () => {
+    for (const level of ['normal', 'low', 'out'] as const) {
+      const { w, b, items, plays, dispose } = stack(level, true, { mpris: true });
+      await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+      await run(830_000);
+      console.log(`\n=== W7m ${level}: heard every song to the end`, plays.map((p) => `${p.trackId} played_ms=${p.playedMs} completed=${p.completed}`));
+      expect(plays.map((p) => p.trackId)).toEqual(['sp:s1', 'sp:s2', 'sp:s3', 'sp:s4']);
+      for (const p of plays) {
+        expect(p.completed).toBe(true);
+        expect(Math.abs(p.playedMs - w.songs.get(p.trackId.slice(3))!.duration_ms)).toBeLessThan(3000);
+      }
+      await dispose();
+    }
+  });
+
+  it('W8m a volume change costs one PUT and no reads', async () => {
+    const { w, b, items, zone, dispose } = stack('normal', true, { mpris: true });
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(20_000);
+    const before = w.total();
+    await zone.command({ type: 'volume', volume: 20 });
+    await run(5_000);
+    expect(w.total() - before).toBe(1);
+    expect(zone.state().volume).toBe(20);
+    await dispose();
+  });
+});
+
+// Spotify requests over one simulated hour on this PC's Spotify app (HORSE), MPRIS reads off (before) and on (after).
+// The songs are in rune's database (as songs played from rune mostly are), so no title lookups on either side.
+describe('request rate', () => {
+  type Story = { name: string; watched: boolean; shown: boolean; run: (s: ReturnType<typeof stack>) => Promise<void> };
+  const HOUR = 3_600_000;
+  const stories: Story[] = [
+    {
+      name: 'A rune queue on HORSE, a tab showing it: 17 songs, a 3 min pause, a seek, two volume changes',
+      watched: true, shown: true,
+      run: async ({ b, items }) => {
+        await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+        await run(1_000_000);
+        await b.send({ type: 'pause' }); await run(180_000); await b.send({ type: 'resume' });
+        await run(400_000);
+        await b.send({ type: 'seek', positionMs: 60_000 });
+        await run(600_000);
+        await b.send({ type: 'volume', volume: 40 }); await run(10_000); await b.send({ type: 'volume', volume: 60 });
+        await run(HOUR - 2_190_000);
+      },
+    },
+    {
+      name: 'B the same queue, no tab open',
+      watched: false, shown: false,
+      run: async ({ b, items }) => { await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items); await run(HOUR); },
+    },
+    {
+      name: 'C an album started in the Spotify app, a tab showing HORSE',
+      watched: true, shown: true,
+      run: async ({ w, zone }) => {
+        zone.onChange(() => undefined);
+        await w.play({ uris: ['spotify:track:s1'] }, DEV);
+        w.context = [...w.songs.keys()];
+        await run(HOUR);
+      },
+    },
+    {
+      name: 'D the app open and paused, a tab showing HORSE',
+      watched: true, shown: true,
+      run: async ({ w, zone }) => {
+        zone.onChange(() => undefined);
+        await w.play({ uris: ['spotify:track:s1'] }, DEV);
+        await run(30_000);
+        await w.pause();
+        await run(HOUR - 30_000);
+      },
+    },
+  ];
+
+  it('one hour each, before and after', async () => {
+    const rows: string[] = [];
+    const totals = { before: 0, after: 0 };
+    for (const story of stories) {
+      const counts: Record<string, Record<string, number>> = {};
+      for (const mpris of [false, true]) {
+        vi.setSystemTime(1_800_000_000_000);
+        const s = stack('normal', story.watched, { mpris, known: true, songs: 20, shown: story.shown });
+        await story.run(s);
+        counts[mpris ? 'after' : 'before'] = Object.fromEntries(s.w.requests);
+        if (story.name.startsWith('A') || story.name.startsWith('C')) expect(s.w.log.filter((l) => l.includes('PUT play s') || l.includes('next in context')).length).toBeGreaterThanOrEqual(15);
+        await s.dispose();
+      }
+      const sum = (c: Record<string, number>) => Object.values(c).reduce((a, n) => a + n, 0);
+      const reads = (c: Record<string, number>) => (c['GET /me/player'] ?? 0) + (c['GET queue'] ?? 0);
+      totals.before += sum(counts.before!);
+      totals.after += sum(counts.after!);
+      rows.push(`${story.name}\n  before: ${sum(counts.before!)} requests (${reads(counts.before!)} reads) ${JSON.stringify(counts.before)}\n  after:  ${sum(counts.after!)} requests (${reads(counts.after!)} reads) ${JSON.stringify(counts.after)}`);
+      expect(counts.after!['GET /me/player'] ?? 0).toBeLessThan(counts.before!['GET /me/player'] ?? 0);
+    }
+    console.log(`\n=== Spotify requests in one simulated hour on HORSE\n${rows.join('\n')}\n  all four hours: before ${totals.before}, after ${totals.after}`);
   });
 });

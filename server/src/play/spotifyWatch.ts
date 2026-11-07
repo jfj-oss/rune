@@ -99,7 +99,7 @@ const defaultProbe: PlaybackProbe = (command, args) =>
   });
 
 /** spotify:track:abc, /com/spotify/track/abc → sp:abc; anything else (an ad, NoTrack) → null. */
-function trackIdOf(raw: string): string | null {
+export function trackIdOf(raw: string): string | null {
   if (!/(^|[/:])track[/:][A-Za-z0-9]+$/.test(raw)) return null;
   return `sp:${raw.split(/[/:]/).pop()}`;
 }

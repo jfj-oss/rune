@@ -22,6 +22,9 @@ export interface Config {
   spotify?: {
     /** Requests allowed in a rolling 24 h window before background jobs stop (default 4000). */
     dailyBudget?: number;
+    /** Read this PC's Spotify app over MPRIS instead of polling GET /me/player for it (default true). false brings
+     *  the polling back. */
+    mprisReads?: boolean;
   };
   /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
   lastfmApiKey?: string;
