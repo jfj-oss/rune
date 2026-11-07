@@ -20,7 +20,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('browser zone', () => {
-  it('KNOWN BUG B1 Previous on a local song in the browser does not restart it (state says 0:00, the audio carries on)', async () => {
+  it('B1 Previous on a local song in the browser restarts it, the audio too', async () => {
     const eng = new AudioEngine();
     const b = new LocalBackend('browser', eng);
     const t = mkItem(mkTrack('l:1', 'local'));
@@ -31,7 +31,8 @@ describe('browser zone', () => {
     await b.send({ type: 'prev' });   // over 3 s in: "restart"
     vi.useRealTimers();
     expect(b.state.positionMs).toBe(0);
-    expect(el.currentTime).toBe(90);  // not moved
+    expect(el.currentTime).toBe(0);
+    expect(el.paused).toBe(false);
     b.dispose();
   });
 

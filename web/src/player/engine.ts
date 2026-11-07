@@ -289,6 +289,8 @@ export class AudioEngine implements Engine {
     // A cue/AAC track may be served as a live stream (no length, no byte ranges).
     // Start mid-track via ?t= instead of seeking after metadata, which would fail.
     const viaT = !isLiveTrack(track) && startMs > 0 && this.wantsLive(track);
+    /** The element already holds this song (Previous restarting it, the same song played again): no new load. */
+    let reused = false;
     if (swap) this.swapToPreloaded();
     else {
       const src = streamSrc(track, this.fmt, viaT ? startMs : undefined);
@@ -306,6 +308,7 @@ export class AudioEngine implements Engine {
         if (!isLiveTrack(track)) this.readGain(src, this.el);
       } else {
         this.liveBaseMs = 0;
+        reused = true;
       }
     }
     this.resumeContext();
@@ -316,7 +319,11 @@ export class AudioEngine implements Engine {
       if (!isLiveTrack(track) && !viaT) target.currentTime = startMs / 1000;
       if (autoplay) void target.play().catch(() => this.errorFn('Tap play to start audio'));
     };
-    if (!isLiveTrack(track) && startMs > 0 && !viaT) {
+    if (reused && !isLiveTrack(track)) {
+      // Its metadata came long ago, so waiting for loadedmetadata would wait for ever: move it now.
+      if (!autoplay) target.pause();
+      start();
+    } else if (!isLiveTrack(track) && startMs > 0 && !viaT) {
       target.addEventListener('loadedmetadata', start, { once: true });
     } else if (autoplay) {
       // A swapped-in preload (or a live t= reload) is already at its start.
