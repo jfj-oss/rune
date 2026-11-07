@@ -127,36 +127,71 @@ describe('world', () => {
     b.dispose(); await zone.close();
   });
 
-  it('W4 moving playback to the phone mid-song skips the song and yanks the music back to the PC', async () => {
+  it('W4 moving playback to the phone mid-song leaves it there: no next song, no music pulled back', async () => {
     const { w, b, items, zone } = stack('normal');
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
     await run(60_000);
     w.otherDevice('phone');
     await run(40_000);
     dump('W4 phone takeover', w, `${nowPlaying(b)}; Spotify now on ${w.device}`);
-    expect(w.device).toBe(DEV);
-    expect(w.cur?.id).toBe('s2');
+    expect(w.device).toBe('phone');
+    expect(w.cur?.id).toBe('s1');
+    expect(w.log.filter((l) => l.includes('[rune]') && !l.includes('volume'))).toHaveLength(1); // only the first play
+    expect(nowPlaying(b)).toContain('s1 paused');
+    await run(300_000);                    // the song ends on the phone: still nothing
+    expect(w.log.filter((l) => l.includes('[rune]') && !l.includes('volume'))).toHaveLength(1);
     b.dispose(); await zone.close();
   });
 
-  it('W5 one empty /me/player answer mid-song skips the song', async () => {
+  it('W4b moved to the phone in the last seconds, seen after the time is up: still not the end of the song', async () => {
+    const { w, b, items, zone } = stack('normal');
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(226_000);
+    w.otherDevice('phone');
+    await run(10_000);
+    expect(w.device).toBe('phone');
+    expect(w.cur?.id).toBe('s1');
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    b.dispose(); await zone.close();
+  });
+
+  it('W5 one empty /me/player answer mid-song changes nothing', async () => {
     const { w, b, items, zone } = stack('normal');
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
     await run(60_000);
     w.nullReads = 1;
     await run(35_000);
     dump('W5 204 blip', w, nowPlaying(b));
-    expect(w.cur?.id).toBe('s2');
+    expect(w.cur?.id).toBe('s1');
+    expect(w.log.some((l) => l.includes('GET /me/player -> 204'))).toBe(true);
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    expect(nowPlaying(b)).toContain('s1 playing');
+    expect(zone.state().status).toBe('playing');
     b.dispose(); await zone.close();
   });
 
-  it('W6 dormant device: 204 right after play skips the first song within a second', async () => {
+  it('W5b a player that is really gone shows as stopped a few seconds later, and the queue does not move on', async () => {
+    const { w, b, items, zone } = stack('normal');
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
+    await run(60_000);
+    w.cur = null; w.device = null;         // Spotify lost the player mid-song: 204 from now on
+    await run(40_000);
+    expect(zone.state().status).toBe('stopped');
+    expect(zone.state().elsewhere).toBeUndefined();
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    expect(nowPlaying(b)).toContain('s1 paused');
+    b.dispose(); await zone.close();
+  });
+
+  it('W6 dormant device: a 204 right after play does not skip the first song', async () => {
     const { w, b, items, zone } = stack('normal');
     w.nullReads = 1;
     await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
     await run(5_000);
     dump('W6 dormant', w, nowPlaying(b));
-    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(true);
+    expect(w.log.some((l) => l.includes('GET /me/player -> 204'))).toBe(true);
+    expect(w.log.some((l) => l.includes('PUT play s2'))).toBe(false);
+    expect(nowPlaying(b)).toContain('s1 playing');
     b.dispose(); await zone.close();
   });
 

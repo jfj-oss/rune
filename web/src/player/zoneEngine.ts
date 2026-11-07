@@ -216,9 +216,12 @@ export class ZoneEngine implements Engine {
     // back too. It says the time is up, never that the song ended: a pause nobody polled looks just the same.
     const pos = this.position() ?? s.positionMs;
     const nearEnd = !this.userPaused && dur > 0 && pos >= dur - this.endSlackMs;
-    // Another song on the zone is the next one only when ours was about to end; earlier it is another client's song,
-    // and sending our next track over it would take the zone back from them.
-    if (!match && !nearEnd && s.status !== 'stopped') {
+    // The zone has let go of our song. That is the song ending only if its time is up (mpv going idle reports the end
+    // itself, also for a track of unknown length). Before that it was moved to the phone, Spotify dropped it, or another
+    // client took over, and sending our next track would take the zone back from them.
+    const letGo = !match || s.status === 'stopped';
+    const reportedEnd = match && s.status === 'stopped' && (dur <= 0 || s.positionMs >= dur - this.endSlackMs);
+    if (letGo && (s.elsewhere || !(nearEnd || reportedEnd))) {
       this.armed = false;
       this.detach();
       this.displaced = true;
@@ -229,8 +232,7 @@ export class ZoneEngine implements Engine {
     }
 
     const finished =
-      !match ||
-      s.status === 'stopped' ||
+      letGo ||
       // Spotify's way of ending. A pause keeps its position, so one from outside is never this, even in the last seconds.
       (s.status === 'paused' && s.positionMs <= REWOUND_MS && !!this.snap?.playing && nearEnd);
     if (finished) {

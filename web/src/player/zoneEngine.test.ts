@@ -2,6 +2,7 @@ import type { PlayerState } from '@liner/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { HybridEngine } from './hybrid';
 import { FakeZone, mkTrack } from './testkit';
+import { emptyState } from './types';
 import { ZoneEngine } from './zoneEngine';
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -122,6 +123,61 @@ describe('ZoneEngine', () => {
     zone.finish();
     expect(ended).not.toHaveBeenCalled();
     expect(sync).toHaveBeenLastCalledWith(200_000, false);
+  });
+
+  it('a stop mid-song is not the end: it sends nothing and shows paused where the song was', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    tick(3000);
+    const sent = zone.log.length;
+    zone.setUnknown(); // empty and stopped: moved to the phone, or Spotify dropped the player
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(63_000, false);
+    await flush();
+    expect(zone.log).toHaveLength(sent);
+  });
+
+  it('a song paused elsewhere that Spotify drops, empty as the real thing is, stays where it was paused', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(60_000);
+    zone.externalPause();
+    tick(600_000);
+    zone.setUnknown();
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(60_000, false);
+  });
+
+  it('an empty zone once the time is up is the end of the song', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(190_000);
+    tick(11_000);
+    zone.setUnknown();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('playback moved to another device is not the end, even with the time up', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true);
+    await flush();
+    zone.progress(190_000);
+    tick(11_000);
+    eng.onState({ ...emptyState('spotify:dev'), elsewhere: true, updatedAt: Date.now() + 5000 });
+    expect(ended).not.toHaveBeenCalled();
+  });
+
+  it('mpv going idle on a track of unknown length is still the end', async () => {
+    const { zone, eng, ended } = setup();
+    eng.load({ ...mkTrack('l:1', 'local'), durationMs: 0 }, 0, true);
+    await flush();
+    zone.progress(1000);
+    zone.finish();
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 
   it('the same snapshot delivered again does not hide that the tab found out late', async () => {

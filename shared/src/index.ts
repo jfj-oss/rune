@@ -141,6 +141,8 @@ export interface PlayerState {
   signalPath?: string[];
   /** ICY "now playing" metadata for live radio (PC zone; absent for normal tracks). */
   nowPlaying?: { title?: string; artist?: string; station?: string };
+  /** A Spotify zone that stopped because playback moved to another device: the song did not end here. */
+  elsewhere?: boolean;
   updatedAt: number;
 }
 

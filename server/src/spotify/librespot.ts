@@ -253,6 +253,8 @@ export class LibrespotZone implements PlaybackZone {
   private closed = false;
   private suppressEndsUntil = 0;
   private endHandled = false;
+  /** Playback left for another device (or the session ended) without the song ending. */
+  private elsewhere = false;
   /** songs in a row that failed to load; a run of them means the account or connection is refused, not one bad song */
   private failStreak = 0;
 
@@ -479,6 +481,7 @@ export class LibrespotZone implements PlaybackZone {
     }
     const uri = spotifyTrackUri(item.track);
     this.currentUri = uri;
+    this.elsewhere = false;
     this.setPosition(positionMs);
     this.status = paused ? 'paused' : 'playing';
     // go-librespot may emit `stopped` for the context it is replacing.
@@ -600,6 +603,7 @@ export class LibrespotZone implements PlaybackZone {
           this.positionMs = this.currentPosition();
           this.positionAt = this.now();
           this.status = 'stopped';
+          this.elsewhere = true;
           this.publish();
         }
         break;
@@ -693,6 +697,7 @@ export class LibrespotZone implements PlaybackZone {
 
   private onPlaying(data: Record<string, unknown>): void {
     this.failStreak = 0;
+    this.elsewhere = false;
     const uri = typeof data.uri === 'string' ? data.uri : undefined;
     if (uri) {
       this.currentUri = uri;
@@ -748,6 +753,7 @@ export class LibrespotZone implements PlaybackZone {
     return {
       zone: this.zone,
       status: this.status,
+      ...(this.elsewhere ? { elsewhere: true } : {}),
       queue: this.q.items.slice(),
       index: this.q.index,
       positionMs: this.currentPosition(),

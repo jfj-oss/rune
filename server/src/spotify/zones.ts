@@ -276,6 +276,10 @@ const VOLUME_HOLD_MS = 4000;
 /** How long a just-skipped-to song is shown while Spotify still reports the previous one. */
 const TRACK_HOLD_MS = 4000;
 const SETTLE_GAP_MS = 350;
+/** An answer with nothing playing is believed only after it stood this long, over at least two reads. */
+const EMPTY_CONFIRM_MS = 4000;
+/** How soon the zone looks again after such an answer. */
+const EMPTY_RECHECK_MS = 5000;
 /**
  * After a command the UI wants confirmation at once: poll ~1 s and ~3 s after it,
  * then fall back to the track-aware schedule below.
@@ -494,6 +498,9 @@ export class SpotifyConnectZone implements PlaybackZone {
   /** Same for shuffle / repeat right after they were switched. */
   private toggleHold: { shuffle?: boolean; repeat?: PlayerState['repeat']; until: number } | null = null;
   private lastActiveDevice: string | null = null;
+  /** When the run of empty /me/player answers began, and how long it is (see passingEmpty). */
+  private emptySince: number | null = null;
+  private emptyReads = 0;
   /** The song just skipped/jumped to: shown at once and kept while Spotify still reports the old one. */
   private trackHold: { id: string; until: number } | null = null;
   /** Queue reuse: only re-read when the item changed, a command ran, or it went stale. */
@@ -870,6 +877,29 @@ export class SpotifyConnectZone implements PlaybackZone {
     );
   }
 
+  /**
+   * Spotify answers 204 in passing too: a dormant device just told to play, a hiccup mid-song. Showing that as stopped
+   * would read as the song ending, so the zone stays as it was until the answer repeats some seconds later, which is
+   * how a player that is really gone looks.
+   */
+  private passingEmpty(): boolean {
+    if (this.snapshot.status === 'stopped') {
+      this.clearEmpty();
+      return false;
+    }
+    const at = this.now();
+    this.emptySince ??= at;
+    this.emptyReads++;
+    if (at < this.claimUntil || this.emptyReads < 2 || at - this.emptySince < EMPTY_CONFIRM_MS) return true;
+    this.clearEmpty();
+    return false;
+  }
+
+  private clearEmpty(): void {
+    this.emptySince = null;
+    this.emptyReads = 0;
+  }
+
   private async doPoll(): Promise<void> {
     // Taken before the read: a poll already on its way when the play went out says nothing about it.
     const sent = this.playSent;
@@ -908,9 +938,13 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.lastActiveDevice = activeId;
     let next: PlayerState;
     if (playback && activeId && activeId !== this.deviceId) {
+      this.clearEmpty();
       if (this.now() < this.claimUntil) return; // just told to play here: Spotify hasn't switched yet
-      next = { ...emptyPlayerState(this.zone, this.now), volume: this.snapshot.volume };
+      next = { ...emptyPlayerState(this.zone, this.now), volume: this.snapshot.volume, elsewhere: true };
     } else {
+      if (!playback || (!playback.item && !playback.is_playing)) {
+        if (this.passingEmpty()) return;
+      } else this.clearEmpty();
       next = mapPlaybackState(this.zone, playback, queue, this.startedQueue, this.now);
       this.claimUntil = 0;
     }
@@ -997,10 +1031,12 @@ export class SpotifyConnectZone implements PlaybackZone {
     this.scheduleIn(held === null ? background : Math.min(held, background));
   }
 
-  /** How long until a track hold or claim has run out and a poll can show what Spotify really reports; null if none is pending. */
+  /** How long until a hold, claim or unconfirmed empty answer can be settled by a poll showing what Spotify really reports; null if none is pending. */
   private holdExpiryDelayMs(): number | null {
     const left = Math.max(this.trackHold?.until ?? 0, this.claimUntil) - this.now();
-    return left > 0 ? left + HOLD_EXPIRY_SLACK_MS : null;
+    const held = left > 0 ? left + HOLD_EXPIRY_SLACK_MS : null;
+    if (this.emptySince === null) return held;
+    return held === null ? EMPTY_RECHECK_MS : Math.min(held, EMPTY_RECHECK_MS);
   }
 
   /** One fast poll after a command; the loop schedules the second one. */
@@ -1075,6 +1111,7 @@ function sameState(a: PlayerState, b: PlayerState): boolean {
     a.volume !== b.volume ||
     a.shuffle !== b.shuffle ||
     a.repeat !== b.repeat ||
+    a.elsewhere !== b.elsewhere ||
     a.queue.length !== b.queue.length
   ) {
     return false;
