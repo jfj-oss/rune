@@ -32,9 +32,6 @@ export function scoreHasText(s: CriticScore, details?: AlbumDetails): boolean {
   const p = scorePreview(s, details);
   return !!(p.quote || p.context?.sentences.length);
 }
-/** Colour class for a score: green when rune has text for it, dark red when it is a bare number. */
-export const textTone = (has: boolean) => (has ? 'text' : 'notext');
-
 /** Full stored text (reception, background, artist note, bio) with its attribution. */
 export function textPreview(label: string, title: string, src: Sourced<string>): PreviewItem {
   return { kind: 'text', label, title, text: src.value, url: src.url, attribution: { source: src.source, url: src.url } };

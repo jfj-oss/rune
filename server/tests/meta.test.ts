@@ -550,7 +550,7 @@ describe('wikipedia sections and prose', () => {
   it('extracts reception and background for the five recorded articles', async () => {
     const expected: Record<string, { reception: boolean; background: boolean; scores: number; quotes: number }> = {
       discovery: { reception: true, background: true, scores: 11, quotes: 4 },
-      'jar-of-flies': { reception: true, background: true, scores: 19, quotes: 1 },
+      'jar-of-flies': { reception: true, background: true, scores: 19, quotes: 0 }, // the only sentence names two outlets' critics and is already the reception text, so no pull quote
       'still-bill': { reception: true, background: false, scores: 10, quotes: 3 },
       uprising: { reception: false, background: false, scores: 3, quotes: 0 },
       'fire-of-unknown-origin': { reception: false, background: false, scores: 2, quotes: 0 },
@@ -747,6 +747,12 @@ describe('quotes', () => {
     expect(
       extractQuotes([{ text: 'The album was released in 1994 and sold well in the United States.', urls: [] }], 'https://x'),
     ).toEqual([]);
+  });
+
+  it('does not credit a sentence naming critics of two outlets to either', () => {
+    const text = 'Paul Evans of Rolling Stone called the EP "darkly gorgeous", and Steve Huey stated "Jar of Flies is a low-key stunner."';
+    expect(extractQuotes([{ text, urls: [] }], 'https://x', 4, true)).toEqual([]);
+    expect(extractQuotes([{ text, urls: [] }], 'https://x', 1).length).toBe(1); // still a review paragraph for picking
   });
 });
 

@@ -68,3 +68,15 @@ export function highlightSegments(text: string, terms: string[]): Segment[] {
   if (last < text.length) out.push({ text: text.slice(last), hit: false });
   return out.length ? out : [{ text, hit: false }];
 }
+
+const flat = (t: string) => t.toLowerCase().replace(/[…]|\.{3}/g, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/** Quotes whose words are not already printed in the reception text: an excerpt that is a sentence of that text would only repeat it. */
+export function quotesNotInReception<Q extends { quote: string }>(quotes: readonly Q[], reception: string | undefined): Q[] {
+  if (!reception) return [...quotes];
+  const text = ` ${flat(reception)} `;
+  return quotes.filter((q) => {
+    const k = flat(q.quote);
+    return k.length < 12 || !text.includes(` ${k} `);
+  });
+}

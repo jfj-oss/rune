@@ -6,7 +6,7 @@ import { browseApi } from '../browseApi';
 import { useIsDesktop } from '../hooks/useMedia';
 import { hostOf } from '../lib/format';
 import { highlightSegments } from '../lib/reviewContext';
-import { formatScoreValue, normalizeScore, scoreSuffix } from '../lib/scores';
+import { formatScoreValue, normalizeScore, scoreSuffix, scoreTone } from '../lib/scores';
 import { usePreview, type PreviewItem } from '../store/preview';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])';
@@ -107,7 +107,7 @@ function Summary({ item, onOpenOriginal }: { item: PreviewItem; onOpenOriginal()
   const s = item.score;
   const n = s ? normalizeScore(s) : 0;
   const ctx = item.context;
-  const tone = item.quote || (ctx && ctx.sentences.length > 0) ? 'text' : 'notext';
+  const tone = scoreTone(n);
   const attr = item.attribution ?? (ctx && ctx.sentences.length > 0 ? { source: ctx.source, url: ctx.url } : undefined);
   return (
     <>

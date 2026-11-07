@@ -79,3 +79,35 @@
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .side, .npbar, .tabs, .mini, .pop__panel, .dialog, .drawer, .toast, .atabs::before { background: rgba(15, 16, 19, 0.85); }
 }
+
+/* ---------- compact critic scores (album hero) + the one score colour scale ---------- */
+.hscores { display: flex; flex-direction: column; align-items: inherit; gap: 8px; }
+.hscores .ahero__stars { margin-top: 6px; }
+.hscores__tally { display: inline-flex; gap: 4px; }
+.hscores__tally i { font-style: normal; font-size: 12px; font-weight: 700; min-width: 22px; height: 22px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px; background: rgba(0, 0, 0, 0.55); border: 1px solid color-mix(in srgb, #fff 14%, transparent); font-variant-numeric: tabular-nums; }
+.hscores__tally i.score--high { color: var(--ok); } .hscores__tally i.score--mid { color: var(--warn); } .hscores__tally i.score--low { color: var(--bad); }
+.hscores__chev { transition: transform var(--t); color: var(--text-2); }
+.hscores__chev.is-open { transform: rotate(180deg); }
+.hscores__panel { display: flex; flex-direction: column; align-items: inherit; gap: 8px; }
+.score { background: rgba(0, 0, 0, 0.6); }
+.score:hover { background: rgba(0, 0, 0, 0.75); }
+.score__ext { align-self: center; color: var(--text-3); }
+.scale { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-2); margin: 0 0 8px; }
+.scale__k { font-weight: 600; } .scale__k--high { color: var(--ok); } .scale__k--mid { color: var(--warn); } .scale__k--low { color: var(--bad); }
+.scale__n { color: var(--text-3); }
+.hscores .scale { justify-content: inherit; }
+
+/* ---------- legibility: a soft scrim behind text blocks, and an opaque queue drawer ----------
+   Text must keep WCAG AA (4.5:1) on every backdrop, including the brightest dither colours (Rose, Copper, Album tints).
+   Worst case dots are ~#d6497c (L~0.2); under a 58% near-black scrim that drops to L~0.03, so --text-3 (#c2c3d1) holds ~8:1. */
+.ahero__txt, .asec { position: relative; isolation: isolate; }
+.ahero__txt::before, .asec::before {
+  content: ''; position: absolute; z-index: -1; pointer-events: none; border-radius: 16px;
+  inset: 0 -14px 0 -14px; background: rgba(4, 4, 9, 0.58);
+}
+.asec::before { top: 22px; }
+.asec--quiet::before { top: 16px; }
+.ahero__txt::before { background: rgba(4, 4, 9, 0.5); inset: -10px -14px -6px -14px; }
+@media (max-width: 899px) { .ahero__txt::before, .asec::before { inset-inline: -10px; } .ahero__txt::before { inset-block: -8px -4px; } }
+.drawer { background: #11121a; }
+.srow { background: rgba(255, 255, 255, 0.07); }

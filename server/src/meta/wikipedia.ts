@@ -423,7 +423,7 @@ export async function fetchWikipedia(
 
   const reception = paragraphsValue(receptionPick.paragraphs, canonical, receptionPick.section, 2400);
   const background = paragraphsValue(backgroundParagraphs, canonical, backgroundSection, 2200);
-  const quotes = extractQuotes(receptionPick.paragraphs, wikipediaUrl(canonical), 4);
+  const quotes = extractQuotes(receptionPick.paragraphs, wikipediaUrl(canonical), 4, true);
 
   return {
     pageTitle: canonical,

@@ -16,8 +16,6 @@
   --ok: #4fd18b;
   --warn: #e8b04a;
   --bad: #e5736f;
-  /* critic score with no stored text (a bare number) */
-  --score-notext: #b4423c;
   --spotify: #1db954;
 
   --r: 8px;

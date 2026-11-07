@@ -545,6 +545,20 @@ export function createDiscover(
 
   // ---------- feed ----------
 
+  /** Artists that are really a score/game/film credit ("Halo" for the Halo soundtracks): every album is a soundtrack.
+   Their name matches unrelated real artists on MusicBrainz, Last.fm and Spotify, so they never seed recommendations. */
+  function soundtrackArtistIds(ids: string[]): Set<string> {
+    if (ids.length === 0) return new Set();
+    const rows = db
+      .prepare(
+        `SELECT artist_id AS id, count(*) AS n,
+                sum(CASE WHEN lower(title) LIKE '%soundtrack%' OR lower(title) LIKE '%(ost)%' OR lower(title) LIKE '% ost' OR lower(title) LIKE '%original score%' OR lower(title) LIKE '%motion picture%' OR lower(title) LIKE '%game score%' THEN 1 ELSE 0 END) AS st
+         FROM albums WHERE artist_id IN (${ids.map(() => '?').join(',')}) GROUP BY artist_id`,
+      )
+      .all(...ids) as { id: string; n: number; st: number }[];
+    return new Set(rows.filter((r) => r.n > 0 && r.st === r.n).map((r) => r.id));
+  }
+
   async function pickSeeds(limit: number, vary = false): Promise<{ id: string; name: string; mbid?: string }[]> {
     const weights = new Map<string, number>();
     const add = (artistId: string, weight: number) => {
@@ -624,9 +638,10 @@ export function createDiscover(
       .all(...ids) as { id: string; name: string; mbid: string | null }[];
     const byId = new Map(rows.map((r) => [r.id, r]));
     const seeds: { id: string; name: string; mbid?: string }[] = [];
+    const soundtracks = soundtrackArtistIds(ids);
     for (const [id] of ranked) {
       const row = byId.get(id);
-      if (!row) continue;
+      if (!row || soundtracks.has(id)) continue;
       let mbid = row.mbid ?? undefined;
       if (!mbid) mbid = await mb.searchArtist(row.name);
       seeds.push({ id: row.id, name: row.name, ...(mbid ? { mbid } : {}) });
@@ -687,8 +702,8 @@ export function createDiscover(
         const id = `sp:${candidate.track.id}`;
         if (usedTracks.has(id) || isCandidateOwned(index, candidate)) continue;
         const firstArtist = candidate.track.artists?.[0]?.name ?? candidate.rawArtist;
-        const artistKey = normalizeName(firstArtist);
-        const songKey = `${artistKey}\u0000${normalizeName(candidate.track.name)}`;
+        const artistKey = candidate.track.artists?.[0]?.id ?? normalizeName(firstArtist);
+        const songKey = `${normalizeName(firstArtist)}\u0000${normalizeName(candidate.track.name)}`;
         if (usedSongs.has(songKey)) continue;
         const count = usedPerArtist.get(artistKey) ?? 0;
         if (count >= 2) continue; // diversify: at most 2 songs per artist in the feed
@@ -718,8 +733,8 @@ export function createDiscover(
             };
             if (isCandidateOwned(index, candidate)) continue;
             const firstArtist = track.artists?.[0]?.name ?? seed.name;
-            const artistKey = normalizeName(firstArtist);
-            const songKey = `${artistKey}\u0000${normalizeName(track.name)}`;
+            const artistKey = track.artists?.[0]?.id ?? normalizeName(firstArtist);
+            const songKey = `${normalizeName(firstArtist)}\u0000${normalizeName(track.name)}`;
             if (usedSongs.has(songKey) || (usedPerArtist.get(artistKey) ?? 0) >= 2) continue;
             usedTracks.add(id);
             usedSongs.add(songKey);

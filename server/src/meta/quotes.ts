@@ -93,6 +93,8 @@ export function splitSentences(text: string): string[] {
 interface Attribution {
   outlet: string;
   author?: string;
+  /** Critics of two different outlets in one sentence ("Paul Evans of Rolling Stone ... and Steve Huey stated"): no single credit is true. */
+  ambiguous?: boolean;
 }
 
 function outletIn(sentence: string): OutletPattern | null {
@@ -146,6 +148,7 @@ function detectAttribution(sentence: string): Attribution | null {
   const resolvedOutlet = outlet?.outlet ?? knownCritic!.outlet;
   return {
     outlet: resolvedOutlet,
+    ...(outlet && knownCritic && knownCritic.outlet !== outlet.outlet ? { ambiguous: true } : {}),
     ...(author ?? knownCritic?.author ? { author: author ?? knownCritic?.author } : {}),
   };
 }
@@ -169,6 +172,8 @@ export function extractQuotes(
   paragraphs: ProseParagraph[],
   fallbackUrl: string,
   max = 4,
+  /** Skip sentences whose credit would be a guess (see Attribution.ambiguous); the reception picker still counts them. */
+  skipAmbiguous = false,
 ): CriticQuote[] {
   const quotes: CriticQuote[] = [];
   const seen = new Set<string>();
@@ -177,7 +182,7 @@ export function extractQuotes(
       if (quotes.length >= max) return quotes;
       if (sentence.length < 40) continue;
       const attribution = detectAttribution(sentence);
-      if (!attribution) continue;
+      if (!attribution || (skipAmbiguous && attribution.ambiguous)) continue;
       // A sentence can start with the tail of a parenthetical (") Likewise, ...").
       const excerpt = sentence.replace(/^[)\]}"'’\s]+/, '').trim();
       if (excerpt.length < 40) continue;

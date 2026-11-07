@@ -9,6 +9,9 @@ export function normalizeScore(s: Pick<CriticScore, 'score' | 'scale'>): number 
 
 export type ScoreTone = 'high' | 'mid' | 'low';
 
+/** One scale for every score, whatever the outlet or whether rune has its text: 75+ green, 55-74 amber, under 55 red (of 100). */
+export const SCORE_SCALE_HINT = 'Colour follows the score, scaled to 100: green 75 and up, amber 55 to 74, red under 55.';
+
 export function scoreTone(normalized: number): ScoreTone {
   if (normalized >= 75) return 'high';
   if (normalized >= 55) return 'mid';

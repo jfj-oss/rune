@@ -409,7 +409,13 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
     if (kind === 'pc') {
       const fmt = cur.format === 'mp3' ? `MP3 ${cur.bitrateKbps ?? 320}` : `FLAC ${cur.bitDepth ?? 16}/${(cur.sampleRate ?? 44100) / 1000}`;
       steps = cur.format === 'mp3' ? [fmt, 'mpv', 'PipeWire 48 kHz', 'resampled'] : [fmt, 'mpv', `PipeWire ${Math.round((cur.sampleRate ?? 44100) / 1000)} kHz`, 'bit-perfect'];
-    } else steps = [cur.format === 'mp3' ? 'MP3' : 'FLAC', 'Transcoded to Opus', 'Browser audio'];
+    } else {
+      // what the browser engine really asks for (player/engine.ts pickFormat): the original file, or AAC with Data saver on
+      let saver = false;
+      try { saver = localStorage.getItem('rune.dataSaver') === '1'; } catch { /* storage blocked */ }
+      const src = cur.format === 'mp3' ? 'MP3' : 'FLAC';
+      steps = saver ? [src, 'Transcoded to AAC (Data saver)', 'Browser audio'] : [src, 'Original file, not transcoded', 'Browser audio'];
+    }
   }
   steps = steps ?? [];
   const bitPerfect = steps.some((s) => /bit-perfect/i.test(s));

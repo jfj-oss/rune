@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { highlightSegments, sentencesMentioning, splitSentences, termsFor } from './reviewContext';
+import { quotesNotInReception, highlightSegments, sentencesMentioning, splitSentences, termsFor } from './reviewContext';
 
 const TEXT =
   'The album was widely praised. Tone Quarterly called it "occasionally too polite." Metacritic gave it 84 out of 100. A second paragraph follows.\n\nPitchfork awarded it 8.1.';
@@ -22,5 +22,17 @@ describe('reviewContext', () => {
       { text: 'Metacritic', hit: true },
       { text: ' gave 84.', hit: false },
     ]);
+  });
+});
+
+describe('quotesNotInReception', () => {
+  const rec = 'Paul Evans of Rolling Stone called the EP "darkly gorgeous", and Steve Huey stated "Jar of Flies is a low-key stunner."';
+  it('drops a quote the reception already prints, keeps others', () => {
+    const dup = { quote: 'Paul Evans of Rolling Stone called the EP "darkly gorgeous", and Steve Huey stated "Jar of Flies is a low-key stunner."' };
+    const other = { quote: 'A quiet, patient record that earns its ending.' };
+    expect(quotesNotInReception([dup, other], rec)).toEqual([other]);
+  });
+  it('keeps everything without a reception', () => {
+    expect(quotesNotInReception([{ quote: 'x y z' }], undefined)).toHaveLength(1);
   });
 });

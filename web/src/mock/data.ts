@@ -224,8 +224,12 @@ export const DETAILS: Record<string, AlbumDetails> = {
       { outlet: 'Metacritic', score: 84, scale: 100, url: 'https://www.metacritic.com/search/glass%20harbour/', reviewCount: 12 },
       { outlet: 'Album of the Year', score: 79, scale: 100, url: 'https://www.albumoftheyear.org/search/?q=glass+harbour', reviewCount: 340 },
       { outlet: 'Pitchfork', score: 8.1, scale: 10, url: 'https://pitchfork.com/search/?query=glass%20harbour' },
+      // a long tail of outlets, like a real well-reviewed album (also exercises the compact score summary)
+      ...([['AllMusic', 4, 5], ['Rolling Stone', 4, 5], ['Chicago Tribune', 3, 4], ['Daily News', 4, 5], ['Entertainment Weekly', 3.8, 5], ['Houston Chronicle', 3.5, 5], ['Los Angeles Times', 2, 4], ['NME', 9, 10], ['Spin', 6, 10], ['Mojo', 3, 5], ['Q', 2, 5], ['Uncut', 8, 10], ['The Guardian', 4, 5], ['PopMatters', 5, 10], ['Slant Magazine', 3, 5], ['Paste', 7.4, 10]] as [string, number, number][]).map(([outlet, score, scale]): AlbumDetails['scores'][number] => ({ outlet, score, scale, url: `https://example.org/scores/${encodeURIComponent(outlet)}` })),
     ],
     quotes: [
+      // the same sentence the reception text already prints: the page must not show it twice
+      { outlet: 'Tone Quarterly', url: 'https://example.org/reviews/glass-harbour-5', quote: 'Contemporary critics singled out the title track and "Last Boat Home" as high points' },
       { outlet: 'The Harbour Review', author: 'M. Calloway', url: 'https://example.org/reviews/glass-harbour-1', quote: 'A record that sounds like it was written while looking out at the water — patient, plain-spoken, and quietly devastating in the last third.' },
       { outlet: 'Wireless Weekly', author: 'D. Okafor', url: 'https://example.org/reviews/glass-harbour-2', quote: 'Vale never raises her voice and never needs to. The strings arrive exactly when you want them and leave before they overstay.' },
       { outlet: 'Tone Quarterly', author: 'S. Lindgren', url: 'https://example.org/reviews/glass-harbour-3', quote: 'Occasionally too polite for its own good, but "Last Boat Home" alone would justify the price of admission.' },
