@@ -31,6 +31,7 @@ import { createMeta, registerMetaRoutes } from '../meta/index.js';
 import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
 import { createSpeakerGuard } from '../play/oneSpeaker.js';
+import { createPlaybackLog, startsSound, type PlaybackProbe } from '../play/playbackLog.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
@@ -83,6 +84,8 @@ export interface AppOptions {
   backups?: boolean;
   /** Inject the flatpak/qdbus runner behind the on-demand Spotify start route (tests). */
   pcSpotify?: PcSpotifyOptions;
+  /** Reads the PC's audio state for the playback log (tests inject a fake). */
+  playbackProbe?: PlaybackProbe;
   /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
   artistWaitMs?: number;
   webDist?: string;
@@ -239,6 +242,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     log: (message, err) => app.log.warn({ err }, message),
     ...opts.pcSpotify,
   });
+  const playbackLog = createPlaybackLog({ dataDir: cfg.dataDir, probe: opts.playbackProbe, logger: app.log });
   const history = createHistory(db);
   const localTwins = createLocalTwins(db);
   const lastState = new Map<Zone, PlayerState>();
@@ -1179,7 +1183,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           if (req.params.zone.startsWith('spotify:') || ['play', 'resume', 'next', 'jump'].includes(parsed.command.type)) {
             app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, from }, 'player command');
           }
-          return sanitize(await z.command(parsed.command));
+          const state = await z.command(parsed.command);
+          if (req.params.zone.startsWith('spotify:') && startsSound(parsed.command)) playbackLog.started({ zone: req.params.zone, state: () => z.state() });
+          return sanitize(state);
         } catch (e) {
           if (e instanceof HttpError && e.status === 429) {
             const until = spotify?.api.blockedUntil() ?? Date.now() + (e.retryAfterMs ?? 0);
@@ -1332,6 +1338,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     extra: [
       { name: 'peaks-close', run: () => peaks.close() },
       { name: 'iradio-close', run: () => iradio.close() },
+      { name: 'playback-log-close', run: () => playbackLog.close() },
       { name: 'spotify-zones-close', run: () => spotify?.zones.close() },
       { name: 'spotify-usage-flush', run: () => spotify?.close() },
       { name: 'http-close', run: () => app.close() },

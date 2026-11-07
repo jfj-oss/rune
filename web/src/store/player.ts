@@ -260,12 +260,13 @@ export const usePlayer = create<PlayerStore>((set, get) => {
               const startIndex = playable.indexOf(current);
               const positionMs = livePosition(s);
               const paused = s.status === 'paused';
+              const volume = prev.userVolume?.() ?? s.volume;
               if (s.status === 'playing' || s.status === 'loading') await prev.send({ type: 'pause' }).catch(() => undefined);
               attach(b);
               await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
               if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
               // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
-              if (s.volume > 0 && Math.abs(b.state.volume - s.volume) > 1) await b.send({ type: 'volume', volume: s.volume }).catch(() => undefined);
+              if (volume > 0 && Math.abs(b.state.volume - volume) > 1) await b.send({ type: 'volume', volume }).catch(() => undefined);
               if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${target.name})`);
               else if (target.kind === 'pc' && playable.some((i) => i.track.source === 'spotify') && playable.some((i) => i.track.source === 'local')) notice('Mixed queue on the PC — keep a rune tab open so it can switch between local and Spotify tracks');
               return;

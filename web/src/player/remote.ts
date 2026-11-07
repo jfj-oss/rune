@@ -120,6 +120,7 @@ export type { ScanProgress };
 /** A zone controlled on the server (pc via mpv, or a Spotify Connect device). */
 export class RemoteBackend implements Backend {
   state: PlayerState;
+  ready = false;
   private subs = new Set<(s: PlayerState) => void>();
   private off: () => void;
   private offReconnect: () => void;
@@ -139,6 +140,7 @@ export class RemoteBackend implements Backend {
   }
   private apply(s: PlayerState) {
     this.state = s;
+    this.ready = true;
     for (const f of this.subs) f(s);
   }
   async refresh() {

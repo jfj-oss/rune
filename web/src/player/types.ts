@@ -9,6 +9,10 @@ export interface Backend {
   send(cmd: ExtCommand, items?: PlayItem[]): Promise<void>;
   /** Pull fresh state (remote zones). */
   refresh(): Promise<void>;
+  /** False until a remote zone answered: `state` is only a placeholder before that. */
+  readonly ready?: boolean;
+  /** The level the user chose, when `state.volume` may be a voice-assistant duck passing by. */
+  userVolume?(): number;
   dispose(): void;
 }
 

@@ -333,7 +333,7 @@ describe('P: PcBackend', () => {
     expect(spz.log).not.toContain('resume');
   });
 
-  it('P5 starting Spotify while the voice assistant has mpv ducked copies the ducked level to Spotify for good', async () => {
+  it('P5 starting Spotify while the voice assistant has mpv ducked leaves the duck behind', async () => {
     const { pc, pcz, spz } = make(); live = pc;
     await pc.send(play([L(1)]), [L(1)]); await flush();
     await pcz.send({ type: 'volume', volume: 100 });
@@ -341,19 +341,70 @@ describe('P: PcBackend', () => {
     await flush();
     await spz.send({ type: 'volume', volume: 100 });
     await pc.send(play([S(1)]), [S(1)]); await flush();
-    expect(spz.state.volume).toBe(20);                // Spotify at 20
+    expect(spz.state.volume).toBe(100);
+    expect(spz.log).not.toContain('volume:20');
     await pcz.send({ type: 'volume', volume: 100 });  // voice restores the zone it ducked: pc only
-    expect(spz.state.volume).toBe(20);                // Spotify stays at 20; "10 % = silent" per the code comment
+    expect(spz.state.volume).toBe(100);
   });
 
-  it('P6 a mixed queue created during a duck pins the whole queue to the ducked level', async () => {
+  it('P5b the level the user chose still follows the music from mpv to Spotify', async () => {
+    const { pc, spz } = make(); live = pc;
+    await pc.send(play([L(1)]), [L(1)]); await flush();
+    await pc.send({ type: 'volume', volume: 40 }); await flush();
+    await pc.send(play([S(1)]), [S(1)]); await flush();
+    expect(spz.state.volume).toBe(40);
+  });
+
+  it('P5c a lower level set from another tab counts once it has stood longer than a duck', async () => {
+    let now = 1000;
+    const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
+    const zones = { pc: pcz, 'spotify:dev': spz };
+    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { id: 'dev', name: 'HORSE' }); live = pc;
+    await pc.send(play([L(1)]), [L(1)]); await flush();
+    await pcz.send({ type: 'volume', volume: 30 }); await flush();
+    now += 21_000;
+    await pc.send(play([S(1)]), [S(1)]); await flush();
+    expect(spz.state.volume).toBe(30);
+  });
+
+  it('P5d a duck ending in time counts for nothing', async () => {
+    let now = 1000;
+    const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
+    const zones = { pc: pcz, 'spotify:dev': spz };
+    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { id: 'dev', name: 'HORSE' }); live = pc;
+    await pc.send(play([L(1)]), [L(1)]); await flush();
+    await pcz.send({ type: 'volume', volume: 20 }); await flush();
+    now += 10_000;
+    await pcz.send({ type: 'volume', volume: 100 }); await flush();
+    now += 60_000;
+    await pc.send(play([S(1)]), [S(1)]); await flush();
+    expect(spz.state.volume).toBe(100);
+  });
+
+  it('P5e a page opened on a quiet zone takes that level, not the placeholder of a zone that has not answered', async () => {
+    const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
+    pcz.state = { ...pcz.state, volume: 40 };
+    class Late extends FakeRemote {
+      ready = false;
+      constructor(zone: string, z: FakeZone) { super(zone, z); this.state = emptyState(zone); }
+    }
+    const zones = { pc: pcz, 'spotify:dev': spz };
+    const pc = new PcBackend({ remote: (z) => (z === 'pc' ? new Late(z, pcz) : new FakeRemote(z, spz)), transport: (z) => zones[z as keyof typeof zones] }, { id: 'dev', name: 'HORSE' }); live = pc;
+    await pcz.send({ type: 'volume', volume: 40 }); await flush();   // the first answer
+    expect(pc.userVolume()).toBe(40);
+  });
+
+  it('P6 a mixed queue created during a duck does not pin the queue to the ducked level', async () => {
     const { pc, pcz, spz } = make(); live = pc;
     await pcz.send({ type: 'volume', volume: 20 }); await flush();
+    const ducks = pcz.log.filter((l) => l === 'volume:20').length;
     await pc.send(play([S(1), L(2)]), [S(1), L(2)]); await flush();
-    expect(spz.log).toContain('volume:20');
+    expect(spz.log).not.toContain('volume:20');
     await pcz.send({ type: 'volume', volume: 100 });  // duck over
-    spz.finishPaused(); spz.finish(); await flush(); await flush();
-    expect(pcz.log.filter((l) => l === 'volume:20').length).toBeGreaterThan(0); // next song drags mpv back down
+    spz.progress(199_000);
+    spz.finishPaused(); await flush(); await flush();
+    expect(pcz.log.at(-1)).toContain('play:l:2');     // the next song did start...
+    expect(pcz.log.filter((l) => l === 'volume:20')).toHaveLength(ducks); // ...without dragging mpv back down
   });
 });
 

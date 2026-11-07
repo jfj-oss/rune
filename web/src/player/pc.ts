@@ -16,7 +16,14 @@ export interface PcDeps {
   remote(zone: string): Backend;
   transport(zone: string): ZoneTransport;
   notice?(msg: string): void;
+  now?(): number;
 }
+
+/**
+ * How long a lower volume from outside must stand before it counts as the user's. The voice assistant ducks a zone for
+ * up to 15 s with a plain volume command and restores that zone only, so a level copied meanwhile would stick for good.
+ */
+const DUCK_MS = 20_000;
 
 /**
  * pc queue mode:
@@ -52,9 +59,13 @@ export class PcBackend implements Backend {
   private subs = new Set<(s: PlayerState) => void>();
   private offs: (() => void)[] = [];
   private cache: { src: PlayerState; out: PlayerState } | null = null;
+  /** The level the user chose (null until a zone reported one) and since when the zone has sat below it. */
+  private level: number | null = null;
+  private lowSince: number | null = null;
 
   constructor(private deps: PcDeps, device?: PcDevice | null) {
     this.pc = deps.remote('pc');
+    if (this.pc.ready !== false) this.level = this.pc.state.volume;
     this.offs.push(this.pc.subscribe((s) => this.onChild('pc', s)));
     this.setDevice(device ?? null);
   }
@@ -103,7 +114,7 @@ export class PcBackend implements Backend {
     // would move the wrong song.
     const stay = this.mode === 'pc' ? pcOn : spOn;
     const want: PcMode = spPlaying ? 'spotify' : pcPlaying ? 'pc' : stay ? this.mode : pcOn ? 'pc' : spOn ? 'spotify' : this.mode;
-    if (want !== this.mode) this.mode = want;
+    if (want !== this.mode) this.follow(want);
     this.emit();
   }
 
@@ -116,9 +127,32 @@ export class PcBackend implements Backend {
     this.subs.clear();
   }
 
+  /** The level to carry over to another player: a duck on this one must not travel with it. */
+  userVolume(): number {
+    const v = this.state.volume;
+    if (this.level === null) return v;
+    if (this.lowSince !== null && (this.deps.now ?? Date.now)() - this.lowSince >= DUCK_MS) {
+      this.lowSince = null;
+      if (v > 0) this.level = v;
+    }
+    return this.level;
+  }
+
+  private noteVolume(v: number) {
+    if (v <= 0) return; // not a level anyone chose: a Spotify zone that has not reported yet
+    if (this.level === null || v >= this.level) {
+      this.level = v;
+      this.lowSince = null;
+    } else this.lowSince ??= (this.deps.now ?? Date.now)();
+  }
+
   async send(cmd: ExtCommand, items: PlayItem[] = []): Promise<void> {
     if (cmd.type === 'play') return this.start(cmd, items);
     if (cmd.type === 'enqueue') return this.enqueue(cmd, items);
+    if (cmd.type === 'volume') {
+      this.level = cmd.volume;
+      this.lowSince = null;
+    }
     const c = this.child(this.mode);
     if (!c) return;
     return c.send(cmd, items);
@@ -129,11 +163,12 @@ export class PcBackend implements Backend {
   private async start(cmd: Extract<ExtCommand, { type: 'play' }>, items: PlayItem[]) {
     const target = modeFor(items);
     if (target !== 'pc' && !this.device) throw new Error('rune starts Spotify on the PC for this');
-    const volume = this.state.volume;
+    const volume = this.userVolume();
+    const moved = target !== this.mode;
     await this.switchTo(target);
     const c = this.ensure(target)!;
     await c.send(cmd, items);
-    if (target !== 'mixed' && c.state.volume !== volume && volume > 0) await c.send({ type: 'volume', volume }).catch(() => undefined);
+    if (moved && target !== 'mixed' && c.state.volume !== volume && volume > 0) await c.send({ type: 'volume', volume }).catch(() => undefined);
   }
 
   private async enqueue(cmd: Extract<ExtCommand, { type: 'enqueue' }>, items: PlayItem[]) {
@@ -153,7 +188,7 @@ export class PcBackend implements Backend {
     // the queue turns mixed: move what is playing into the tab-driven hybrid queue, then add
     const queue: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
     const repeat = s.repeat;
-    const volume = s.volume;
+    const volume = this.userVolume();
     await this.switchTo('mixed');
     const m = this.ensure('mixed')!;
     await m.send({ type: 'play', trackIds: [], startIndex: s.index, positionMs: livePosition(s), paused: s.status === 'paused' }, queue);
@@ -174,7 +209,7 @@ export class PcBackend implements Backend {
       const sp = this.device ? `spotify:${this.device.id}` : null;
       if (!sp) return null;
       const engine = new HybridEngine(new ZoneEngine(this.deps.transport('pc')), new ZoneEngine(this.deps.transport(sp)));
-      this.mixed = new LocalBackend('pc', engine, { volume: this.pc.state.volume || 100 }, this.deps.notice);
+      this.mixed = new LocalBackend('pc', engine, { volume: this.userVolume() || 100 }, this.deps.notice);
       this.offs.push(this.mixed.subscribe((s) => this.onChild('mixed', s)));
     }
     return this.child(mode);
@@ -193,13 +228,24 @@ export class PcBackend implements Backend {
     this.emit();
   }
 
-  private onChild(from: PcMode, _s: PlayerState) {
+  /** The page moves to the player that is sounding: its level is the one in use now. */
+  private follow(mode: PcMode) {
+    this.mode = mode;
+    const v = this.child(mode)?.state.volume ?? 0;
+    if (v > 0) {
+      this.level = v;
+      this.lowSince = null;
+    }
+  }
+
+  private onChild(from: PcMode, s: PlayerState) {
+    if (from === this.mode) this.noteVolume(s.volume);
     // The page shows whichever player is sounding: something can start the other one behind our back (the Spotify
     // app itself, another tab, the voice assistant), and the server then pauses the first (play/oneSpeaker.ts).
     if (this.mode !== 'mixed' && from !== 'mixed') {
       const other: PcMode = this.mode === 'pc' ? 'spotify' : 'pc';
       if (this.child(other)?.state.status === 'playing' && this.child(this.mode)?.state.status !== 'playing') {
-        this.mode = other;
+        this.follow(other);
         this.emit();
         return;
       }
