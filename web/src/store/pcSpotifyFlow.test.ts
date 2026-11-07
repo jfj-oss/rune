@@ -59,7 +59,7 @@ interface Harness {
 }
 
 /** Fresh store + fake fetch. `deviceAfterReads` = first poll on which the pc device exists (null = never). */
-async function setup(deviceAfterReads: number | null): Promise<Harness> {
+async function setup(deviceAfterReads: number | null, pcState?: Partial<PlayerState>): Promise<Harness> {
   vi.resetModules();
   vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:4545' });
   vi.stubGlobal('WebSocket', FakeWebSocket);
@@ -102,7 +102,7 @@ async function setup(deviceAfterReads: number | null): Promise<Harness> {
         }));
         return json({ ...baseState(zone), status: 'playing', queue, index: body.startIndex ?? 0 });
       }
-      return json(baseState(zone));
+      return json({ ...baseState(zone), ...(zone === 'pc' ? pcState : {}) });
     }
     if (url.startsWith('/api/spotify/')) return json({ connected: false });
     return json({});
@@ -121,6 +121,17 @@ async function setup(deviceAfterReads: number | null): Promise<Harness> {
     playerPosts: () => playerPosts,
   };
 }
+
+describe('moving playback to another zone', () => {
+  it('pauses a zone that is still loading: its song would start under the moved one', async () => {
+    vi.stubGlobal('Audio', class { addEventListener() {} play() { return Promise.resolve(); } pause() {} load() {} removeAttribute() {} });
+    const loading = { track: { ...item('l:1').track, source: 'local' as const }, album: item('l:1').album, queueId: 'q0' };
+    const h = await setup(null, { status: 'loading', queue: [loading], index: 0 });
+    await h.usePlayer.getState().setZone('browser');
+    expect(h.playerPosts().filter((p) => p.zone === 'pc').map((p) => p.body.type)).toEqual(['pause']);
+    expect(h.usePlayer.getState().zone).toBe('browser');
+  });
+});
 
 describe('Spotify on the PC speakers', () => {
   it('starts the app, waits for its Connect device, then plays without dropping Spotify tracks', async () => {

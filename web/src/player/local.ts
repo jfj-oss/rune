@@ -146,6 +146,7 @@ export class LocalBackend implements Backend {
       case 'resume':
         if (s.status === 'stopped') { if (s.queue.length) this.startCurrent(0); return; }
         this.engine.play();
+        if (this.state !== s) return; // the song was over: Play moved the queue on, and the state already says so
         this.set({ status: 'playing', positionMs: this.engine.position() ?? s.positionMs, updatedAt: Date.now() });
         return;
       case 'next': return this.advanceManual(1);

@@ -67,7 +67,7 @@ describe('Z: ZoneEngine', () => {
     expect(ended).toHaveBeenCalledTimes(1);
   });
 
-  it('Z4 Pause pressed while the play is still on its way is dropped: the song starts anyway', async () => {
+  it('Z4 Pause pressed while the play is still on its way lands right after it: the song stays silent', async () => {
     const zone = new FakeZone('spotify:dev');
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
@@ -76,27 +76,115 @@ describe('Z: ZoneEngine', () => {
     eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
     eng.pause();                         // user changes their mind
     release(); await flush(); await flush();
-    expect(zone.log.filter((l) => l === 'pause')).toHaveLength(0);
+    expect(zone.log.filter((l) => l === 'pause')).toHaveLength(1);
+    expect(zone.log.indexOf('pause')).toBeGreaterThan(zone.log.findIndex((l) => l.startsWith('play:')));
+    expect(zone.state.status).toBe('paused');
+  });
+
+  it('Z4b Pause then Play during the load cancel out: one play, nothing else, and the song is followed', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => false };
+    const eng = new ZoneEngine(slow, { pollMs: 60_000 });
+    const sync = vi.fn(); eng.onSync(sync);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    eng.pause();
+    eng.play();
+    release(); await flush(); await flush();
+    expect(zone.log.filter((l) => l === 'pause' || l === 'resume')).toEqual([]);
+    expect(zone.state.status).toBe('playing');
+    zone.progress(5000);
+    expect(sync).toHaveBeenLastCalledWith(5000, true);
+  });
+
+  it('Z4c Play pressed during a paused start resumes it once it landed', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => false };
+    const eng = new ZoneEngine(slow, { pollMs: 60_000 });
+    eng.load(mkTrack('sp:1', 'spotify'), 42_000, false); await flush();
+    eng.play();
+    release(); await flush(); await flush();
+    expect(zone.log.at(-1)).toBe('resume');
     expect(zone.state.status).toBe('playing');
   });
 
-  it('Z5 after the "overdue" stop, Play talks to a dead engine: no subscription, so the end of that song is never seen', async () => {
+  it('Z4d Pause during the volume step goes out with the play itself', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'volume') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => false };
+    const eng = new ZoneEngine(slow, { pollMs: 60_000 });
+    eng.setVolume(50);
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    eng.pause();
+    release(); await flush(); await flush();
+    expect(zone.log).toContain('play:sp:1@0:paused');
+    expect(zone.log).not.toContain('pause');
+  });
+
+  it('Z5 after the "overdue" stop, Play goes on with the queue instead of resuming a song on a dead engine', async () => {
     const { zone, eng, ended, tick } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
     zone.progress(100_000);
     tick(400_000);                       // slept past the end
     zone.finishPaused();                 // overdue: tab stops, shows the end, paused
     expect(ended).not.toHaveBeenCalled();
+    const sent = zone.log.length;
     eng.play(); await flush();           // the user presses Play on the rune page
-    expect(zone.log.at(-1)).toBe('resume');   // resumes the OLD song, does not move to the next
-    zone.progress(1000);                 // websocket event: nobody listens any more
-    tick(250_000);
-    zone.finishPaused();
-    zone.finish();
-    expect(ended).not.toHaveBeenCalled();     // queue silently dead
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(zone.log).toHaveLength(sent); // the old song is not resumed: the queue loads the next one
   });
 
-  it('Z6 start timeout gives up without silencing the zone: the song starts later with the page showing paused', async () => {
+  it('Z5b the whole queue: Play after the overdue stop plays the next song, and that one is followed to its end', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let now = 10_000;
+    const b = new LocalBackend('pc', new ZoneEngine(zone, { now: () => now, pollMs: 60_000 }));
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, [S(1), S(2), S(3)]); await flush();
+    zone.progress(100_000);
+    now += 400_000;
+    zone.finishPaused();
+    expect(b.state).toMatchObject({ index: 0, status: 'paused' });
+    await b.send({ type: 'resume' }); await flush();
+    expect(b.state).toMatchObject({ index: 1, status: 'playing', positionMs: 0 });
+    expect(zone.log.at(-1)).toBe('play:sp:2@0');
+    zone.progress(199_000);
+    zone.finishPaused(); await flush();
+    expect(b.state.index).toBe(2);
+    expect(zone.log.at(-1)).toBe('play:sp:3@0');
+    b.dispose();
+  });
+
+  it('Z5c Play after the overdue stop on the last song ends the queue instead of showing it playing', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let now = 10_000;
+    const b = new LocalBackend('pc', new ZoneEngine(zone, { now: () => now, pollMs: 60_000 }));
+    await b.send({ type: 'play', trackIds: [], startIndex: 0 }, [S(1)]); await flush();
+    zone.progress(100_000);
+    now += 400_000;
+    zone.finishPaused();
+    const sent = zone.log.length;
+    await b.send({ type: 'resume' }); await flush();
+    expect(b.state.status).toBe('stopped');
+    expect(zone.log).toHaveLength(sent);
+    b.dispose();
+  });
+
+  it('Z5d a seek after the overdue stop picks a place in that song: Play starts there', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(100_000);
+    tick(400_000);
+    zone.finishPaused();
+    eng.seek(30_000);
+    eng.play(); await flush();
+    expect(ended).not.toHaveBeenCalled();
+    expect(zone.log.at(-1)).toBe('play:sp:1@30000');
+  });
+
+  it('Z6 a start given up on is silenced when it lands after all, and Play tries it again', async () => {
     const zone = new FakeZone('spotify:dev');
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
@@ -109,20 +197,66 @@ describe('Z: ZoneEngine', () => {
     eng.onState({ ...emptyState('spotify:dev'), updatedAt: 5 });    // any zone event after 12 s
     expect(err).toHaveBeenCalledTimes(1);                          // page: "did not start", paused
     release(); await flush(); await flush();
-    expect(zone.state.status).toBe('playing');                     // ...and now it sounds
-    expect(zone.log).not.toContain('pause');
-    eng.pause(); await flush();
-    expect(zone.log).not.toContain('pause');                       // Pause on the page cannot reach it
+    expect(zone.log.at(-1)).toBe('pause');                         // it landed late: silenced at once
+    expect(zone.state.status).toBe('paused');
+    eng.play(); await flush(); await flush();
+    expect(zone.log.at(-1)).toBe('play:sp:1@0');
   });
 
-  it('Z7 a tab that wakes within 60 s of the end sees another client\'s new song and overwrites it', async () => {
-    const { zone, eng, ended, tick } = setup();
+  it('Z6b a new song taking over before the late start lands is not paused by it', async () => {
+    const zone = new FakeZone('spotify:dev');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    // the zone runs its commands in order: the second play waits for the first
+    const slow: ZoneTransport = { send: async (c) => { if (c.type === 'play') await gate; return zone.send(c); }, get: () => zone.get(), subscribe: (f) => zone.subscribe(f), connected: () => true };
+    let now = 0;
+    const eng = new ZoneEngine(slow, { now: () => now, pollMs: 60_000, startTimeoutMs: 12_000 });
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    now = 13_000;
+    eng.onState({ ...emptyState('spotify:dev'), updatedAt: 5 });
+    eng.load(mkTrack('sp:2', 'spotify'), 0, true); await flush();
+    release(); await flush(); await flush();
+    expect(zone.log.filter((l) => l.startsWith('play:'))).toEqual(['play:sp:1@0', 'play:sp:2@0']);
+    expect(zone.log).not.toContain('pause');
+    expect(zone.state.status).toBe('playing');
+  });
+
+  it('Z6c a start the zone accepted but never showed gets its pause at once', async () => {
+    const { zone, eng, err, tick } = setup();
+    const send = zone.send.bind(zone);
+    zone.send = async (c) => { if (c.type === 'play') { zone.log.push('play'); return zone.state; } return send(c); };
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    tick(6000);
+    eng.onState(zone.state);
+    expect(err).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(zone.log.at(-1)).toBe('pause');
+  });
+
+  it('Z7 a tab that wakes within 60 s of the end leaves another client\'s new song alone', async () => {
+    const { zone, eng, ended, sync, tick } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
     zone.progress(150_000);
     tick(70_000);    // song ended 20 s ago; the phone has started something else
     zone.state = { ...zone.state, queue: [{ queueId: 'x', track: mkTrack('sp:phone', 'spotify'), album: { id: 'a', title: 'b' } }], index: 0, positionMs: 3000, status: 'playing', updatedAt: Date.now() + 1 };
+    const sent = zone.log.length;
     eng.onState(zone.state);
-    expect(ended).toHaveBeenCalledTimes(1);  // tab now sends its next track over the phone's choice
+    expect(ended).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenLastCalledWith(200_000, false);
+    await flush();
+    expect(zone.log).toHaveLength(sent);
+    eng.play(); await flush();               // the user asks: then the queue goes on
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('Z7b a song that began as ours ran out followed it, however late the tab noticed within the minute', async () => {
+    const { zone, eng, ended, tick } = setup();
+    eng.load(mkTrack('sp:1', 'spotify'), 0, true); await flush();
+    zone.progress(150_000);
+    tick(70_000);    // song ended 20 s ago and Spotify's own autoplay has run for those 20 s
+    zone.state = { ...zone.state, queue: [{ queueId: 'x', track: mkTrack('sp:auto', 'spotify'), album: { id: 'a', title: 'b' } }], index: 0, positionMs: 20_000, status: 'playing', updatedAt: Date.now() + 1 };
+    eng.onState(zone.state);
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -224,7 +358,7 @@ describe('P: PcBackend', () => {
 });
 
 describe('L: LocalBackend', () => {
-  it('L1 the 4 s window: status flips back to playing after Pause was dropped', async () => {
+  it('L1 Pause during a load holds: the page stays paused and the song stays silent', async () => {
     const zone = new FakeZone('spotify:dev');
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
@@ -235,7 +369,8 @@ describe('L: LocalBackend', () => {
     await b.send({ type: 'pause' });
     expect(b.state.status).toBe('paused');
     release(); await flush(); await flush();
-    expect(b.state.status).toBe('playing');   // the page un-pauses itself and the song sounds
+    expect(b.state.status).toBe('paused');
+    expect(zone.state.status).toBe('paused');
     b.dispose();
   });
 });

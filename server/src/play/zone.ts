@@ -573,10 +573,11 @@ class PcZoneImpl implements PcZone {
       this.status = 'loading';
       this.emitChange();
     }
-    await this.respawn(wasPaused, savedPosition);
+    await this.respawn(wasPaused, savedPosition, wasActive);
   }
 
-  private async respawn(wasPaused: boolean, savedPosition: number): Promise<void> {
+  /** `wasActive` false: nothing was playing, so the new mpv just waits; the queue stays for Play. */
+  private async respawn(wasPaused: boolean, savedPosition: number, wasActive: boolean): Promise<void> {
     this.restoring = true;
     try {
       await sleep(200);
@@ -584,7 +585,7 @@ class PcZoneImpl implements PcZone {
       await this.spawnMpv();
       this.respawnAttempts = 0;
       await this.setMpvVolume(this.volume);
-      if (this.q.index >= 0) {
+      if (wasActive && this.q.index >= 0) {
         await this.startPlayback({ positionMs: savedPosition, paused: wasPaused });
       } else {
         this.status = 'stopped';
@@ -595,7 +596,7 @@ class PcZoneImpl implements PcZone {
       if (this.closed) return;
       if (this.respawnAttempts < MAX_RESPAWN_ATTEMPTS) {
         this.restoring = false;
-        await this.respawn(wasPaused, savedPosition);
+        await this.respawn(wasPaused, savedPosition, wasActive);
         return;
       }
       this.status = 'stopped';

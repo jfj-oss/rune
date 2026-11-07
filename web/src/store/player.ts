@@ -260,7 +260,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
               const startIndex = playable.indexOf(current);
               const positionMs = livePosition(s);
               const paused = s.status === 'paused';
-              if (s.status === 'playing') await prev.send({ type: 'pause' }).catch(() => undefined);
+              if (s.status === 'playing' || s.status === 'loading') await prev.send({ type: 'pause' }).catch(() => undefined);
               attach(b);
               await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
               if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);

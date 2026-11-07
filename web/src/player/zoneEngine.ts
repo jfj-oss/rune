@@ -43,6 +43,13 @@ export class ZoneEngine implements Engine {
   private userPaused = false;
   /** Another client's song took the zone: this track waits, paused, until the user plays it again. */
   private displaced = false;
+  /** Waiting like that, but the song's time ran out: Play moves on to the next song. */
+  private spent = false;
+  /** Pause or Play was pressed during the load: until the correction lands, what the zone says is out of date. */
+  private correcting = false;
+  /** The load this engine gave up on while its play was on the way: it gets a pause if it lands after all. */
+  private lateGen: number | null = null;
+  private startMs = 0;
   private loadedAt = 0;
   private lastUpdated = 0;
   private snap: { pos: number; at: number; playing: boolean } | null = null;
@@ -79,7 +86,10 @@ export class ZoneEngine implements Engine {
     this.armed = false;
     this.inFlight = true;
     this.displaced = false;
+    this.spent = false;
+    this.correcting = false;
     this.userPaused = !autoplay;
+    this.startMs = startMs;
     this.loadedAt = this.now();
     this.lastUpdated = 0;
     this.snap = null;
@@ -89,36 +99,59 @@ export class ZoneEngine implements Engine {
         // the zone may have a different volume than the slider (mpv vs the Spotify app): bring it in line
         if (this.serverVolume === null || Math.abs(this.serverVolume - this.volume) > 1) await this.t.send({ type: 'volume', volume: this.volume }).catch(() => undefined);
         if (gen !== this.gen) return; // stopped or replaced meanwhile: its pause must not land before this play
-        const s = await this.t.send({ type: 'play', trackIds: [track.id], startIndex: 0, positionMs: Math.max(0, Math.round(startMs)), paused: !autoplay });
-        this.onState(s, gen);
+        let paused = this.userPaused;
+        let s = await this.t.send({ type: 'play', trackIds: [track.id], startIndex: 0, positionMs: Math.max(0, Math.round(startMs)), paused });
+        // Pause or Play pressed while the start was on its way: only now can it land after that start, not ahead of it.
+        while (gen === this.gen && this.userPaused !== paused) {
+          paused = this.userPaused;
+          s = await this.t.send({ type: paused ? 'pause' : 'resume' });
+        }
+        if (gen === this.gen) {
+          this.inFlight = false;
+          this.correcting = false;
+          this.onState(s, gen);
+        } else if (gen === this.lateGen && (!this.track || this.displaced)) {
+          // Given up on, and nothing new took over: the page says it did not start, so it must not sound now.
+          void this.t.send({ type: 'pause' }).catch(() => undefined);
+        }
       } catch (e) {
         if (gen === this.gen) this.errorFn(e instanceof Error && e.message ? `Could not start playback — ${e.message}` : 'Could not start playback on that device');
       } finally {
-        if (gen === this.gen) this.inFlight = false;
+        if (gen === this.gen) {
+          this.inFlight = false;
+          this.correcting = false;
+        }
       }
     })();
   }
 
   play() {
     if (!this.track) return;
+    // the song was over when the tab noticed, and this engine stopped there: Play goes on with the queue
+    if (this.spent) { this.spent = false; this.endedFn(); return; }
     // the zone holds someone else's song: a resume would only restart that
     if (this.displaced) { this.load(this.track, this.position() ?? 0, true); return; }
+    const wasPaused = this.userPaused;
     this.userPaused = false;
     if (this.snap) this.snap = { pos: this.position() ?? this.snap.pos, at: this.now(), playing: true };
+    if (this.inFlight) { this.correcting ||= wasPaused; return; }
     this.command({ type: 'resume' });
   }
 
   pause() {
-    if (!this.track || !this.armed) return;
+    if (!this.track || (!this.armed && !this.inFlight)) return;
+    const wasPaused = this.userPaused;
     this.userPaused = true;
     const pos = this.position();
     if (pos !== null) this.snap = { pos, at: this.now(), playing: false };
+    if (this.inFlight) { this.correcting ||= !wasPaused; return; }
     this.command({ type: 'pause' });
   }
 
   seek(ms: number) {
     if (!this.track) return;
     this.snap = { pos: ms, at: this.now(), playing: this.snap?.playing ?? !this.userPaused };
+    this.spent = false; // a place picked in the song: Play starts from there, not with the next song
     if (this.displaced) return; // not our song to seek in: play() starts from here
     this.command({ type: 'seek', positionMs: Math.round(ms) });
   }
@@ -150,6 +183,8 @@ export class ZoneEngine implements Engine {
     this.armed = false;
     this.inFlight = false;
     this.displaced = false;
+    this.spent = false;
+    this.correcting = false;
     this.snap = null;
     if (was && sounding) void this.t.send({ type: 'pause' }).catch(() => undefined);
   }
@@ -188,7 +223,7 @@ export class ZoneEngine implements Engine {
   /** Feed a zone state in (websocket, poll, or a command's response). Exposed for tests. */
   onState(s: PlayerState, gen = this.gen) {
     const track = this.track;
-    if (!track || gen !== this.gen || this.displaced) return;
+    if (!track || gen !== this.gen || this.displaced || this.correcting) return;
     if (s.updatedAt < this.lastUpdated && this.armed) return; // older than something already applied
     const cur = s.queue[s.index];
     const match = !!cur && sameTrack(cur.track, track);
@@ -200,7 +235,7 @@ export class ZoneEngine implements Engine {
         this.serverVolume = s.volume;
       } else {
         if (t - this.loadedAt > this.startTimeoutMs) {
-          this.fail('The device did not start the track — is the Spotify app open on the PC?');
+          this.fail('The device did not start the track — is the Spotify app open on the PC?', s);
         }
         return;
       }
@@ -221,10 +256,15 @@ export class ZoneEngine implements Engine {
     // client took over, and sending our next track would take the zone back from them.
     const letGo = !match || s.status === 'stopped';
     const reportedEnd = match && s.status === 'stopped' && (dur <= 0 || s.positionMs >= dur - this.endSlackMs);
-    if (letGo && (s.elsewhere || !(nearEnd || reportedEnd))) {
+    // Another song that began when ours ran out followed it; one that began later was someone's choice, even if ours was over by then.
+    const snap = this.snap;
+    const sinceEnd = snap?.playing ? t - (snap.at + Math.max(0, dur - snap.pos)) : null;
+    const followed = s.status === 'stopped' || (sinceEnd !== null && Math.abs(s.positionMs - sinceEnd) <= this.endSlackMs);
+    if (letGo && (s.elsewhere || !(nearEnd || reportedEnd) || (!match && !followed))) {
       this.armed = false;
       this.detach();
       this.displaced = true;
+      this.spent = nearEnd;
       this.userPaused = true;
       this.snap = { pos, at: t, playing: false };
       this.syncFn(pos, false);
@@ -241,11 +281,11 @@ export class ZoneEngine implements Engine {
       // A tab that slept (a closed laptop, a background tab) finds out long after the song ended. It must not start
       // the next song on the PC out of nowhere minutes later, with nobody there: it stops instead.
       // The same goes for a song paused elsewhere that Spotify drops as stopped minutes later: nobody asked for the next one.
-      const overdue = this.snap?.playing
-        ? t - (this.snap.at + Math.max(0, dur - this.snap.pos)) > ZoneEngine.STALE_END_MS
-        : s.status !== 'paused';
+      const overdue = sinceEnd !== null ? sinceEnd > ZoneEngine.STALE_END_MS : s.status !== 'paused';
       this.snap = { pos: dur, at: t, playing: false };
       if (overdue) {
+        this.displaced = true;
+        this.spent = true;
         this.userPaused = true;
         this.syncFn(dur, false);
         return;
@@ -259,10 +299,18 @@ export class ZoneEngine implements Engine {
     this.syncFn(s.positionMs, playing);
   }
 
-  private fail(msg: string) {
+  /** Give up on a start. The track stays, paused, so that Play tries again. */
+  private fail(msg: string, s: PlayerState) {
     this.detach();
-    this.track = null;
+    // A play still on its way can start any time now. One already answered may too, unless another song has the zone.
+    if (this.inFlight) this.lateGen = this.gen;
+    else if (s.status !== 'playing') void this.t.send({ type: 'pause' }).catch(() => undefined);
     this.gen++;
+    this.inFlight = false;
+    this.correcting = false;
+    this.displaced = true;
+    this.userPaused = true;
+    this.snap = { pos: this.startMs, at: this.now(), playing: false };
     this.errorFn(msg);
   }
 }
