@@ -32,6 +32,7 @@ import { createArtistMeta, registerArtistMetaRoutes } from '../meta/artist.js';
 import { registerBrowseRoutes } from './browse.js';
 import { createSpeakerGuard } from '../play/oneSpeaker.js';
 import { createPlaybackLog, startsSound, type PlaybackProbe } from '../play/playbackLog.js';
+import { createSpotifyWatch, type SpotifyWatchOptions } from '../play/spotifyWatch.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
 import { createClientPresence } from './presence.js';
@@ -86,6 +87,9 @@ export interface AppOptions {
   pcSpotify?: PcSpotifyOptions;
   /** Reads the PC's audio state for the playback log (tests inject a fake). */
   playbackProbe?: PlaybackProbe;
+  /** Log MPRIS, the PipeWire stream and the Connect zone of this PC's Spotify app side by side (main.ts enables;
+   *  tests pass fakes). It only listens. */
+  spotifyWatch?: boolean | Partial<SpotifyWatchOptions>;
   /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
   artistWaitMs?: number;
   webDist?: string;
@@ -243,6 +247,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     ...opts.pcSpotify,
   });
   const playbackLog = createPlaybackLog({ dataDir: cfg.dataDir, probe: opts.playbackProbe, logger: app.log });
+  const spotifyWatch = opts.spotifyWatch
+    ? createSpotifyWatch({ dataDir: cfg.dataDir, logger: app.log, ...(typeof opts.spotifyWatch === 'object' ? opts.spotifyWatch : {}) })
+    : undefined;
   const history = createHistory(db);
   const localTwins = createLocalTwins(db);
   const lastState = new Map<Zone, PlayerState>();
@@ -451,7 +458,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (watched?.zone === z) return z;
     watched?.off();
     const off = z.onChange((state) => {
-      if (id === pcSpotifyDevice?.id) speakers.changed('spotify', state);
+      if (id === pcSpotifyDevice?.id) {
+        speakers.changed('spotify', state);
+        spotifyWatch?.connect(state);
+      }
       recordHistory(state);
       broadcast({ type: 'player', state: sanitize(state) });
     });
@@ -1315,6 +1325,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     peaks.close();
     iradio.close();
     await settleJobs();
+    spotifyWatch?.close();
     for (const watched of spotifyListeners.values()) watched.off();
     await spotify?.zones.close();
     spotify?.close();
@@ -1339,6 +1350,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       { name: 'peaks-close', run: () => peaks.close() },
       { name: 'iradio-close', run: () => iradio.close() },
       { name: 'playback-log-close', run: () => playbackLog.close() },
+      { name: 'spotify-watch-close', run: () => spotifyWatch?.close() },
       { name: 'spotify-zones-close', run: () => spotify?.zones.close() },
       { name: 'spotify-usage-flush', run: () => spotify?.close() },
       { name: 'http-close', run: () => app.close() },

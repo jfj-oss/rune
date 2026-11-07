@@ -14,6 +14,8 @@ const { app, shutdown } = await buildApp(db, cfg, {
   scanOnStart: background,
   watch: background && process.env.RUNE_NO_WATCH !== '1',
   backups: background && process.env.RUNE_NO_BACKUPS !== '1',
+  // Phase 0: MPRIS + PipeWire + Connect side by side in spotify-watch.jsonl (listens only).
+  spotifyWatch: background && process.env.RUNE_NO_SPOTIFY_WATCH !== '1',
 });
 const host = process.env.RUNE_HOST ?? '0.0.0.0';
 await app.listen({ port: cfg.port, host });
