@@ -28,6 +28,8 @@ const DEFAULT_RECENT_LIMIT = 20;
 const DEFAULT_REDISCOVER_LIMIT = 8;
 const DEFAULT_OLDER_THAN_DAYS = 90;
 const MAX_LIMIT = 200;
+/** Two zones' plays of one song that began this close together are one listen. */
+const SAME_LISTEN_MS = 20_000;
 
 const migration = readFileSync(new URL('../db/migrations-history.sql', import.meta.url), 'utf8');
 
@@ -80,8 +82,18 @@ export function createHistory(db: Db, opts: HistoryOptions = {}): HistoryService
     `INSERT INTO plays (track_id, album_id, zone, started_at, played_ms, completed)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
+  // One listen can be reported twice: the browser zone posts its own plays, and the server counts the Connect zone of
+  // that tab's Spotify device (or a tab drives the PC's Spotify app while the server watches it). Two zones naming the
+  // same song started within this window are one play: the first row is kept, with the larger heard time.
+  const twin = db.prepare(
+    `SELECT id FROM plays WHERE track_id = ? AND zone <> ? AND started_at BETWEEN ? AND ? ORDER BY ABS(started_at - ?) LIMIT 1`,
+  );
+  const merge = db.prepare('UPDATE plays SET played_ms = MAX(played_ms, ?), completed = MAX(completed, ?) WHERE id = ?');
   const write = (p: RecordedPlay): void => {
-    insert.run(p.trackId, p.albumId, p.zone, p.startedAt, p.playedMs, p.completed ? 1 : 0);
+    const done = p.completed ? 1 : 0;
+    const same = twin.get(p.trackId, p.zone, p.startedAt - SAME_LISTEN_MS, p.startedAt + SAME_LISTEN_MS, p.startedAt) as { id: number } | undefined;
+    if (same) merge.run(p.playedMs, done, same.id);
+    else insert.run(p.trackId, p.albumId, p.zone, p.startedAt, p.playedMs, done);
   };
   const counter = new PlayCounter(write, { pauseSplitMs: opts.pauseSplitMs });
   const now = opts.now ?? Date.now;

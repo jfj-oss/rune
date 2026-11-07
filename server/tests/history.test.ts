@@ -405,6 +405,25 @@ describe('Spotify Connect zones: the time between reads is estimated', () => {
   });
 });
 
+describe('one listen reported by two zones', () => {
+  it('the browser zone and the Connect zone of its Spotify device make one row, with the larger heard time', () => {
+    const db = openDb(':memory:');
+    const history = createHistory(db);
+    history.record({ trackId: 'sp:a', albumId: 'sp:al', zone: 'browser', startedAt: BASE, playedMs: 180_000, completed: true });
+    history.record({ trackId: 'sp:a', albumId: 'sp:al', zone: 'spotify:dev', startedAt: BASE + 4_000, playedMs: 200_000, completed: false });
+    expect(plays(db).map((p) => [p.zone, p.playedMs, p.completed])).toEqual([['browser', 200_000, 1]]);
+  });
+
+  it('the same zone playing a song twice, or two zones far apart in time, are separate plays', () => {
+    const db = openDb(':memory:');
+    const history = createHistory(db);
+    history.record({ trackId: 'sp:a', albumId: 'sp:al', zone: 'pc', startedAt: BASE, playedMs: 40_000, completed: false });
+    history.record({ trackId: 'sp:a', albumId: 'sp:al', zone: 'pc', startedAt: BASE + 10_000, playedMs: 40_000, completed: false });
+    history.record({ trackId: 'sp:a', albumId: 'sp:al', zone: 'browser', startedAt: BASE + 120_000, playedMs: 40_000, completed: false });
+    expect(plays(db)).toHaveLength(3);
+  });
+});
+
 describe('recent albums', () => {
   it('orders by last played and aggregates plays', () => {
     const db = openDb(':memory:');
