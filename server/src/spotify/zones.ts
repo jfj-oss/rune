@@ -300,6 +300,10 @@ const UNWATCHED_PLAYING_UNKNOWN_MS = 30_000;
 const WATCHED_IDLE_MS = 20_000;
 const UNWATCHED_IDLE_MS = 300_000;
 const MIN_BACKGROUND_POLL_MS = 1_500;
+/** While Spotify's breaker is up nothing re-reads a zone: a song shown playing is shown paused this long after its time is up. */
+const BLOCKED_STALE_SLACK_MS = 5_000;
+/** The same for a song of unknown length, counted from the last read. */
+const BLOCKED_STALE_UNKNOWN_MS = 600_000;
 /** 'out' means at most one background poll every ten minutes. */
 const OUT_BACKGROUND_POLL_MS = 600_000;
 const BUDGET_DELAY_MULTIPLIER: Record<Exclude<SpotifyBudgetLevel, 'out'>, number> = {
@@ -1003,7 +1007,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     // without touching the network at all.
     const blocked = this.blockedUntil?.() ?? null;
     if (blocked !== null && blocked > this.now()) {
-      this.scheduleAt(blocked + 1000);
+      this.parkWhileBlocked(blocked);
       return;
     }
     await this.pollOnce();
@@ -1011,7 +1015,7 @@ export class SpotifyConnectZone implements PlaybackZone {
     // The poll may just have discovered the quota block.
     const nowBlocked = this.blockedUntil?.() ?? null;
     if (nowBlocked !== null && nowBlocked > this.now()) {
-      this.scheduleAt(nowBlocked + 1000);
+      this.parkWhileBlocked(nowBlocked);
       return;
     }
     // A command is still owed fast follow-ups: budget never delays them.
@@ -1027,6 +1031,32 @@ export class SpotifyConnectZone implements PlaybackZone {
     const held = this.holdExpiryDelayMs();
     const background = this.backgroundDelayMs();
     this.scheduleIn(held === null ? background : Math.min(held, background));
+  }
+
+  /**
+   * Spotify is out of quota until `blocked`: wait for it without touching the network. A song shown playing would stay
+   * "playing" on every client for hours (X3), so once its time is up it is shown paused at its end. Nobody can know
+   * what Spotify did next; a pause holds a tab-driven queue (it never reads as the song ending), and the next real
+   * read after the breaker puts it right.
+   */
+  private parkWhileBlocked(blocked: number): void {
+    const end = this.staleAt();
+    if (end !== null && this.now() >= end) {
+      const s = this.snapshot;
+      const dur = s.queue[s.index]?.track.durationMs ?? 0;
+      this.snapshot = { ...s, status: 'paused', positionMs: dur > 0 ? dur : s.positionMs + (this.now() - s.updatedAt), updatedAt: this.now() };
+      for (const cb of this.listeners) cb(this.snapshot);
+    }
+    const next = this.staleAt();
+    this.scheduleAt(next === null ? blocked + 1000 : Math.min(next, blocked + 1000));
+  }
+
+  /** When a zone shown playing, with nothing re-reading it, should be taken as no longer known to play. */
+  private staleAt(): number | null {
+    const s = this.snapshot;
+    if (s.status !== 'playing') return null;
+    const dur = s.queue[s.index]?.track.durationMs ?? this.lastPlayback?.item?.duration_ms ?? 0;
+    return dur > 0 ? s.updatedAt + Math.max(0, dur - s.positionMs) + BLOCKED_STALE_SLACK_MS : s.updatedAt + BLOCKED_STALE_UNKNOWN_MS;
   }
 
   /** How long until a hold, claim or unconfirmed empty answer can be settled by a poll showing what Spotify really reports; null if none is pending. */

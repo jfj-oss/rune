@@ -46,7 +46,7 @@ describe('misc', () => {
     await z.close();
   });
 
-  it('KNOWN BUG X3 Spotify stuck on "playing" while the breaker is up: nothing re-reads it', async () => {
+  it('X3 while the breaker is up nothing re-reads Spotify, and a song past its time is shown paused at its end', async () => {
     let reads = 0;
     const blocked = Date.now() + 9 * 3600_000;
     const { api } = fakeApi({ currentPlayback: async () => { reads++; return { device: { id: 'd', volume_percent: 50 }, repeat_state: 'off', shuffle_state: false, is_playing: true, progress_ms: 5000, item: { id: 'a', uri: 'spotify:track:a', name: 'a', duration_ms: 200000, artists: [], album: { id: 'b', name: 'b', images: [], artists: [] } } } as never; } });
@@ -57,9 +57,15 @@ describe('misc', () => {
     expect(z.state().status).toBe('playing');
     on = true;
     const r = reads;
-    await vi.advanceTimersByTimeAsync(2 * 3600_000);    // two hours later
-    expect(reads).toBe(r);
-    expect(z.state().status).toBe('playing');           // every client still shows it as playing
+    const seen: string[] = [];
+    z.onChange((s) => seen.push(`${s.status}@${s.positionMs}`));
+    await vi.advanceTimersByTimeAsync(190_000);          // the song has 195 s left
+    expect(z.state().status).toBe('playing');
+    await vi.advanceTimersByTimeAsync(2 * 3600_000);     // two hours later
+    expect(reads).toBe(r);                              // still not one read
+    expect(z.state().status).toBe('paused');
+    expect(z.state().positionMs).toBe(200000);
+    expect(seen).toEqual(['paused@200000']);
     await z.close();
   });
 
