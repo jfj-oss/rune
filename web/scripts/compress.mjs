@@ -1,10 +1,12 @@
 // Post-build: write .br and .gz next to every text asset in dist/, so the server
 // (@fastify/static preCompressed) sends them without compressing on each request.
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
-const root = new URL('../dist', import.meta.url).pathname;
+// Optional first argument: compress a build in that directory instead of web/dist
+// (the self-update step builds to a temp folder and swaps it in only on success).
+const root = resolve(process.argv[2] ?? new URL('../dist', import.meta.url).pathname);
 const TEXT = /\.(js|css|html|svg|json|webmanifest|txt|map)$/;
 let files = 0, before = 0, after = 0;
 function walk(dir) {

@@ -82,3 +82,20 @@ export interface YearFacet { year: number; albumCount: number; decade: number }
 export type TrackSort = 'title' | 'artist' | 'album' | 'duration' | 'added';
 export interface TrackQuery { q?: string; sort?: TrackSort; dir?: 'asc' | 'desc'; offset?: number; limit?: number }
 export interface GenreAlbumQuery { sort?: 'added' | 'artist' | 'title' | 'year'; dir?: 'asc' | 'desc'; offset?: number; limit?: number }
+
+// ---------- self-update (GET/POST /update/…) ----------
+// Mirrors server/src/update.ts; kept here because @liner/shared is frozen.
+
+export type UpdateStage = 'downloading' | 'installing' | 'building' | 'restarting' | 'restart-needed' | null;
+export interface UpdateStatus {
+  supported: boolean;
+  current: string | null;
+  latest: string | null;
+  behind: number;
+  ahead: number;
+  dirty: boolean;
+  playing: boolean;
+  stage: UpdateStage;
+  error: string | null;
+}
+export type UpdateInstallResult = { ok: true; stage: 'restarting' | 'restart-needed' } | { ok: false; status: number; error: string };

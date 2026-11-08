@@ -267,6 +267,12 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .badge--bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .statuscard .sourceline { margin-top: 10px; }
+/* Settings → Updates */
+.updatecard { margin-bottom: 18px; display: flex; flex-direction: column; gap: 2px; max-width: 1100px; }
+.updatecard__note { margin: 8px 0 0; font-size: 13px; color: var(--text-2); }
+.updatecard__note--error { color: var(--bad); display: flex; align-items: center; gap: 7px; }
+.updatecard__actions { margin-top: 12px; }
+.updatecard .btn:disabled { opacity: 0.45; }
 
 /* ---------- seven library tabs on mobile ---------- */
 /* 7 tabs no longer fit one row at 390px: wrap to a second row so People and

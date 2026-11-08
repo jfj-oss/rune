@@ -1,2 +1,9 @@
-{ "name": "@liner/shared", "version": "0.0.0", "type": "module", "main": "src/index.ts", "types": "src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit", "test": "echo no tests" } }
+{
+  "name": "@liner/shared",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "echo no tests" },
+  "devDependencies": { "typescript": "^7.0.2" }
+}

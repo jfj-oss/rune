@@ -1,7 +1,7 @@
 import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, Zone } from '@liner/shared';
 import type { RunePlaylistDetail, RunePlaylistSummary } from './lib/playlists';
 import { mockCover } from './mock/covers';
-import type { AlbumQuery, MatchCandidate, PlayItem, SearchResults, ZoneInfo } from './lib/types';
+import type { AlbumQuery, MatchCandidate, PlayItem, SearchResults, UpdateInstallResult, UpdateStatus, ZoneInfo } from './lib/types';
 
 /** Mock mode: VITE_MOCK=1 at build time, or ?mock=1 (sticks for the session; ?mock=0 clears it). */
 function detectMock(): boolean {
@@ -190,6 +190,17 @@ export const api = {
   async scanErrors(): Promise<{ path: string; reason: string }[]> {
     if (isMock) return [];
     return http<{ path: string; reason: string }[]>('/scan/errors');
+  },
+  // ---------- self-update ----------
+  async updateStatus(): Promise<UpdateStatus> {
+    if (isMock) {
+      return { supported: true, current: 'abc1234', latest: 'abc1234', behind: 0, ahead: 0, dirty: false, playing: false, stage: null, error: null };
+    }
+    return http('/update/status');
+  },
+  async updateInstall(): Promise<UpdateInstallResult> {
+    if (isMock) return { ok: true, stage: 'restart-needed' };
+    return http('/update/install', { method: 'POST' });
   },
 };
 

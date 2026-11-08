@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server } from 'lucide-react';
 import { Empty } from '../components/Rows';
+import { UpdateCard } from '../components/UpdateCard';
 import { api, http, isMock } from '../api';
 import { discoverApi } from '../discoverApi';
 import { useIsDesktop } from '../hooks/useMedia';
@@ -194,6 +195,7 @@ export default function Settings() {
 
       <AmbientPicker />
       <KeyboardCard />
+      <UpdateCard />
 
       {q.isError ? (
         <Empty title="Could not reach the rune server" icon={<Server size={28} />}>

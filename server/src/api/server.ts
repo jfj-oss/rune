@@ -77,6 +77,7 @@ import {
   type BackupService,
   type ShutdownResult,
 } from '../ops/index.js';
+import { createUpdateService, registerUpdateRoutes } from '../update.js';
 
 export interface AppOptions {
   /** Start mpv for the PC zone (false in tests). */
@@ -149,6 +150,18 @@ const MBID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** Fastify yields an array for repeated query keys (`?q=a&q=b`); take the first. */
 function queryValue(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
+}
+
+/** The git checkout's top-level directory, or a safe fallback when rune is not in one. */
+async function findUpdateRepoRoot(cwd: string): Promise<string> {
+  const root = await new Promise<string | null>((resolve) => {
+    execFile('git', ['rev-parse', '--show-toplevel'], { cwd, timeout: 10_000 }, (err, stdout) => {
+      resolve(err ? null : String(stdout).trim() || null);
+    });
+  });
+  if (root) return root;
+  const parent = join(cwd, '..');
+  return existsSync(join(parent, 'pnpm-workspace.yaml')) ? parent : cwd;
 }
 
 /** Local wall-clock HH:MM (24 h), e.g. for "Spotify songs play again around 19:42". */
@@ -896,6 +909,24 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     return local;
   }
 
+  // ---------- self-update
+  // The served web build lives in the git checkout's web/dist; both the static
+  // plugin and the update module need that path, so resolve it once here.
+  const dist = opts.webDist ?? new URL('../../../web/dist', import.meta.url).pathname;
+  const updateService = createUpdateService({
+    repoRoot: () => findUpdateRepoRoot(process.cwd()),
+    webDist: dist,
+    // Music playing (or paused mid-song) on the PC blocks an update, whatever
+    // zone owns the PC queue (mpv directly, or the server-owned driver).
+    isPlayingOnPc: () => {
+      const zone = driver ?? pc;
+      if (!zone) return false;
+      const s = zone.state();
+      return s.status === 'playing' || s.status === 'paused' || s.status === 'loading';
+    },
+    logger: { warn: (obj, msg) => app.log.warn(obj, msg), info: (obj, msg) => app.log.info(obj, msg) },
+  });
+
   // ---------- routes
   await app.register(
     async (r) => {
@@ -1130,6 +1161,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }),
         logger: app.log,
       });
+
+      // Self-update: status + install. The install route rebuilds and restarts
+      // rune, so it is guarded by a same-origin check of its own.
+      registerUpdateRoutes(r, updateService);
 
       // Whether an empty PC queue continues with generated radio tracks.
       r.get('/settings/autoRadio', async () => ({ enabled: autoRadioEnabled() }));
@@ -1467,7 +1502,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   registerStreamRoutes(app, db, cfg);
 
   // ---------- web UI (built) with SPA fallback
-  const dist = opts.webDist ?? new URL('../../../web/dist', import.meta.url).pathname;
   /** The web build served now (web/dist/build-id.txt, written by the web build); null when there is none. */
   let buildCache: { mtimeMs: number; id: string | null } | null = null;
   function webBuildId(): string | null {
