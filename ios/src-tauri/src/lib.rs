@@ -32,6 +32,26 @@ const INIT_SCRIPT: &str = r#"
   // inside the iPhone shell rather than a browser.
   window.__runeNative = Object.freeze({ platform: 'ios' });
 
+  // An app, not a web page: no pinch zoom, and no zoom-in when a text box under 16 px is tapped (iOS does that).
+  // Browsers opening the same rune server keep normal zoom; this only runs in the iPhone shell.
+  (function noZoom() {
+    var content = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+    function apply() {
+      var m = document.querySelector('meta[name=viewport]');
+      if (!m) { m = document.createElement('meta'); m.name = 'viewport'; (document.head || document.documentElement).appendChild(m); }
+      if (m.content !== content) m.content = content;
+      if (!document.getElementById('rune-native-nozoom')) {
+        var st = document.createElement('style'); st.id = 'rune-native-nozoom';
+        st.textContent = 'html{touch-action:pan-x pan-y;-webkit-text-size-adjust:100%}input,textarea,select{font-size:max(16px,1em)!important}';
+        (document.head || document.documentElement).appendChild(st);
+      }
+    }
+    apply();
+    document.addEventListener('DOMContentLoaded', apply);
+    document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+    document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+  })();
+
   // The bundled connect screen is already the settings screen; only the remote web app needs the
   // gesture. Tauri's asset page is tauri://localhost, the server page is http(s).
   if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
