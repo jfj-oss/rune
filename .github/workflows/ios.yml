@@ -1,0 +1,210 @@
+# Builds an UNSIGNED iOS .ipa on GitHub's macOS runners. SideStore signs it with a free Apple ID, so no
+# certificate, team or provisioning profile is ever involved here. Runs only when started by hand:
+# Actions tab -> ios -> Run workflow. Download the "rune-ipa" artifact and install it with SideStore
+# (docs/IOS.md).
+#
+# ios/src-tauri/gen/apple is generated here rather than committed: the Tauri CLI version is pinned by
+# ios/package-lock.json, so `tauri ios init` is reproducible, and a generated Xcode project in git would
+# churn on every Tauri or Xcode update. ios init also runs `pod install`.
+#
+# The app icon needs extra steps. icons/ios-1024.png is already opaque and full-bleed, but `tauri icon`
+# writes RGBA PNGs and iOS rejects icons with an alpha channel, so every generated icon is round-tripped
+# through JPEG (which cannot carry alpha). tauri icon writes into gen/apple/Assets.xcassets, so it must
+# run after init.
+name: ios
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Full Xcode and build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          devdir=$(xcode-select -p)
+          case "$devdir" in
+            */Contents/Developer) ;;
+            *)
+              echo "::error::full Xcode is not selected on this runner (xcode-select -p = $devdir)"
+              exit 1
+              ;;
+          esac
+          xcodebuild -version
+          if ! sdk=$(xcrun --sdk iphoneos --show-sdk-path 2>&1); then
+            echo "::error::no iPhoneOS SDK found: $sdk"
+            exit 1
+          fi
+          if [ ! -d "$sdk" ]; then
+            echo "::error::the iPhoneOS SDK path does not exist: $sdk"
+            exit 1
+          fi
+          echo "iPhoneOS SDK: $sdk"
+
+          # tauri ios init needs these two; the runners have them, but say so plainly if one goes missing.
+          if ! command -v pod >/dev/null; then
+            echo "CocoaPods is missing; installing it with Homebrew"
+            brew install cocoapods
+          fi
+          if ! command -v xcodegen >/dev/null; then
+            echo "XcodeGen is missing; installing it with Homebrew"
+            brew install xcodegen
+          fi
+          pod --version
+          xcodegen --version | head -1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-aarch64-apple-ios
+          workspaces: ios/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ios/package-lock.json
+
+      - name: Versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          rustup target list --installed
+          node --version
+          npm --version
+
+      - name: Tauri CLI
+        working-directory: ios
+        run: npm ci
+
+      - name: Show Tauri CLI version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./ios/node_modules/.bin/tauri --version
+
+      - name: Generate the Xcode project
+        working-directory: ios/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The Rust target is installed by the toolchain step above, so skip init's own rustup calls.
+          # --ci keeps it from asking about outdated dependencies (GitHub also sets CI=true).
+          echo "Generating ios/src-tauri/gen/apple"
+          ../node_modules/.bin/tauri ios init --ci --skip-targets-install
+
+          # The Xcode project's "Build Rust Code" phase calls the Tauri CLI the way init recorded it, which here is a
+          # relative `node tauri` that does not exist inside gen/apple, and Xcode's script PATH may lack node. Point
+          # it at absolute paths instead.
+          NODE="$(command -v node)"; CLI="$GITHUB_WORKSPACE/ios/node_modules/@tauri-apps/cli/tauri.js"
+          PBX="$(ls -d gen/apple/*.xcodeproj)/project.pbxproj"
+          echo "before:"; grep -o 'shellScript = "[^"]*xcode-script' "$PBX" | head -3 || true
+          # (the command goes in through the environment: "@tauri-apps" in a perl string would be read as an array)
+          NEWCMD="$NODE $CLI" perl -0pi -e 's{shellScript = "[^"]*? ios xcode-script}{shellScript = "$ENV{NEWCMD} ios xcode-script}g' "$PBX"
+          echo "after:"; grep -o 'shellScript = "[^"]*xcode-script' "$PBX" | head -3
+          grep -q "$CLI ios xcode-script" "$PBX" || { echo "::error::could not point the Xcode build phase at the Tauri CLI"; exit 1; }
+
+      - name: Generate the opaque iOS app icon
+        working-directory: ios/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          # gen/apple/Assets.xcassets now exists, so tauri icon writes AppIcon.appiconset into it. The
+          # --ios-color background guarantees no transparency in the generated source; the source itself
+          # (icons/ios-1024.png) is already an opaque, full-bleed rune mark.
+          ../node_modules/.bin/tauri icon icons/ios-1024.png --ios-color "#14131c"
+
+          icons=gen/apple/Assets.xcassets/AppIcon.appiconset
+          if [ ! -f "$icons/AppIcon-512@2x.png" ]; then
+            echo "::error::tauri icon did not write $icons/AppIcon-512@2x.png"
+            exit 1
+          fi
+
+          # tauri icon still saves RGBA PNGs, and iOS wants no alpha channel at all. Go through JPEG at full
+          # quality, which cannot carry alpha, and back to PNG.
+          for f in "$icons"/*.png; do
+            jpg="$RUNNER_TEMP/$(basename "$f").jpg"
+            sips -s format jpeg -s formatOptions 100 "$f" --out "$jpg" >/dev/null
+            sips -s format png "$jpg" --out "$f" >/dev/null
+            rm -f "$jpg"
+          done
+
+          for f in "$icons"/*.png; do
+            if sips -g hasAlpha "$f" | grep -q 'hasAlpha: yes'; then
+              echo "::error::$f still has an alpha channel; iOS rejects app icons with transparency"
+              exit 1
+            fi
+          done
+          sips -g pixelWidth -g pixelHeight -g hasAlpha "$icons/AppIcon-512@2x.png"
+
+      - name: Build the unsigned .ipa
+        working-directory: ios/src-tauri
+        shell: bash
+        run: |
+          set -euo pipefail
+          # aarch64 is the physical-device target. --no-sign makes tauri pass CODE_SIGNING_ALLOWED=NO and
+          # pack Payload/<name>.app into an .ipa itself; SideStore signs that later.
+          echo "Building rune for iPhone (release, unsigned)"
+          ../node_modules/.bin/tauri ios build --ci --no-sign --target aarch64
+
+      - name: Pack and check rune.ipa
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipas=$(find ios/src-tauri/gen/apple/build -type f -name '*.ipa' 2>/dev/null || true)
+          ipa=$(printf '%s\n' "$ipas" | sed -n '1p')
+          if [ -z "$ipa" ]; then
+            echo "::error::tauri ios build finished but no .ipa was produced under ios/src-tauri/gen/apple/build"
+            find ios/src-tauri/gen/apple/build -maxdepth 3 -print 2>/dev/null | head -60 || true
+            exit 1
+          fi
+          echo "Using $ipa"
+          mkdir -p out
+          cp "$ipa" out/rune.ipa
+
+          unzip -q out/rune.ipa -d "$RUNNER_TEMP/ipa-check"
+          app=$(find "$RUNNER_TEMP/ipa-check/Payload" -maxdepth 1 -type d -name '*.app' | sed -n '1p')
+          if [ -z "$app" ] || [ ! -f "$app/Info.plist" ]; then
+            echo "::error::the .ipa has no Payload/*.app/Info.plist"
+            find "$RUNNER_TEMP/ipa-check" -maxdepth 3 -print | head -40 || true
+            exit 1
+          fi
+          echo "App bundle:        $(basename "$app")"
+          echo "Bundle identifier: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")"
+          echo "Bundle name:       $(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$app/Info.plist")"
+          echo "Version:           $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
+
+          # The two iOS behaviours the app relies on: background audio, and plain http on a local network.
+          if [ "$(/usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes:0' "$app/Info.plist" 2>/dev/null)" != "audio" ]; then
+            echo "::error::UIBackgroundModes does not contain audio; background playback will stop when the screen locks"
+            exit 1
+          fi
+          if [ "$(/usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' "$app/Info.plist" 2>/dev/null)" != "true" ]; then
+            echo "::error::NSAppTransportSecurity/NSAllowsLocalNetworking is missing; an http LAN server cannot be reached"
+            exit 1
+          fi
+
+          if [ -e "$app/_CodeSignature" ] || [ -e "$app/embedded.mobileprovision" ]; then
+            echo "::error::the .ipa is signed; it must be unsigned so SideStore can sign it with the free Apple ID"
+            exit 1
+          fi
+          du -h out/rune.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rune-ipa
+          path: out/rune.ipa
+          if-no-files-found: error
+          retention-days: 30

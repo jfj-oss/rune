@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0f1013" />
+    <title>rune</title>
+    <link rel="icon" type="image/svg+xml" href="mark.svg" />
+    <style>
+      /* The bundled connect screen. It is the first thing shown on every launch, so it is a single
+         self-contained page: no build step, no font download, no network request of its own. */
+      :root {
+        --bg: #0f1013;
+        --text: #ececf1;
+        --text-2: #c4c5d0;
+        --text-3: #a9aab9;
+        --accent: #b3a7ff;
+        --accent-2: #cfc8ff;
+        --line: rgba(255, 255, 255, 0.12);
+        --surface: rgba(255, 255, 255, 0.055);
+        --surface-2: rgba(255, 255, 255, 0.085);
+        --bad: #e5736f;
+        --ok: #4fd18b;
+        --warn: #e8b04a;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        background:
+          radial-gradient(1100px 700px at 50% -10%, rgba(143, 124, 255, 0.16), transparent 60%),
+          radial-gradient(900px 600px at 90% 110%, rgba(143, 124, 255, 0.08), transparent 55%),
+          var(--bg);
+        color: var(--text);
+        font: 16px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .wrap {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 100dvh;
+        max-width: 560px;
+        margin: 0 auto;
+        padding:
+          calc(24px + env(safe-area-inset-top, 0px))
+          calc(20px + env(safe-area-inset-right, 0px))
+          calc(24px + env(safe-area-inset-bottom, 0px))
+          calc(20px + env(safe-area-inset-left, 0px));
+      }
+      .brand { display: flex; align-items: center; justify-content: center; gap: 12px; }
+      .mark { width: 64px; height: 64px; display: block; }
+      h1 { margin: 0; font-size: 34px; font-weight: 550; letter-spacing: -0.025em; }
+      .tagline { margin: 8px 0 0; text-align: center; color: var(--text-3); font-size: 15px; }
+      .card {
+        margin-top: 28px;
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: var(--surface);
+        box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.65);
+      }
+      label { display: block; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-2); }
+      input {
+        width: 100%;
+        margin-top: 8px;
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.28);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px; /* keeps iOS from zooming the page when the field is focused */
+        outline: none;
+      }
+      input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(179, 167, 255, 0.18); }
+      input::placeholder { color: #74768a; }
+      .hint { margin: 10px 0 0; color: var(--text-3); font-size: 13px; line-height: 1.45; }
+      .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; color: var(--text-2); }
+      .row { display: flex; gap: 10px; margin-top: 18px; }
+      .btn {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        padding: 12px 18px;
+        font: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        cursor: pointer;
+        transition: opacity 120ms ease, background 120ms ease;
+      }
+      .btn:disabled { opacity: 0.55; cursor: default; }
+      .btn--primary { flex: 1; background: var(--accent); color: #14121f; }
+      .btn--primary:active { background: var(--accent-2); }
+      .btn--ghost { border-color: var(--line); background: transparent; color: var(--text-2); }
+      .btn--ghost:active { background: var(--surface-2); }
+      .status { min-height: 22px; margin: 12px 0 0; font-size: 13.5px; line-height: 1.45; color: var(--text-3); }
+      .status.is-error { color: var(--bad); }
+      .status.is-ok { color: var(--ok); }
+      .status.is-warn { color: var(--warn); }
+      .opening { text-align: center; padding: 8px 0 4px; }
+      .opening p { margin: 14px 0 18px; color: var(--text-2); font-size: 14.5px; overflow-wrap: anywhere; }
+      .spinner {
+        width: 28px; height: 28px;
+        margin: 0 auto;
+        border: 2.5px solid rgba(255, 255, 255, 0.16);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+      .gear {
+        position: fixed;
+        top: calc(12px + env(safe-area-inset-top, 0px));
+        right: calc(12px + env(safe-area-inset-right, 0px));
+        display: grid;
+        place-items: center;
+        width: 40px; height: 40px;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: var(--text-3);
+        cursor: pointer;
+      }
+      .gear:active { background: var(--surface-2); }
+      .help {
+        margin-top: 14px;
+        padding: 16px 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text-3);
+        font-size: 13.5px;
+        line-height: 1.55;
+      }
+      .help h2 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.01em; color: var(--text-2); }
+      .help p { margin: 0 0 10px; }
+      .help ul { margin: 0 0 12px; padding-left: 18px; }
+      .help li { margin: 3px 0; }
+      .help .btn { padding: 8px 12px; font-size: 13px; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <button class="gear" id="gear" aria-label="Server settings" aria-expanded="false" aria-controls="help">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+
+    <main class="wrap">
+      <div class="brand">
+        <img class="mark" src="mark.svg" alt="" />
+        <h1 id="title">rune</h1>
+      </div>
+      <p class="tagline" id="tagline">Your library, your server.</p>
+
+      <section class="card">
+        <div class="opening" id="opening" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <p id="openingText">Opening your server…</p>
+          <button class="btn btn--ghost" id="change" type="button">Change server</button>
+        </div>
+
+        <form id="form" novalidate>
+          <label for="address">Server address</label>
+          <input
+            id="address"
+            name="address"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="go"
+            placeholder="https://your-pc.tailnet.ts.net:8445"
+          />
+          <p class="hint">
+            Tailscale: <span class="mono">https://your-pc.tailnet.ts.net:8445</span><br />
+            Home Wi-Fi: <span class="mono">http://192.168.1.20:4545</span>
+          </p>
+          <div class="row">
+            <button class="btn btn--primary" id="connect" type="submit">Connect</button>
+            <button class="btn btn--ghost" id="back" type="button" hidden>Back to rune</button>
+          </div>
+          <p class="status" id="status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <aside class="help" id="help" hidden>
+        <h2>Which address?</h2>
+        <p>The address of the computer that runs the rune server, including its port (4545 unless you changed it, or the HTTPS port your Tailscale Serve uses).</p>
+        <ul>
+          <li><b>Tailscale:</b> the PC's full https name; rune is then reachable anywhere, encrypted.</li>
+          <li><b>Home Wi-Fi only:</b> the PC's LAN address over http. iOS allows plain http for local addresses only.</li>
+        </ul>
+        <p id="savedLine" hidden></p>
+        <button class="btn btn--ghost" id="forget" type="button" hidden>Forget saved server</button>
+        <p style="margin-top: 10px">Inside the app, long-press the page title to come back to this screen.</p>
+      </aside>
+    </main>
+
+    <script>
+      (function () {
+        'use strict';
+        var tauri = window.__TAURI__ && window.__TAURI__.core;
+        var invoke = tauri && tauri.invoke;
+
+        var $ = function (id) { return document.getElementById(id); };
+        var form = $('form');
+        var address = $('address');
+        var connectButton = $('connect');
+        var backButton = $('back');
+        var changeButton = $('change');
+        var opening = $('opening');
+        var openingText = $('openingText');
+        var statusLine = $('status');
+        var help = $('help');
+        var gear = $('gear');
+        var forget = $('forget');
+        var savedLine = $('savedLine');
+
+        var saved = null;
+        var generation = 0;
+
+        function setStatus(text, kind) {
+          statusLine.textContent = text || '';
+          statusLine.className = 'status' + (kind ? ' is-' + kind : '');
+        }
+
+        function setBusy(busy) {
+          connectButton.disabled = busy;
+          connectButton.textContent = busy ? 'Checking…' : 'Connect';
+        }
+
+        function showForm() {
+          opening.hidden = true;
+          form.hidden = false;
+          backButton.hidden = !saved;
+          savedLine.hidden = !saved;
+          forget.hidden = !saved;
+          savedLine.textContent = saved ? 'Saved server: ' + saved : '';
+        }
+
+        function showOpening(url) {
+          form.hidden = true;
+          opening.hidden = false;
+          openingText.textContent = 'Opening ' + url + '…';
+          setStatus('');
+        }
+
+        function backToServer() {
+          if (!saved) { showForm(); return; }
+          showOpening(saved);
+          attempt(saved, true);
+        }
+
+        function attempt(value, fromSaved) {
+          var mine = ++generation;
+          setBusy(true);
+          if (fromSaved) showOpening(value);
+          invoke('connect_server', { url: value }).then(function (info) {
+            if (mine !== generation) return;
+            saved = info.url;
+            if (info.ok === false) {
+              setStatus('Connected, but the server reports a problem. Opening anyway…', 'warn');
+              window.setTimeout(function () { if (mine === generation) window.location.replace(info.url); }, 1200);
+              return;
+            }
+            setStatus('Connected to rune ' + info.version + '.', 'ok');
+            window.location.replace(info.url);
+          }).catch(function (error) {
+            if (mine !== generation) return;
+            showForm();
+            address.value = value;
+            setStatus(String(error), 'error');
+          }).then(function () {
+            if (mine === generation) setBusy(false);
+          });
+        }
+
+        function boot() {
+          var settingsMode = false;
+          try { settingsMode = new URLSearchParams(window.location.search).has('settings'); } catch (e) { /* old WebKit */ }
+
+          if (!invoke) {
+            showForm();
+            setStatus('This screen only works inside the rune iPhone app.', 'error');
+            return;
+          }
+
+          invoke('get_server').then(function (value) {
+            saved = value || null;
+            address.value = saved || '';
+            showForm();
+            if (settingsMode) {
+              document.title = 'rune — server';
+              $('title').textContent = 'Server settings';
+              $('tagline').textContent = 'Where rune lives.';
+              if (saved) backButton.hidden = false;
+              return;
+            }
+            if (saved) {
+              showOpening(saved);
+              attempt(saved, true);
+            }
+          }).catch(function (error) {
+            showForm();
+            setStatus('Could not read the saved address: ' + error, 'error');
+          });
+        }
+
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          var value = address.value.trim();
+          if (!value) { setStatus('Enter your server’s address first.', 'error'); address.focus(); return; }
+          attempt(value, false);
+        });
+
+        changeButton.addEventListener('click', function () {
+          generation++;
+          setBusy(false);
+          showForm();
+          address.focus();
+        });
+
+        backButton.addEventListener('click', backToServer);
+        forget.addEventListener('click', function () {
+          invoke('clear_server').then(function () {
+            saved = null;
+            address.value = '';
+            showForm();
+            setStatus('Saved server forgotten.', 'ok');
+          }).catch(function (error) {
+            setStatus(String(error), 'error');
+          });
+        });
+
+        gear.addEventListener('click', function () {
+          var open = help.hidden;
+          help.hidden = !open;
+          gear.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+
+        boot();
+      })();
+    </script>
+  </body>
+</html>
