@@ -36,8 +36,8 @@ interface PlayerStore {
   init(): Promise<void>;
   /** handoff:false = just switch (nothing is carried over from the old zone). */
   setZone(id: Zone, opts?: { handoff?: boolean }): Promise<void>;
-  /** Re-read the zone list (Spotify Connect devices come and go). */
-  refreshZones(): Promise<void>;
+  /** Re-read the zone list (Spotify Connect devices come and go). `fresh` skips the server's short device cache. */
+  refreshZones(opts?: { fresh?: boolean }): Promise<void>;
   playItems(items: PlayItem[], startIndex?: number, opts?: { shuffle?: boolean; context?: string }): Promise<void>;
   /** Answer of the "Play on…" sheet. */
   playOn(zone: Zone, req: ChooserRequest, remember?: boolean): Promise<void>;
@@ -227,10 +227,10 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       set({ ready: true });
     },
 
-    async refreshZones() {
+    async refreshZones(opts) {
       if (isMock) return;
       try {
-        let zones = tidyZones(await api.zones());
+        let zones = tidyZones(await api.zones({ fresh: opts?.fresh === true }));
         // never drop the zone we are playing on
         const cur = get().zones.find((z) => z.id === get().zone);
         if (cur && !zones.some((z) => z.id === cur.id)) zones = [...zones, cur];
@@ -241,8 +241,22 @@ export const usePlayer = create<PlayerStore>((set, get) => {
 
     async setZone(id, opts) {
       try {
+      if (id === get().zone) return;
       let z = get().zones.find((x) => x.id === id);
-      if (!z || id === get().zone) return;
+      // A phone's Spotify app can go to sleep (or quit) between the picker opening and the tap: look once more, and
+      // say why instead of quietly staying on the old zone.
+      if (!z) {
+        await get().refreshZones({ fresh: true });
+        z = get().zones.find((x) => x.id === id);
+        if (!z) {
+          useUi.getState().toast(
+            id.startsWith('spotify:')
+              ? 'That Spotify device isn’t available right now — open Spotify on it, then try again.'
+              : 'That playback device isn’t available right now.',
+          );
+          return;
+        }
+      }
       const handoff = opts?.handoff !== false;
       if (handoff) { useSpotify.getState().remember('spotify', undefined); useSpotify.getState().remember('local', undefined); }
       saveLocal('rune.zone', id);

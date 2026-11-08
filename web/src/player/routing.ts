@@ -27,7 +27,33 @@ export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boo
 export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource): string {
   if (zone.kind === 'pc' && source === 'spotify') return 'rune starts Spotify on the PC for this';
   if (source === 'radio') return `${zone.name} can’t play internet radio — use the PC or this browser`;
+  // iPhones/iPads (and any browser without the Web Playback SDK) cannot play Spotify inside the page.
+  if (zone.kind === 'browser' && source === 'spotify') {
+    return 'Spotify can’t play in this browser — open the Spotify app on this device, then pick it as the zone';
+  }
   return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
+}
+
+/** A one-line description of a Connect device for the pickers, saying plainly what a phone is and whether it is asleep. */
+export function spotifyDeviceHint(
+  z: Pick<ZoneInfo, 'name' | 'deviceType' | 'isActive' | 'isRestricted'>,
+): string {
+  const type = (z.deviceType ?? '').toLowerCase();
+  const what =
+    type === 'smartphone'
+      ? 'Spotify app on a phone'
+      : type === 'tablet'
+        ? 'Spotify app on a tablet'
+        : type === 'computer'
+          ? 'Spotify app on a computer'
+          : type === 'speaker'
+            ? 'Spotify speaker'
+            : !z.deviceType && /phone|iphone|ipad|android/i.test(z.name)
+              ? 'Spotify app on a phone'
+              : 'Spotify Connect';
+  if (z.isRestricted) return `${what} · restricted — pick another device`;
+  if (z.isActive === false) return `${what} · asleep — open Spotify there to wake it`;
+  return what;
 }
 
 export type Routing =

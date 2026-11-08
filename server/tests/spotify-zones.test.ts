@@ -57,6 +57,8 @@ class FakeZoneApi implements SpotifyZoneApi {
   async play(body: SpotifyPlayBody, deviceId?: string): Promise<void> {
     this.calls.push({ method: 'play', args: [body, deviceId] });
   }
+  /** PUT /me/player (wake/transfer); absent unless a test needs it, like an older client. */
+  transfer?: (deviceId: string, play?: boolean) => Promise<void>;
   async pause(deviceId?: string): Promise<void> {
     this.calls.push({ method: 'pause', args: [deviceId] });
   }
@@ -103,11 +105,26 @@ describe('Spotify Connect zones', () => {
 
     const list = await zones.listZones();
     expect(list).toEqual([
-      { id: 'spotify:dev1', name: 'Sim Phone', kind: 'spotify' },
-      { id: 'spotify:dev2', name: 'Kitchen Speaker', kind: 'spotify' },
+      { id: 'spotify:dev1', name: 'Sim Phone', kind: 'spotify', deviceType: 'Smartphone', isActive: true, isRestricted: false },
+      { id: 'spotify:dev2', name: 'Kitchen Speaker', kind: 'spotify', deviceType: 'Smartphone', isActive: true, isRestricted: false },
     ]);
     expect(zones.get('spotify:dev1')).toBeInstanceOf(SpotifyConnectZone);
     expect(zones.get('spotify:dev2')?.name).toBe('Kitchen Speaker');
+  });
+
+  it('reports Spotify’s device type and state, and lets the picker force a fresh list', async () => {
+    const api = new FakeZoneApi();
+    api.devicesData = [{ ...SIM_DEVICE, id: 'phone1', name: 'iPhone', is_active: false, is_restricted: true }];
+    let t = 1000;
+    const zones = createSpotifyZones(api, { now: () => t });
+    expect(await zones.listZones()).toEqual([
+      { id: 'spotify:phone1', name: 'iPhone', kind: 'spotify', deviceType: 'Smartphone', isActive: false, isRestricted: true },
+    ]);
+    t += 2_000; // inside the 5 s cache, outside the 1.5 s "fresh" window
+    await zones.listZones();
+    expect(api.deviceCalls).toBe(1);
+    await zones.listZones({ fresh: true });
+    expect(api.deviceCalls).toBe(2);
   });
 
   it('maps play to uris + offset on the device and reflects /me/player', async () => {
@@ -850,6 +867,33 @@ describe('sharedPlaybackReads', () => {
     await shared.devices();
     expect(api.deviceCalls).toBe(3);
   });
+
+  it('a fresh read bypasses the 5 s cache, but not when the budget is low or used up', async () => {
+    const api = new FakeZoneApi();
+    api.devicesData = [SIM_DEVICE];
+    let t = 1000;
+    let level: SpotifyBudgetLevel = 'normal';
+    const shared = sharedPlaybackReads(api, () => t, undefined, undefined, () => level);
+
+    await shared.devices(); // seeds the cache at t=1000
+    t += 2_000; // 5 s cache still warm, 1.5 s fresh window gone
+    await shared.devices();
+    expect(api.deviceCalls).toBe(1); // an ordinary read keeps the cache
+    await shared.devices(true);
+    expect(api.deviceCalls).toBe(2); // the picker opening forces a read
+
+    t += 2_000; // 2 s since that read: inside the 5 s cache
+    level = 'low';
+    await shared.devices(true);
+    expect(api.deviceCalls).toBe(2); // a low budget keeps the cached list
+    level = 'out';
+    await shared.devices(true);
+    expect(api.deviceCalls).toBe(2);
+
+    t += 4_000; // 6 s since the read: stale even at a low budget
+    await shared.devices(true);
+    expect(api.deviceCalls).toBe(3);
+  });
 });
 
 describe('commands on one zone run in order', () => {
@@ -1068,5 +1112,115 @@ describe('placeholder queue entries', () => {
     expect(state.queue[0]?.track.title).toBe('Come Together');
     expect(state.queue[0]?.album.title).toBe('Abbey Road');
     expect(state.index).toBe(0);
+  });
+});
+
+describe('starting on a phone whose Spotify app went to sleep', () => {
+  /** A phone that stays listed while its app sleeps: the device list says so, /me/player still names another device. */
+  function sleepingPhone(): FakeZoneApi {
+    const api = new FakeZoneApi();
+    api.devicesData = [{ ...SIM_DEVICE, is_active: false }];
+    api.playback = playbackState(sampleTrack('t1'), {
+      device: { ...SIM_DEVICE, id: 'elsewhere', name: 'rune — This Mac' },
+    });
+    api.transfer = async (deviceId, play) => {
+      api.calls.push({ method: 'transfer', args: [deviceId, play] });
+    };
+    return api;
+  }
+
+  /** Run a command through its settle gaps without waiting them out in real time. */
+  async function runTimers(run: () => Promise<unknown>): Promise<unknown> {
+    vi.useFakeTimers();
+    const settled = run().then((value) => value, (err: unknown) => err);
+    await vi.runAllTimersAsync();
+    return settled;
+  }
+
+  it('wakes the app, sends the songs again and plays', async () => {
+    const api = sleepingPhone();
+    let plays = 0;
+    api.play = async (body, deviceId) => {
+      api.calls.push({ method: 'play', args: [body, deviceId] });
+      plays++;
+      // The first play is accepted but does nothing (the app was asleep); the retry starts it.
+      if (plays >= 2) api.playback = playbackState(sampleTrack('t1'));
+    };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const result = await runTimers(() => zone.command({ type: 'play', trackIds: ['sp:t1'] }));
+
+    expect(result).not.toBeInstanceOf(Error);
+    expect(result).toMatchObject({ zone: 'spotify:dev1', status: 'playing' });
+    // One wake (a transfer with play:true), then the same songs sent again.
+    expect(callsOf(api, 'transfer').map((c) => c.args)).toEqual([['dev1', true]]);
+    expect(callsOf(api, 'play')).toHaveLength(2);
+  });
+
+  it('gives a plain, actionable message when the phone never wakes', async () => {
+    const api = sleepingPhone();
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const result = await runTimers(() => zone.command({ type: 'play', trackIds: ['sp:t1'] }));
+
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toBe('Open Spotify on your phone (“Sim Phone”), then try again.');
+    expect(callsOf(api, 'transfer')).toHaveLength(1);
+    expect(callsOf(api, 'play')).toHaveLength(2);
+  });
+
+  it('refuses a restricted device with a message, without waking it', async () => {
+    const api = sleepingPhone();
+    api.devicesData = [{ ...SIM_DEVICE, is_active: false, is_restricted: true }];
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const result = await runTimers(() => zone.command({ type: 'play', trackIds: ['sp:t1'] }));
+
+    expect(result).toBeInstanceOf(Error);
+    expect((result as Error).message).toMatch(/restricted/);
+    // Spotify accepted the play (it cannot know yet that the device is restricted); no wake is sent.
+    expect(callsOf(api, 'transfer')).toHaveLength(0);
+    expect(callsOf(api, 'play')).toHaveLength(1);
+  });
+
+  it('does not wake a device that is already active', async () => {
+    const api = new FakeZoneApi();
+    api.devicesData = [SIM_DEVICE]; // active
+    api.transfer = async () => {
+      throw new Error('must not wake an active device');
+    };
+    api.playback = playbackState(sampleTrack('t1')); // already this device
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const result = await runTimers(() => zone.command({ type: 'play', trackIds: ['sp:t1'] }));
+
+    expect(result).not.toBeInstanceOf(Error);
+    expect(callsOf(api, 'transfer')).toHaveLength(0);
+    expect(callsOf(api, 'play')).toHaveLength(1);
+  });
+
+  it('retries once when Spotify answers "device not found" to the first play', async () => {
+    const api = new FakeZoneApi();
+    api.devicesData = [SIM_DEVICE];
+    api.transfer = async (deviceId, play) => {
+      api.calls.push({ method: 'transfer', args: [deviceId, play] });
+    };
+    api.playback = playbackState(sampleTrack('t1'), {
+      device: { ...SIM_DEVICE, id: 'elsewhere', name: 'rune — This Mac' },
+    });
+    let plays = 0;
+    api.play = async (body, deviceId) => {
+      api.calls.push({ method: 'play', args: [body, deviceId] });
+      plays++;
+      if (plays === 1) throw new HttpError('Spotify API 404 for PUT /me/player/play', 404, '{"error":{"status":404,"message":"Device not found"}}');
+      api.playback = playbackState(sampleTrack('t1'));
+    };
+    const zone = new SpotifyConnectZone(api, 'dev1', 'Sim Phone');
+
+    const result = await runTimers(() => zone.command({ type: 'play', trackIds: ['sp:t1'] }));
+
+    expect(result).not.toBeInstanceOf(Error);
+    expect(callsOf(api, 'transfer').map((c) => c.args)).toEqual([['dev1', true]]);
+    expect(callsOf(api, 'play')).toHaveLength(2);
   });
 });

@@ -9,10 +9,15 @@ import type { Config } from '../src/config.js';
 import {
   activeFfmpegPids,
   cleanupStaleCacheParts,
+  negotiateStreamFormat,
+  parseAcceptedKinds,
   parseRangeHeader,
   registerStreamRoutes,
+  sourceKindForFile,
   transcodeOutputPath,
+  type SourceKind,
   type StoredTrack,
+  type StreamFormat,
 } from '../src/play/stream.js';
 
 const cfg: Config = {
@@ -249,6 +254,58 @@ describe('parseRangeHeader', () => {
   });
 });
 
+describe('format negotiation from the client’s accept= list', () => {
+  const kinds = (...list: SourceKind[]) => new Set<SourceKind>(list);
+  const file = (path: string, cueStart: number | null = null) => ({ path, cue_start_ms: cueStart });
+
+  it('parses the accept list, ignoring unknown entries and malformed values', () => {
+    expect(parseAcceptedKinds(' FLAC, mp3 ,nope')).toEqual(kinds('flac', 'mp3'));
+    expect(parseAcceptedKinds('opus')).toEqual(kinds('opus'));
+    expect(parseAcceptedKinds('')).toBeNull();
+    expect(parseAcceptedKinds('nope')).toBeNull();
+    expect(parseAcceptedKinds(undefined)).toBeNull();
+    expect(parseAcceptedKinds('x'.repeat(201))).toBeNull();
+  });
+
+  it('names a stored file’s source kind by its extension', () => {
+    expect(sourceKindForFile('/music/a.FLAC')).toBe('flac');
+    expect(sourceKindForFile('/music/a.mp3')).toBe('mp3');
+    expect(sourceKindForFile('/music/a.m4a')).toBe('m4a');
+    expect(sourceKindForFile('/music/a.opus')).toBe('opus');
+    expect(sourceKindForFile('/music/a.ogg')).toBe('vorbis');
+    expect(sourceKindForFile('/music/a.unknown')).toBeNull();
+  });
+
+  it('keeps the requested format when there is no accept list (older clients)', () => {
+    expect(negotiateStreamFormat(file('/m/a.flac'), 'orig', null)).toBe('orig');
+    expect(negotiateStreamFormat(file('/m/a.flac'), 'flac', null)).toBe('flac');
+    expect(negotiateStreamFormat(file('/m/a.flac'), 'aac', null)).toBe('aac');
+  });
+
+  it('serves orig only when the file’s kind is accepted, and AAC otherwise', () => {
+    const flac = file('/m/a.flac');
+    const opus = file('/m/a.opus');
+    expect(negotiateStreamFormat(flac, 'orig', kinds('flac', 'mp3'))).toBe('orig');
+    expect(negotiateStreamFormat(flac, 'orig', kinds('mp3', 'aac'))).toBe('aac');
+    expect(negotiateStreamFormat(opus, 'orig', kinds('flac', 'mp3'))).toBe('aac');
+    // No recognisable extension: cannot promise the browser plays it, so transcode.
+    expect(negotiateStreamFormat(file('/m/a.data'), 'orig', kinds('flac'))).toBe('aac');
+  });
+
+  it('slices cue tracks to FLAC when accepted, and to AAC when not', () => {
+    const cue = file('/m/a.flac', 1000);
+    expect(negotiateStreamFormat(cue, 'orig', kinds('flac'))).toBe('flac');
+    expect(negotiateStreamFormat(cue, 'orig', kinds('mp3', 'aac'))).toBe('aac');
+  });
+
+  it('downgrades an explicit flac request the browser cannot play', () => {
+    const flac = file('/m/a.flac');
+    expect(negotiateStreamFormat(flac, 'flac' satisfies StreamFormat, kinds('flac'))).toBe('flac');
+    expect(negotiateStreamFormat(flac, 'flac', kinds('mp3', 'aac'))).toBe('aac');
+    expect(negotiateStreamFormat(flac, 'aac', kinds('flac'))).toBe('aac');
+  });
+});
+
 describe('GET /api/stream fmt=orig (plain file)', () => {
   it('serves the whole file with metadata', async () => {
     const res = await app.inject({ method: 'GET', url: '/api/stream/l:plain' });
@@ -256,6 +313,23 @@ describe('GET /api/stream fmt=orig (plain file)', () => {
     expect(res.headers['content-type']).toBe('audio/flac');
     expect(res.headers['accept-ranges']).toBe('bytes');
     expect(Number(res.headers['content-length'])).toBe(plainBytes.length);
+    expect(res.rawPayload.equals(plainBytes)).toBe(true);
+  });
+
+  it('transcodes to AAC when the client says it cannot play FLAC', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:plain?fmt=orig&accept=mp3,aac,m4a' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('audio/aac');
+    const out = join(dir, 'plain-negotiated.aac');
+    writeFileSync(out, res.rawPayload);
+    expect(ffprobeStream(out).codec_name).toBe('aac');
+    expect(Math.abs(packetDuration(out) - 4.0)).toBeLessThanOrEqual(0.15);
+  }, 30_000);
+
+  it('serves the stored FLAC unchanged when the client accepts FLAC', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/stream/l:plain?fmt=orig&accept=flac,mp3' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('audio/flac');
     expect(res.rawPayload.equals(plainBytes)).toBe(true);
   });
 

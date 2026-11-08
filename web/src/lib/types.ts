@@ -18,6 +18,12 @@ export interface ZoneInfo {
   /** pc zone only: its queue lives on the server (server config spotify.serverQueue), which also starts the Spotify
    *  app when a Spotify song needs it. The page is then a plain remote, and a mixed queue needs no open tab. */
   serverQueue?: boolean;
+  /** spotify zones: Spotify's device type ('Smartphone', 'Tablet', 'Computer', 'Speaker', …). */
+  deviceType?: string;
+  /** spotify zones: this device is the account's active one right now. */
+  isActive?: boolean;
+  /** spotify zones: private session / not controllable through the Spotify Web API. */
+  isRestricted?: boolean;
 }
 
 /** A track plus just enough album context to put it in a queue. */

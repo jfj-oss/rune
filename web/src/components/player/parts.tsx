@@ -8,6 +8,7 @@ import { isLiveTrack } from '../../lib/listenTypes';
 import type { ZoneInfo } from '../../lib/types';
 import { isMixedQueue } from '../../player/pc';
 import { usePlayer, useSignalPath } from '../../store/player';
+import { spotifyDeviceHint } from '../../player/routing';
 import { Popover } from '../Popover';
 import { detectIOS } from '../../lib/volume';
 import { Slider } from './Slider';
@@ -230,6 +231,7 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
 
 /** What a zone can play, as a one-line hint under its name. */
 export function zoneHint(z: ZoneInfo, mixed: boolean): string | null {
+  if (z.kind === 'spotify') return spotifyDeviceHint(z);
   if (z.kind !== 'pc') return null;
   if (z.serverQueue) return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)` : 'Local + Spotify (rune starts the Spotify app)';
   if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)`;
@@ -244,10 +246,11 @@ function ZoneList({ close }: { close(): void }) {
   const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
   const [hidden, setHidden] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
-  // the Spotify app on the PC (and phones) come and go: look again whenever the list is opened
-  useEffect(() => { void refresh(); void api.hiddenZones().then(setHidden, () => undefined); }, [refresh]);
+  // The Spotify app on the PC (and phones) come and go, and a sleeping phone only shows while its app is awake:
+  // ask for a fresh list every time the picker opens (the server keeps it budget-aware).
+  useEffect(() => { void refresh({ fresh: true }); void api.hiddenZones().then(setHidden, () => undefined); }, [refresh]);
   const toggleHidden = async (name: string, hide: boolean) => {
-    try { setHidden(await api.setZoneHidden(name, hide)); await refresh(); } catch { /* server offline */ }
+    try { setHidden(await api.setZoneHidden(name, hide)); await refresh({ fresh: true }); } catch { /* server offline */ }
   };
   return (
     <>
@@ -257,7 +260,12 @@ function ZoneList({ close }: { close(): void }) {
         const hint = zoneHint(z, mixed && z.id === zone);
         return (
           <div key={z.id} className="zonerow">
-            <button className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`} onClick={() => { void setZone(z.id); close(); }}>
+            <button
+              className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`}
+              disabled={z.isRestricted === true}
+              title={z.isRestricted ? 'This device is in a private session; Spotify does not let rune control it' : undefined}
+              onClick={() => { void setZone(z.id); close(); }}
+            >
               <I size={16} />
               <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
               {z.id === zone && <Check size={16} className="menu__check" />}

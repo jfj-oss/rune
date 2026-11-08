@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '@liner/shared';
-import { AudioEngine } from './engine';
+import { AudioEngine, streamUrl } from './engine';
 import { mkTrack } from './testkit';
 
 /** Minimal <audio> double: records src assignments, play calls and events. */
@@ -297,3 +297,33 @@ describe('AudioEngine on iOS (background playback)', () => {
   });
 });
 
+
+describe('streamUrl capability negotiation', () => {
+  const track = local('l:neg');
+  const base = `/api/stream/${encodeURIComponent('l:neg')}`;
+
+  it('keeps the old URL when there is no accept list (tests, SSR, older clients)', () => {
+    expect(streamUrl(track, { fmt: 'orig', kbps: 256 })).toBe(`${base}?fmt=orig&kbps=256`);
+  });
+
+  it('tells the server which source kinds this browser plays, for fmt=orig', () => {
+    expect(streamUrl(track, { fmt: 'orig', kbps: 256 }, { accept: 'mp3,aac,m4a' }))
+      .toBe(`${base}?fmt=orig&kbps=256&accept=mp3,aac,m4a`);
+  });
+
+  it('does not negotiate a format already picked by the user (data saver AAC)', () => {
+    expect(streamUrl(track, { fmt: 'aac', kbps: 256 }, { accept: 'mp3,aac,m4a' }))
+      .toBe(`${base}?fmt=aac&kbps=256`);
+  });
+
+  it('keeps wait=1 for iOS (ranged file) and seek slices with t=', () => {
+    expect(streamUrl(track, { fmt: 'orig', kbps: 256 }, { accept: 'mp3,aac', ios: true }, 12_000))
+      .toBe(`${base}?fmt=orig&kbps=256&accept=mp3,aac&wait=1&t=12000`);
+  });
+
+  it('leaves radio streams alone', () => {
+    const radio = mkTrack('rs:station-1', 'local'); // live tracks are recognised by their rs: id
+    expect(streamUrl(radio, { fmt: 'orig', kbps: 256 }, { accept: 'mp3' }))
+      .toBe('/api/radio/rs%3Astation-1/stream');
+  });
+});

@@ -2,7 +2,7 @@ import type { Track } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
 import { sdkSupportedFor } from '../lib/device';
 import type { PlayItem, ZoneInfo } from '../lib/types';
-import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, withoutOwnDevice, withoutPcDevice, zoneCanPlay, followPcSpeakers, noteSounding } from './routing';
+import { cantPlayMessage, playableZones, routeItems, spotifyDeepLink, spotifyDeviceHint, withoutOwnDevice, withoutPcDevice, zoneCanPlay, followPcSpeakers, noteSounding } from './routing';
 
 const t = (id: string, source: 'local' | 'spotify', albumId = source === 'spotify' ? 'sp:alb1' : 'la:a'): PlayItem => ({
   track: { id, albumId, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
@@ -139,6 +139,37 @@ describe('pc zone with the PC’s Spotify app', () => {
   it('explains that rune starts the app (no manual “open Spotify” instruction)', () => {
     expect(cantPlayMessage({ kind: 'pc', name: 'Linux PC speakers' }, 'spotify')).toBe('rune starts Spotify on the PC for this');
     expect(cantPlayMessage({ kind: 'spotify', name: 'iPhone' }, 'local')).toContain('iPhone');
+  });
+});
+
+describe('Connect device labels', () => {
+  it('says plainly that a phone is the Spotify app on a phone', () => {
+    expect(spotifyDeviceHint({ name: 'iPhone', deviceType: 'Smartphone' })).toBe('Spotify app on a phone');
+    expect(spotifyDeviceHint({ name: 'Pixel', deviceType: 'smartphone' })).toBe('Spotify app on a phone');
+    expect(spotifyDeviceHint({ name: 'Living room', deviceType: 'Speaker' })).toBe('Spotify speaker');
+    expect(spotifyDeviceHint({ name: 'HORSE', deviceType: 'Computer' })).toBe('Spotify app on a computer');
+  });
+
+  it('falls back to the name when Spotify gives no type', () => {
+    expect(spotifyDeviceHint({ name: 'Jo’s iPhone' })).toBe('Spotify app on a phone');
+    expect(spotifyDeviceHint({ name: 'Kitchen' })).toBe('Spotify Connect');
+  });
+
+  it('says when a device is asleep or restricted', () => {
+    expect(spotifyDeviceHint({ name: 'iPhone', deviceType: 'Smartphone', isActive: false }))
+      .toBe('Spotify app on a phone · asleep — open Spotify there to wake it');
+    expect(spotifyDeviceHint({ name: 'iPhone', deviceType: 'Smartphone', isRestricted: true }))
+      .toBe('Spotify app on a phone · restricted — pick another device');
+    expect(spotifyDeviceHint({ name: 'iPhone', deviceType: 'Smartphone', isActive: true }))
+      .toBe('Spotify app on a phone');
+  });
+});
+
+describe('Spotify in a browser without the Web Playback SDK', () => {
+  it('tells the user to hand it to the Spotify app, which then shows as a zone', () => {
+    expect(cantPlayMessage({ kind: 'browser', name: 'iPhone' }, 'spotify')).toBe(
+      'Spotify can’t play in this browser — open the Spotify app on this device, then pick it as the zone',
+    );
   });
 });
 

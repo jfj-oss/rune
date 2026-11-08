@@ -41,6 +41,70 @@ export interface StoredTrack {
 
 export type StreamFormat = 'orig' | 'flac' | 'aac';
 
+/** What a file really contains, as a browser's `canPlayType` vocabulary names it. */
+export type SourceKind = 'flac' | 'mp3' | 'aac' | 'm4a' | 'wav' | 'aiff' | 'vorbis' | 'opus' | 'wma';
+const SOURCE_KINDS = new Set<string>(['flac', 'mp3', 'aac', 'm4a', 'wav', 'aiff', 'vorbis', 'opus', 'wma']);
+
+/** A client's `accept=` list: the source kinds its media element says it can play. Null = it said nothing. */
+export function parseAcceptedKinds(raw: string | undefined): Set<SourceKind> | null {
+  if (typeof raw !== 'string' || raw.length > 200) return null;
+  const kinds = raw
+    .split(',')
+    .map((k) => k.trim().toLowerCase())
+    .filter((k) => SOURCE_KINDS.has(k));
+  // An empty list means "no negotiation" (an older client, or a malformed value): serve what was asked for.
+  return kinds.length ? new Set(kinds as SourceKind[]) : null;
+}
+
+/** The source kind of a stored file, from its extension (what the server would send for fmt=orig). */
+export function sourceKindForFile(path: string): SourceKind | null {
+  switch (extname(path).toLowerCase()) {
+    case '.flac':
+      return 'flac';
+    case '.mp3':
+      return 'mp3';
+    case '.m4a':
+    case '.mp4':
+      return 'm4a';
+    case '.aac':
+      return 'aac';
+    case '.wav':
+      return 'wav';
+    case '.aif':
+    case '.aiff':
+      return 'aiff';
+    case '.ogg':
+    case '.oga':
+      return 'vorbis';
+    case '.opus':
+      return 'opus';
+    case '.wma':
+      return 'wma';
+    default:
+      return null;
+  }
+}
+
+/**
+ * The format actually served. A client can say which source kinds its `<audio>` plays (`accept=flac,mp3,…`); when the
+ * file's own kind is not among them, transcode to AAC, which every browser here plays. Cue tracks are sliced to FLAC
+ * for fmt=orig, so they follow the same rule. No `accept` list means the old behaviour (serve what was asked).
+ */
+export function negotiateStreamFormat(
+  track: Pick<StoredTrack, 'path' | 'cue_start_ms'>,
+  fmt: StreamFormat,
+  accepted: Set<SourceKind> | null,
+): StreamFormat {
+  if (!accepted) return fmt;
+  if (fmt === 'orig') {
+    if (track.cue_start_ms != null) return accepted.has('flac') ? 'flac' : 'aac';
+    const kind = track.path ? sourceKindForFile(track.path) : null;
+    return kind && accepted.has(kind) ? 'orig' : 'aac';
+  }
+  if (fmt === 'flac' && !accepted.has('flac')) return 'aac';
+  return fmt;
+}
+
 export interface ByteRange {
   start: number;
   end: number; // inclusive
@@ -288,14 +352,13 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
 
   app.get('/api/stream/:trackId', async (request, reply) => {
     const { trackId } = request.params as { trackId: string };
-    const query = request.query as { fmt?: string; kbps?: string; t?: string; live?: string; wait?: string };
+    const query = request.query as { fmt?: string; kbps?: string; t?: string; live?: string; wait?: string; accept?: string };
     const offsetMs = Math.max(0, Number.parseInt(query.t ?? '0', 10) || 0);
 
     const fmtRaw = (query.fmt ?? 'orig').toLowerCase();
     if (fmtRaw !== 'orig' && fmtRaw !== 'flac' && fmtRaw !== 'aac') {
       return reply.code(400).send({ error: `unsupported fmt '${query.fmt}'` });
     }
-    const fmt = fmtRaw as StreamFormat;
     const kbps = (() => {
       const n = Number.parseInt(query.kbps ?? '', 10);
       return Number.isFinite(n) && n >= 8 && n <= 512 ? n : 256;
@@ -306,6 +369,9 @@ export function registerStreamRoutes(app: FastifyInstance, db: Db, cfg: Config):
     if (!track.path || !existsSync(track.path)) {
       return reply.code(410).send({ error: 'audio file is missing' });
     }
+    // The client says which source kinds it can play (iOS refuses Opus, some browsers refuse FLAC): when the file is
+    // not one of them, AAC is served instead of a file that would fail silently in its <audio> element.
+    const fmt = negotiateStreamFormat(track, fmtRaw as StreamFormat, parseAcceptedKinds(query.accept));
 
     // Loudness gain is only a *hint*: the server never alters the audio here.
     // Browsers apply it with Web Audio (GainNode) so a quiet 70s FLAC and a

@@ -85,9 +85,10 @@ export const api = {
     if (isMock) return (await mock()).mockApi.search(q);
     return http(`/search${qs({ q, local: opts.localOnly ? '1' : undefined })}`);
   },
-  async zones(): Promise<ZoneInfo[]> {
+  /** `fresh`: the picker just opened — ask for the device list now instead of the server's short cache. */
+  async zones(opts: { fresh?: boolean } = {}): Promise<ZoneInfo[]> {
     if (isMock) return (await mock()).mockApi.zones();
-    return http('/zones');
+    return http(`/zones${opts.fresh ? '?refresh=1' : ''}`);
   },
   /** Is the Spotify desktop app (flatpak) currently running on the PC? */
   async pcSpotifyStatus(): Promise<{ running: boolean }> {

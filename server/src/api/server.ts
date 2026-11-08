@@ -1284,7 +1284,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return reply.send(createReadStream(file));
       });
 
-      r.get('/zones', async () => {
+      r.get<{ Querystring: { refresh?: string } }>('/zones', async (req) => {
         const zones: {
           id: Zone;
           name: string;
@@ -1295,11 +1295,17 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           spotifyDeviceName?: string;
           /** For 'pc': its queue lives on the server (phase 3); the page is a plain remote. */
           serverQueue?: boolean;
+          /** For 'spotify': Spotify's own description, so the picker can label phones and sleeping devices. */
+          deviceType?: string;
+          isActive?: boolean;
+          isRestricted?: boolean;
         }[] = [];
+        // The picker opening asks for the list even if the 5 s cache is warm; the API keeps this budget-aware.
+        const fresh = req.query.refresh === '1';
         const spotifyConnected = !!spotify && (await spotify.auth.status()).connected;
         if (spotifyConnected) {
           try {
-            const spotifyZones = await spotify.zones.listZones();
+            const spotifyZones = await spotify.zones.listZones({ fresh });
             notePcSpotify(spotifyZones);
             for (const z of spotifyZones) watchSpotifyZone(z.id);
             zones.push(...spotifyZones);

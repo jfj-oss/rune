@@ -1,6 +1,7 @@
 import type { Track } from '@liner/shared';
 import { isLiveTrack } from '../lib/listenTypes';
 import { detectIOS } from '../lib/volume';
+import { browserAcceptedFormats } from './capabilities';
 
 /** What actually makes sound (or pretends to) for a local (browser/mock) zone. */
 export interface Engine {
@@ -45,14 +46,35 @@ function pickFormat(): { fmt: string; kbps: number } {
 }
 
 const ON_IOS = typeof navigator !== 'undefined' && detectIOS(navigator.userAgent, navigator.maxTouchPoints) !== null;
+/** Source kinds this browser plays untouched; the server transcodes anything else to AAC. */
+const ACCEPT = browserAcceptedFormats();
 
-function streamSrc(track: Track, fmt: { fmt: string; kbps: number }, tMs?: number): string {
+export interface StreamUrlOptions {
+  /** `accept=` list (see capabilities.ts); absent = no negotiation (older clients/tests). */
+  accept?: string | null;
+  /** iOS waits for a ranged cache file instead of a live stream. */
+  ios?: boolean;
+}
+
+/** The stream URL for a track, pure so the capability negotiation is unit-testable. */
+export function streamUrl(
+  track: Track,
+  fmt: { fmt: string; kbps: number },
+  opts: StreamUrlOptions = {},
+  tMs?: number,
+): string {
   if (isLiveTrack(track)) return `/api/radio/${encodeURIComponent(track.id)}/stream`;
-  // iOS needs a ranged file, so it waits for the cache instead of taking a live stream.
-  const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}${ON_IOS ? '&wait=1' : ''}`;
+  const base = `/api/stream/${encodeURIComponent(track.id)}?fmt=${fmt.fmt}&kbps=${fmt.kbps}` +
+    `${fmt.fmt === 'orig' && opts.accept ? `&accept=${opts.accept}` : ''}` +
+    // iOS needs a ranged file, so it waits for the cache instead of taking a live stream.
+    `${opts.ios ? '&wait=1' : ''}`;
   // Live transcoded streams have no length and cannot be range-seeked, so seeking
   // reloads with t=<ms> and the server slices from there.
   return tMs && tMs > 0 ? `${base}&t=${Math.round(tMs)}` : base;
+}
+
+function streamSrc(track: Track, fmt: { fmt: string; kbps: number }, tMs?: number): string {
+  return streamUrl(track, fmt, { accept: ACCEPT, ios: ON_IOS }, tMs);
 }
 
 type AudioContextCtor = typeof AudioContext;

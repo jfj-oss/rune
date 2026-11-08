@@ -1,8 +1,9 @@
 import { Check, ExternalLink, Globe, Monitor, Smartphone, Speaker } from 'lucide-react';
 import { useEffect } from 'react';
 import { plural } from '../lib/format';
+import { detectIOS } from '../lib/volume';
 import type { PlaySource, ZoneInfo } from '../lib/types';
-import { playableZones, spotifyDeepLink } from '../player/routing';
+import { playableZones, spotifyDeepLink, spotifyDeviceHint } from '../player/routing';
 import { usePlayer } from '../store/player';
 import { capsFrom, useSpotify } from '../store/spotify';
 import { Dialog } from './Dialog';
@@ -14,6 +15,7 @@ const hint = {
   spotify: 'Spotify Connect',
 } as const;
 const hintFor = (z: ZoneInfo, need: PlaySource) => {
+  if (z.kind === 'spotify') return spotifyDeviceHint(z);
   if (z.kind !== 'pc') return hint[z.kind];
   if (z.spotifyDeviceId) return `Local files, and Spotify through the Spotify app “${z.spotifyDeviceName ?? 'on the PC'}”`;
   return need === 'spotify' ? 'Local files, and Spotify (rune starts the app)' : hint.pc;
@@ -31,14 +33,17 @@ export function PlayOnSheet() {
   const playOn = usePlayer((s) => s.playOn);
   const refresh = usePlayer((s) => s.refreshZones);
 
-  // Connect devices appear and disappear (the phone's Spotify app): keep looking while the sheet is open.
+  // Connect devices appear and disappear (the phone's Spotify app): read the list at once on opening, then keep
+  // looking while the sheet is open (the server's short cache keeps the interval from spending a request each time).
   useEffect(() => {
     if (!req) return;
+    void refresh({ fresh: true });
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
   }, [req, refresh]);
 
   if (!req) return null;
+  const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
   const caps = capsFrom({ connected, supported, sdk: { phase, deviceId: null } });
   const options = playableZones(zones, req.need, caps);
   const cur = zones.find((z) => z.id === zone);
@@ -55,7 +60,14 @@ export function PlayOnSheet() {
         {options.map(({ zone: z, label }) => {
           const I = icons[z.kind] ?? Monitor;
           return (
-            <button key={z.id} className="sheet__opt" role="menuitem" onClick={() => { close(); void playOn(z.id, req); }}>
+            <button
+              key={z.id}
+              className="sheet__opt"
+              role="menuitem"
+              disabled={z.isRestricted === true}
+              title={z.isRestricted ? 'This device is in a private session; Spotify does not let rune control it' : undefined}
+              onClick={() => { close(); void playOn(z.id, req); }}
+            >
               <I size={20} />
               <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : hintFor(z, req.need)}</small></span>
               {z.id === zone && <Check size={16} className="menu__check" />}
@@ -71,7 +83,17 @@ export function PlayOnSheet() {
       </div>
       {req.need === 'spotify' && !caps.sdk && (
         <p className="sheet__note">
-          {connected ? (supported ? 'Spotify Premium is needed to play inside the browser.' : 'This browser can’t play Spotify itself. Open the Spotify app on this device, then pick it above.') : 'Spotify is not connected.'}
+          {connected ? (
+            ios ? (
+              <>Spotify can’t play inside {ios === 'iPhone' ? 'an iPhone' : 'an iPad'}'s browser. Open the Spotify app on the phone, then pick it above (its Connect device appears here once it is awake).</>
+            ) : supported ? (
+              'Spotify Premium is needed to play inside the browser.'
+            ) : (
+              'This browser can’t play Spotify itself. Open the Spotify app on this device, then pick it above.'
+            )
+          ) : (
+            'Spotify is not connected.'
+          )}
         </p>
       )}
       {req.need === 'spotify' && cur?.kind === 'pc' && !cur.spotifyDeviceId && (

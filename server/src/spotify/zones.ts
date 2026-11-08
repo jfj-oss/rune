@@ -22,7 +22,8 @@ import type { MprisPlaybackSource, MprisPlaybackState } from './mpris.js';
 
 /** Subset of SpotifyApi used by zones (a fake is injected in tests). */
 export interface SpotifyZoneApi {
-  devices(): Promise<SpotifyDevice[]>;
+  /** `fresh`: the picker just opened and wants the current list even if the short cache is still warm. */
+  devices(fresh?: boolean): Promise<SpotifyDevice[]>;
   tracks(ids: string[], opts?: { maxSingles?: number }): Promise<SpotifyTrack[]>;
   /** One track by id (GET /tracks/{id}). Dev-mode apps may not use the batch endpoint. */
   track(id: string): Promise<SpotifyTrack>;
@@ -32,6 +33,8 @@ export interface SpotifyZoneApi {
   readsFree?(deviceId: string): boolean;
   queue(): Promise<SpotifyQueue>;
   play(body: SpotifyPlayBody, deviceId?: string): Promise<void>;
+  /** PUT /me/player: moves playback to a device and (play: true) wakes its app. Absent for older fakes. */
+  transfer?(deviceId: string, play?: boolean): Promise<void>;
   pause(deviceId?: string): Promise<void>;
   next(deviceId?: string): Promise<void>;
   previous(deviceId?: string): Promise<void>;
@@ -625,7 +628,14 @@ export class SpotifyConnectZone implements PlaybackZone {
         // random one (rune shuffles before sending, so the order it sends is the order it wants)
         if (uris.length > 0) body.offset = { position: window.start };
         if (cmd.positionMs && cmd.positionMs > 0) body.position_ms = Math.round(cmd.positionMs);
-        await this.api.play(body, device);
+        // Send the songs right away (one read like any other command): a lot of tests, and the UI, depend on the
+        // started queue reaching the listeners before the first poll can. Only an unreachable device costs extra.
+        try {
+          await this.api.play(body, device);
+        } catch (err) {
+          if (!deviceUnreachable(err)) throw err;
+          await this.recoverStart(body);
+        }
         this.claim();
         if (cmd.paused) await this.api.pause(device).catch(() => undefined);
         // Show the picked song and the queue we sent at once; Spotify's metadata for those
@@ -642,7 +652,7 @@ export class SpotifyConnectZone implements PlaybackZone {
             this.publishStartedQueue();
           })
           .catch(() => undefined);
-        return this.settle();
+        return this.confirmStart(body);
       }
       case 'enqueue': {
         // Spotify's Web API only appends; it cannot insert next. `next` is ignored.
@@ -874,12 +884,94 @@ export class SpotifyConnectZone implements PlaybackZone {
 
   /** Poll until Spotify reports this device as the active one (or give up after a few tries). */
   private async settle(): Promise<PlayerState> {
-    for (let i = 0; i < SETTLE_TRIES; i++) {
-      await this.pollOnce();
-      if (this.lastActiveDevice === this.deviceId) break;
-      if (i < SETTLE_TRIES - 1) await new Promise((r) => setTimeout(r, SETTLE_GAP_MS));
-    }
+    await this.settledOnDevice();
     return this.snapshot;
+  }
+
+  /** Does Spotify now name this device as the active one? Polls a few times: the switch takes a moment. */
+  private async settledOnDevice(tries = SETTLE_TRIES, gapMs = SETTLE_GAP_MS): Promise<boolean> {
+    for (let i = 0; i < tries; i++) {
+      await this.pollOnce();
+      if (this.lastActiveDevice === this.deviceId) return true;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    return false;
+  }
+
+  /** This device as Spotify's device list describes it right now (undefined if the list cannot be read). */
+  private async deviceInfo(): Promise<SpotifyDevice | undefined> {
+    try {
+      return (await this.api.devices()).find((d) => d.id === this.deviceId);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Spotify could not reach this Connect device at all (404, a 403): its app is asleep or gone. Ask the device list
+   * whether it is restricted, then wake it once (a transfer with play:true starts the app) and send the songs again.
+   * If Spotify accepts the play instead, that is all this can tell — a sleeping phone accepts it too (confirmStart).
+   */
+  private async recoverStart(body: SpotifyPlayBody): Promise<void> {
+    const info = await this.deviceInfo();
+    if (info?.is_restricted) throw this.restrictedError();
+    await this.wakeApp();
+    try {
+      await this.api.play(body, this.deviceId);
+    } catch (err) {
+      // Refused twice: a plain message the user can act on, not a retry that claims success from /me/player.
+      if (!deviceUnreachable(err)) throw err;
+      throw new Error(this.wakeMessage(info?.type));
+    }
+    if (await this.settledOnDevice(6, 500)) return;
+    throw new Error(this.wakeMessage(info?.type));
+  }
+
+  /**
+   * After a play Spotify accepted, check that this device really became the active one. A phone whose app went to
+   * sleep stays listed as inactive and accepts a play that then does nothing: then transfer to it (play:true wakes
+   * the app), send the songs again, and if it never wakes, throw what the user can act on. A device that is merely
+   * slow to switch is left to the ordinary polling: nothing here blocks the started queue from showing.
+   */
+  private async confirmStart(body: SpotifyPlayBody): Promise<PlayerState> {
+    if (await this.settledOnDevice()) return this.snapshot;
+    const info = await this.deviceInfo();
+    if (info?.is_restricted) throw this.restrictedError();
+    if (!info || info.is_active) return this.snapshot;
+    await this.wakeApp();
+    try {
+      await this.api.play(body, this.deviceId);
+    } catch (err) {
+      if (!deviceUnreachable(err)) throw err;
+      throw new Error(this.wakeMessage(info.type));
+    }
+    if (await this.settledOnDevice(6, 500)) return this.snapshot;
+    throw new Error(this.wakeMessage(info.type));
+  }
+
+  private restrictedError(): Error {
+    return new Error(
+      `Spotify has marked “${this.name}” as restricted, so rune cannot control it. ` +
+        'Turn off the private session there (or pick another device).',
+    );
+  }
+
+  /** Wake a sleeping Connect app: a transfer with play:true starts it on whatever it last held. (Not the public
+   *  wake(), which starts this zone's polling.) */
+  private async wakeApp(): Promise<void> {
+    const transfer = this.api.transfer;
+    if (!transfer) return;
+    await transfer.call(this.api, this.deviceId, true).catch((err: unknown) => {
+      // A phone that is deeply asleep refuses even the transfer; the retry after the songs is what matters.
+      if ((err as { status?: number }).status === 429) throw err;
+    });
+  }
+
+  private wakeMessage(type?: string | null): string {
+    const phone = /smartphone|tablet/i.test(type ?? '') || /phone|iphone|ipad|android|pixel|galaxy/i.test(this.name);
+    return phone
+      ? `Open Spotify on your phone (“${this.name}”), then try again.`
+      : `Open Spotify on “${this.name}”, then try again.`;
   }
 
   private async pollOnce(): Promise<void> {
@@ -1202,6 +1294,12 @@ function assertNever(x: never): never {
   throw new Error(`Unsupported player command: ${JSON.stringify(x)}`);
 }
 
+/** Spotify's answers for a Connect device that is asleep, gone from the list, or in a private session. */
+function deviceUnreachable(err: unknown): boolean {
+  const { status, body } = err as { status?: number; body?: unknown };
+  return status === 404 || (status === 403 && typeof body === 'string' && /restriction violated|restricted|device/i.test(body));
+}
+
 /**
  * Spotify answers 403 "Restriction violated" when the player is already where it was told to go: pausing what is
  * paused, resuming what plays. Commands sent on a stale state do that, and it is no failure. Anything else is rethrown.
@@ -1231,6 +1329,12 @@ export interface SpotifyZoneInfo {
   id: Zone;
   name: string;
   kind: 'spotify';
+  /** Spotify's device type: 'Smartphone', 'Tablet', 'Computer', 'Speaker', … (the picker labels phones clearly). */
+  deviceType?: string;
+  /** True while this device is the account's active one. */
+  isActive?: boolean;
+  /** Private session / otherwise not controllable through the Web API. */
+  isRestricted?: boolean;
 }
 
 /** A Connect device: its state is read from, and its commands go through, the Spotify Web API. */
@@ -1248,7 +1352,7 @@ export class SpotifyZones {
   ) {
     // /me/player describes the whole account, so every zone polling it can share one answer.
     this.now = opts.now ?? Date.now;
-    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris);
+    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris, opts.budgetLevel);
     // A local report that changes what is playing wakes every zone: they update from the
     // synthetic (free) answer immediately.
     opts.localPlayback?.setWake(() => this.wake());
@@ -1263,14 +1367,24 @@ export class SpotifyZones {
     });
   }
 
-  /** Devices for GET /zones; shapes merge cleanly with the PC/browser zones. */
-  async listZones(): Promise<SpotifyZoneInfo[]> {
-    const devices = await this.api.devices();
+  /**
+   * Devices for GET /zones; shapes merge cleanly with the PC/browser zones. `fresh` asks the API for a new list even
+   * if its short cache is still warm (the picker just opened); the API itself skips that when the budget is low.
+   */
+  async listZones(opts: { fresh?: boolean } = {}): Promise<SpotifyZoneInfo[]> {
+    const devices = await this.api.devices(opts.fresh === true);
     const out: SpotifyZoneInfo[] = [];
     for (const device of devices) {
       if (!device.id) continue;
       const zone = this.ensureZone(device.id, device.name);
-      out.push({ id: zone.zone, name: device.name, kind: 'spotify' });
+      out.push({
+        id: zone.zone,
+        name: device.name,
+        kind: 'spotify',
+        ...(device.type ? { deviceType: device.type } : {}),
+        isActive: device.is_active,
+        isRestricted: device.is_restricted,
+      });
     }
     return out;
   }
@@ -1314,6 +1428,8 @@ export function createSpotifyZones(api: SpotifyZoneApi, opts: ConnectZoneOptions
 const SHARED_READ_MS = 800;
 /** The device list changes rarely; GET /zones can afford a 5 s cache. */
 const DEVICES_READ_MS = 5000;
+/** A picker opening asks for a fresh list, but not more than once in this window (a request each time is waste). */
+const DEVICES_FRESH_MS = 1500;
 
 /** Spotify ids are the last URI segment: `spotify:artist:abc` → `abc`. */
 function spotifyIdFromUri(uri: string): string {
@@ -1378,6 +1494,7 @@ export function sharedPlaybackReads(
   now: () => number = Date.now,
   local?: LocalPlaybackSource,
   mpris?: MprisPlaybackSource,
+  budgetLevel?: () => SpotifyBudgetLevel,
 ): SpotifyZoneApi {
   type Slot<T> = { at: number; value: Promise<T> } | null;
   let playback: Slot<SpotifyPlaybackState | null> = null;
@@ -1425,8 +1542,12 @@ export function sharedPlaybackReads(
     );
   };
   return {
-    devices: () =>
-      read(
+    devices: (fresh = false) => {
+      // A fresh read is a user-facing action (the picker opened), but at a low or used-up budget the cached list is
+      // good enough: an extra request there costs more than a few seconds of staleness.
+      const level = budgetLevel?.() ?? 'normal';
+      const ttl = fresh && level !== 'low' && level !== 'out' ? DEVICES_FRESH_MS : DEVICES_READ_MS;
+      return read(
         devices,
         (s) => (devices = s),
         async () => {
@@ -1436,8 +1557,9 @@ export function sharedPlaybackReads(
           );
           return list;
         },
-        DEVICES_READ_MS,
-      ),
+        ttl,
+      );
+    },
     tracks: (ids, o) => api.tracks(ids, o),
     track: (id) => api.track(id),
     currentPlayback: (forDevice) => {
@@ -1454,6 +1576,10 @@ export function sharedPlaybackReads(
     readsFree: (deviceId) => mpris?.readsFree(deviceId) ?? false,
     queue: () => read(queue, (s) => (queue = s), () => api.queue()),
     play: (body, deviceId) => write(() => api.play(body, deviceId), deviceId),
+    // Only when the underlying client has it: an older fake without transfer stays transfer-less (the zone skips waking).
+    ...(api.transfer
+      ? { transfer: (deviceId: string, play = false) => write(() => api.transfer!(deviceId, play), deviceId) }
+      : {}),
     pause: (deviceId) => write(() => api.pause(deviceId), deviceId),
     next: (deviceId) => write(() => api.next(deviceId), deviceId),
     previous: (deviceId) => write(() => api.previous(deviceId), deviceId),
