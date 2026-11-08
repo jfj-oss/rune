@@ -1,0 +1,29 @@
+[package]
+name = "rune-ios"
+version = "0.1.0"
+description = "The rune iPhone shell: a thin native wrapper around your own rune server"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# The iOS entry point lives in lib.rs; Tauri's mobile template links this static library.
+name = "rune_ios_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The connect screen's /api/health probe runs in Rust so it is not subject to WKWebView's CORS rules.
+# rustls (not the platform TLS stack) keeps the same code path on the iPhone and on a Linux cargo check.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+url = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
