@@ -43,6 +43,7 @@ import { registerJsonCompression } from './compress.js';
 import { registerCors } from './cors.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
+import { registerLikedRoutes } from './liked.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
 import { albumsByIds, coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
@@ -1052,6 +1053,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
       registerBrowseRoutes(r, db);
       registerSavedRoute(r, db);
+      registerLikedRoutes(r, db, spotify ? {
+        api: spotify.api,
+        connected: async () => (await spotify.auth.status()).connected,
+        grantedScopes: () => spotify.auth.grantedScopes(),
+        onChange: () => broadcast({ type: 'library-changed' }),
+      } : undefined);
       registerFrameRoutes(r);
       registerHistoryRoutes(r, history);
       registerLoudnessRoutes(r, loudness);

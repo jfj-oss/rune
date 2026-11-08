@@ -734,3 +734,134 @@ export async function addTracksToSpotifyPlaylist(
   void snapshot; // the next sync picks up Spotify's new snapshot and confirms the order
   return ids.length;
 }
+
+// ---------- Liked Songs: local reads + like/unlike ----------
+
+/**
+ * Which of these track ids (the `sp:<id>` form used across rune) are in the local
+ * Liked Songs table? Reads the synced playlist, never Spotify — the point of the
+ * mirror is that "is it liked?" is free against the daily request budget.
+ */
+export function likedTrackIds(db: Db, trackIds: string[]): string[] {
+  ensureSpotifyLibrarySchema(db);
+  const ids = [...new Set(trackIds.filter((id) => id.startsWith('sp:')))];
+  const out: string[] = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = ids.slice(i, i + 500);
+    const rows = db
+      .prepare(
+        `SELECT track_id FROM playlist_tracks
+         WHERE playlist_id = ? AND track_id IN (${part.map(() => '?').join(',')})`,
+      )
+      .all(LIKED_SONGS_PLAYLIST_ID, ...part) as { track_id: string }[];
+    for (const row of rows) out.push(row.track_id);
+  }
+  return out;
+}
+
+export interface LikedWriteApi {
+  request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
+  tracks(ids: string[]): Promise<SpotifyTrack[]>;
+}
+
+export interface LikedWriteResult {
+  liked: boolean;
+  /** Songs whose Spotify/Liked Songs state actually changed (0 when it already matched). */
+  changed: number;
+}
+
+/**
+ * Like or unlike Spotify songs. Only songs whose local state differs are sent, so
+ * pressing a heart that is already in the right state costs no Spotify request;
+ * changes go out in batches of 50 through the shared API client (budget counters,
+ * 429 Retry-After and the lockout all apply). The Liked Songs mirror is updated in
+ * the same call: newest first on add, dense positions on remove.
+ */
+export async function setTracksLiked(
+  api: LikedWriteApi,
+  db: Db,
+  trackIds: string[],
+  liked: boolean,
+  opts: { now?: () => number } = {},
+): Promise<LikedWriteResult> {
+  ensureSpotifySchema(db);
+  ensureSpotifyLibrarySchema(db);
+  const now = opts.now ?? Date.now;
+  const ids = [
+    ...new Set(
+      trackIds
+        .filter((id) => id.startsWith('sp:'))
+        .map((id) => id.slice(3))
+        .filter(Boolean),
+    ),
+  ];
+  if (ids.length === 0) return { liked, changed: 0 };
+
+  const have = new Set(likedTrackIds(db, ids.map((id) => `sp:${id}`)));
+  const changing = ids.filter((id) => have.has(`sp:${id}`) !== liked);
+  if (changing.length === 0) return { liked, changed: 0 };
+
+  const at = now();
+  if (liked) {
+    await addTracksToSpotifyPlaylist(
+      api,
+      db,
+      LIKED_SONGS_PLAYLIST_ID,
+      changing.map((id) => `sp:${id}`),
+      { now },
+    );
+  } else {
+    for (let i = 0; i < changing.length; i += 50) {
+      await api.request<void>('/me/tracks', {
+        method: 'DELETE',
+        body: { ids: changing.slice(i, i + 50) },
+      });
+    }
+    const tx = db.transaction(() => {
+      const del = db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?');
+      for (const id of changing) del.run(LIKED_SONGS_PLAYLIST_ID, `sp:${id}`);
+      // Removing rows leaves gaps: renumber the survivors densely. Targets are
+      // always ≤ the row's current position and no later row sits on a target, so
+      // this cannot collide with an existing primary key.
+      const rows = db
+        .prepare('SELECT position FROM playlist_tracks WHERE playlist_id = ? ORDER BY position')
+        .all(LIKED_SONGS_PLAYLIST_ID) as { position: number }[];
+      const move = db.prepare('UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND position = ?');
+      rows.forEach((row, index) => {
+        if (row.position !== index) move.run(index, LIKED_SONGS_PLAYLIST_ID, row.position);
+      });
+      db.prepare('UPDATE playlists SET track_count = ?, updated_at = ? WHERE id = ?').run(
+        rows.length,
+        at,
+        LIKED_SONGS_PLAYLIST_ID,
+      );
+    });
+    tx();
+  }
+
+  rememberLocalLikedChange(db, at);
+  return { liked, changed: changing.length };
+}
+
+/**
+ * A heart press already told Spotify and the mirror is correct, so record the
+ * Liked Songs probe stamp the next sync will compare against. This keeps a local
+ * like/unlike from triggering the ~100-request full Liked Songs pass. If the guess
+ * (count + newest added_at to the second) does not match Spotify's probe, the next
+ * sync just does the full pass as usual — nothing is skipped that was not already
+ * reflected locally.
+ */
+function rememberLocalLikedChange(db: Db, at: number): void {
+  // Only once the mirror exists: writing a stamp before the first sync would make
+  // the next sync skip Liked Songs entirely.
+  if (!db.prepare('SELECT 1 FROM playlists WHERE id = ?').get(LIKED_SONGS_PLAYLIST_ID)) return;
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) AS n, MAX(added_at) AS newest FROM playlist_tracks WHERE playlist_id = ?',
+    )
+    .get(LIKED_SONGS_PLAYLIST_ID) as { n: number; newest: number | null };
+  const newest = row.newest == null ? undefined : new Date(row.newest).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  ensureAppState(db);
+  setAppState(db, LIKED_STAMP_KEY, likedStamp(row.n, newest));
+  setAppState(db, LIKED_FULL_AT_KEY, String(at));
+}
