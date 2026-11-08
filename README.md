@@ -42,8 +42,8 @@ device, add its address to `corsOrigins`:
 { "corsOrigins": ["http://192.168.1.10:7420"] }
 ```
 
-Only search, album/playlist details, cover art and the audio stream are exposed, and Spotify tracks are never sent
-to Megatron.
+Only search, album/playlist details, cover art and the audio stream are exposed. Spotify audio is never streamed, and
+Megatron filters Spotify tracks out of everything it plays.
 
 Start it:
 
