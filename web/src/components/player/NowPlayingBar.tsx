@@ -6,6 +6,7 @@ import { liveMeta } from '../../lib/live';
 import { currentItem, usePlayer } from '../../store/player';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
+import { LikedHeart } from '../Liked';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
 
 export function NowPlayingBar() {
@@ -29,7 +30,10 @@ export function NowPlayingBar() {
               {meta ? (
                 <span className="npbar__title" title={meta.title}>{meta.title}</span>
               ) : (
-                <Link to={`/album/${encId(cur.album.id)}`} className="npbar__title" title={cur.track.title}>{cur.track.title}</Link>
+                <div className="npbar__titlerow">
+                  <Link to={`/album/${encId(cur.album.id)}`} className="npbar__title" title={cur.track.title}>{cur.track.title}</Link>
+                  <LikedHeart track={cur.track} />
+                </div>
               )}
               <div className="npbar__sub">
                 {meta ? (

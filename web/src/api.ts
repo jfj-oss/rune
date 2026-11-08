@@ -170,6 +170,17 @@ export const api = {
     if (isMock) return (await mock()).mockApi.setAlbumSaved(id, saved);
     await http(`/albums/${encodeURIComponent(id)}/save`, { method: saved ? 'POST' : 'DELETE' });
   },
+  /** Is this Spotify track in Liked Songs? Answered from the server's synced copy (no Spotify call). */
+  async trackLiked(id: string): Promise<boolean> {
+    if (isMock) return (await mock()).mockApi.trackLiked(id);
+    const res = await http<{ liked: Record<string, boolean> }>(`/tracks/liked${qs({ ids: id })}`);
+    return res.liked[id] === true;
+  },
+  /** Like/unlike this Spotify track, mirroring the change into Liked Songs on the server. */
+  async setTrackLiked(id: string, liked: boolean): Promise<void> {
+    if (isMock) return (await mock()).mockApi.setTrackLiked(id, liked);
+    await http('/tracks/liked', { method: liked ? 'POST' : 'DELETE', body: JSON.stringify({ ids: [id] }) });
+  },
   async scan(): Promise<void> {
     if (isMock) return;
     await http('/scan', { method: 'POST' });
