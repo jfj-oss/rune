@@ -7,6 +7,7 @@ const STAGE_LABEL: Record<NonNullable<UpdateStatus['stage']>, string> = {
   downloading: 'Downloading',
   installing: 'Installing',
   building: 'Building',
+  'waiting-for-music': 'Restarts when the music stops',
   restarting: 'Restarting',
   'restart-needed': 'Update ready — restart rune',
 };

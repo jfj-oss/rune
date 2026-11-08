@@ -14,7 +14,7 @@ import { existsSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-export type UpdateStage = 'downloading' | 'installing' | 'building' | 'restarting' | 'restart-needed' | null;
+export type UpdateStage = 'downloading' | 'installing' | 'building' | 'waiting-for-music' | 'restarting' | 'restart-needed' | null;
 
 export interface UpdateStatus {
   /** True when this copy can self-update: a git checkout, on a branch, with an origin remote. */
@@ -66,6 +66,8 @@ export interface UpdateOptions {
   /** Whether rune runs under systemd (INVOCATION_ID set). Injected by tests. */
   underSystemd?: () => boolean;
   now?: () => number;
+  /** How often to look again while a song started during the build is still going. */
+  musicPollMs?: number;
   /** Minimum gap between background fetches triggered by GET status. */
   fetchMinGapMs?: number;
   logger?: {
@@ -128,6 +130,7 @@ class UpdateServiceImpl implements UpdateService {
   private readonly underSystemd: () => boolean;
   private readonly now: () => number;
   private readonly fetchMinGapMs: number;
+  private readonly musicPollMs: number;
   private readonly logger: UpdateOptions['logger'];
 
   private stage: UpdateStage = null;
@@ -147,6 +150,7 @@ class UpdateServiceImpl implements UpdateService {
     this.underSystemd = opts.underSystemd ?? (() => process.env.INVOCATION_ID !== undefined && process.env.INVOCATION_ID !== '');
     this.now = opts.now ?? Date.now;
     this.fetchMinGapMs = opts.fetchMinGapMs ?? 60_000;
+    this.musicPollMs = opts.musicPollMs ?? 5_000;
     this.logger = opts.logger;
   }
 
@@ -401,6 +405,9 @@ class UpdateServiceImpl implements UpdateService {
       }
 
       if (this.underSystemd()) {
+        // The build takes minutes, so a song may have started since the check above. Never restart under it.
+        if (this.isPlayingOnPc()) this.stage = 'waiting-for-music';
+        while (this.isPlayingOnPc()) await new Promise((done) => setTimeout(done, this.musicPollMs));
         this.stage = 'restarting';
         try {
           await this.restartFn();

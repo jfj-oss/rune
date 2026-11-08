@@ -86,7 +86,7 @@ export interface GenreAlbumQuery { sort?: 'added' | 'artist' | 'title' | 'year';
 // ---------- self-update (GET/POST /update/…) ----------
 // Mirrors server/src/update.ts; kept here because @liner/shared is frozen.
 
-export type UpdateStage = 'downloading' | 'installing' | 'building' | 'restarting' | 'restart-needed' | null;
+export type UpdateStage = 'downloading' | 'installing' | 'building' | 'waiting-for-music' | 'restarting' | 'restart-needed' | null;
 export interface UpdateStatus {
   supported: boolean;
   current: string | null;

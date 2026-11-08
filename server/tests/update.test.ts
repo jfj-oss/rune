@@ -73,6 +73,7 @@ function svc(
     build?: (toDir: string) => Promise<void>;
     install?: () => Promise<void>;
     restart?: () => void | Promise<void>;
+    musicPollMs?: number;
   },
 ) {
   return createUpdateService({
@@ -83,6 +84,7 @@ function svc(
     build: opts.build,
     install: opts.install,
     restart: opts.restart,
+    musicPollMs: opts.musicPollMs,
   });
 }
 
@@ -165,6 +167,34 @@ describe('update install', () => {
     const res = await s.install();
     expect(res).toEqual({ ok: true, stage: 'restarting' });
     expect(restarted).toBe(true);
+  });
+
+  it('waits for a song that started during the build before restarting', async () => {
+    const { repoRoot, webDist } = initRepos();
+    addRemoteCommit(repoRoot, 'B');
+    let playing = false;
+    let polls = 0;
+    let restartedWhilePlaying: boolean | null = null;
+    const s = svc({
+      repoRoot,
+      webDist,
+      underSystemd: () => true,
+      musicPollMs: 1,
+      isPlayingOnPc: () => {
+        if (playing && ++polls >= 3) playing = false;
+        return playing;
+      },
+      build: async (toDir) => {
+        mkdirSync(toDir, { recursive: true });
+        writeFileSync(join(toDir, 'index.html'), 'built');
+        playing = true;
+      },
+      restart: () => {
+        restartedWhilePlaying = playing;
+      },
+    });
+    expect(await s.install()).toEqual({ ok: true, stage: 'restarting' });
+    expect(restartedWhilePlaying).toBe(false);
   });
 
   it('refuses when tracked files are dirty', async () => {
