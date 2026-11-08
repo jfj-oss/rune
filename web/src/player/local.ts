@@ -3,7 +3,8 @@ import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import type { Engine } from './engine';
 import type { TabChannel } from './oneTab';
-import { emptyState, livePosition, type Backend } from './types';
+import { matchBackendModes } from './modes';
+import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 
 let qn = 0;
 const newQueueId = () => `q${Date.now().toString(36)}${(qn++).toString(36)}`;
@@ -46,6 +47,7 @@ export class LocalBackend implements Backend {
     return () => { this.subs.delete(fn); };
   }
   async refresh() {}
+  async matchModes(want: PlayModes) { await matchBackendModes(this, want); }
   dispose() { clearInterval(this.timer); this.engine.stop(); this.subs.clear(); this.tabs?.close(); }
 
   private set(patch: Partial<PlayerState>) {

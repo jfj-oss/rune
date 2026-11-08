@@ -1,8 +1,9 @@
 import type { ClientEvent, PlayerState, ScanProgress, ServerEvent } from '@liner/shared';
 import { api } from '../api';
 import type { ExtCommand, PlayItem } from '../lib/types';
+import { matchBackendModes } from './modes';
 import { setSdkReporter } from './spotifySdk';
-import { emptyState, livePosition, type Backend } from './types';
+import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 import type { ZoneTransport } from './zoneEngine';
 
 type Listener = (e: ServerEvent) => void;
@@ -179,6 +180,7 @@ export class RemoteBackend implements Backend {
   async refresh() {
     try { this.apply(await api.playerState(this.zone)); } catch { /* server offline; keep last */ }
   }
+  async matchModes(want: PlayModes) { await matchBackendModes(this, want); }
   dispose() { this.off(); this.offReconnect(); this.unview(); this.subs.clear(); }
 
   async send(cmd: ExtCommand, _items?: PlayItem[]): Promise<void> {

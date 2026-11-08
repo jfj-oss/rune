@@ -1,12 +1,20 @@
 import type { PlayerState } from '@liner/shared';
 import type { ExtCommand, PlayItem } from '../lib/types';
 
+/** Rune's repeat/shuffle setting for the queue it is starting. */
+export interface PlayModes {
+  shuffle: boolean;
+  repeat: PlayerState['repeat'];
+}
+
 export interface Backend {
   readonly zone: string;
   readonly state: PlayerState;
   /** Called with the new state whenever it changes (not on every position tick). */
   subscribe(fn: (s: PlayerState) => void): () => void;
   send(cmd: ExtCommand, items?: PlayItem[]): Promise<void>;
+  /** Make the player behind this backend match rune's repeat/shuffle, "off" included, writing only what differs. */
+  matchModes?(want: PlayModes): Promise<void>;
   /** Pull fresh state (remote zones). */
   refresh(): Promise<void>;
   /** False until a remote zone answered: `state` is only a placeholder before that. */

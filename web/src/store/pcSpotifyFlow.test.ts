@@ -2,7 +2,7 @@
 // Connect device, then play exactly as if it had been there. Fetch is faked (no real
 // Spotify API is ever called), playback zones are the server's RemoteBackend over that
 // fake fetch, and time is fake.
-import type { PlayerState, Track } from '@liner/shared';
+import type { PlayerState, QueueItem, Track } from '@liner/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import { PC_SPOTIFY_FAILED, PC_SPOTIFY_MAX_READS, PC_SPOTIFY_POLL_MS, PC_SPOTIFY_STARTING } from '../player/pcStart';
@@ -33,6 +33,15 @@ const baseState = (zone: string): PlayerState => ({
 const json = (data: unknown): Response =>
   ({ ok: true, status: 200, statusText: 'OK', json: async () => data }) as unknown as Response;
 
+const queueItem = (id: string): QueueItem => ({
+  queueId: `q:${id}`,
+  track: { id, albumId: 'sp:alb', source: 'spotify', title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
+  album: { id: 'sp:alb', title: 'Album' },
+});
+
+/** How the fake Spotify device is set (repeat "all" = Spotify's "context"). */
+interface DeviceModes { shuffle: boolean; repeat: PlayerState['repeat'] }
+
 class FakeWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
@@ -59,7 +68,11 @@ interface Harness {
 }
 
 /** Fresh store + fake fetch. `deviceAfterReads` = first poll on which the pc device exists (null = never). */
-async function setup(deviceAfterReads: number | null, pcState?: Partial<PlayerState>): Promise<Harness> {
+async function setup(
+  deviceAfterReads: number | null,
+  pcState?: Partial<PlayerState>,
+  deviceModes?: DeviceModes,
+): Promise<Harness> {
   vi.resetModules();
   vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:4545' });
   vi.stubGlobal('WebSocket', FakeWebSocket);
@@ -67,11 +80,14 @@ async function setup(deviceAfterReads: number | null, pcState?: Partial<PlayerSt
   let startCalls = 0;
   let readsAfterStart = 0;
   const playerPosts: PlayerPost[] = [];
+  // A Spotify Connect device's own state. A command changes it, as Spotify would; /me/player echoes it.
+  const modes: DeviceModes = { ...(deviceModes ?? { shuffle: false, repeat: 'off' }) };
 
   const zones = () => {
     const ready = startCalls > 0 && deviceAfterReads !== null && readsAfterStart >= deviceAfterReads;
     return [
       { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(ready ? { spotifyDeviceId: 'dev', spotifyDeviceName: 'HORSE' } : {}) },
+      ...(deviceModes ? [{ id: 'spotify:dev', name: 'HORSE', kind: 'spotify' }] : []),
       { id: 'browser', name: 'This computer', kind: 'browser' },
     ];
   };
@@ -91,18 +107,23 @@ async function setup(deviceAfterReads: number | null, pcState?: Partial<PlayerSt
     }
     if (url.startsWith('/api/player/')) {
       const zone = decodeURIComponent(url.slice('/api/player/'.length));
+      const isDevice = zone.startsWith('spotify:');
       const body = init?.body ? (JSON.parse(String(init.body)) as ExtCommand & { trackIds?: string[]; startIndex?: number }) : null;
       if (method === 'POST' && body) {
         playerPosts.push({ zone, body });
+        if (isDevice) {
+          if (body.type === 'repeat') modes.repeat = body.mode;
+          else if (body.type === 'shuffle') modes.shuffle = body.on;
+        }
         const ids = body.trackIds ?? [];
         const queue = ids.map((id, i) => ({
           queueId: `q${i}`,
           track: { id, albumId: 'sp:alb', source: id.startsWith('sp:') ? 'spotify' : 'local', title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
           album: { id: 'sp:alb', title: 'Album' },
         }));
-        return json({ ...baseState(zone), status: 'playing', queue, index: body.startIndex ?? 0 });
+        return json({ ...baseState(zone), ...(isDevice ? modes : {}), status: 'playing', queue, index: body.startIndex ?? 0 });
       }
-      return json({ ...baseState(zone), ...(zone === 'pc' ? pcState : {}) });
+      return json({ ...baseState(zone), ...(isDevice ? modes : {}), ...(zone === 'pc' ? pcState : {}) });
     }
     if (url.startsWith('/api/spotify/')) return json({ connected: false });
     return json({});
@@ -130,6 +151,54 @@ describe('moving playback to another zone', () => {
     await h.usePlayer.getState().setZone('browser');
     expect(h.playerPosts().filter((p) => p.zone === 'pc').map((p) => p.body.type)).toEqual(['pause']);
     expect(h.usePlayer.getState().zone).toBe('browser');
+  });
+});
+
+describe('repeat/shuffle when playback moves to a Spotify zone', () => {
+  /** The pc zone is sounding a Spotify queue with repeat off (= rune's setting in the bar). */
+  const pcPlaying = (extra: Partial<PlayerState> = {}): Partial<PlayerState> => ({
+    status: 'playing',
+    queue: [queueItem('sp:1')],
+    index: 0,
+    positionMs: 0,
+    repeat: 'off',
+    shuffle: false,
+    ...extra,
+  });
+  const devicePosts = (h: Harness) => h.playerPosts().filter((p) => p.zone === 'spotify:dev');
+
+  it('clears a Spotify device left repeating: a one-song queue with repeat off ends up off', async () => {
+    // The device says "all" (Spotify's "context"): it would loop the single song forever.
+    const h = await setup(null, pcPlaying(), { repeat: 'all', shuffle: true });
+
+    await h.usePlayer.getState().setZone('spotify:dev');
+
+    expect(devicePosts(h).map((p) => p.body.type)).toEqual(['play', 'repeat', 'shuffle']);
+    expect(devicePosts(h)[1]!.body).toEqual({ type: 'repeat', mode: 'off' });
+    expect(devicePosts(h)[2]!.body).toEqual({ type: 'shuffle', on: false });
+    // The bar follows the zone that actually plays, not the zone it was handed from.
+    expect(h.usePlayer.getState().zone).toBe('spotify:dev');
+    expect(h.usePlayer.getState().state.repeat).toBe('off');
+    expect(h.usePlayer.getState().state.shuffle).toBe(false);
+  });
+
+  it('carries rune’s own repeat and shuffle (all / on) to the Spotify device', async () => {
+    const h = await setup(null, pcPlaying({ repeat: 'all', shuffle: true }), { repeat: 'off', shuffle: false });
+
+    await h.usePlayer.getState().setZone('spotify:dev');
+
+    expect(devicePosts(h).map((p) => p.body.type)).toEqual(['play', 'repeat', 'shuffle']);
+    expect(devicePosts(h)[1]!.body).toEqual({ type: 'repeat', mode: 'all' });
+    expect(devicePosts(h)[2]!.body).toEqual({ type: 'shuffle', on: true });
+    expect(h.usePlayer.getState().state.repeat).toBe('all');
+  });
+
+  it('sends no repeat/shuffle request when the device already matches', async () => {
+    const h = await setup(null, pcPlaying(), { repeat: 'off', shuffle: false });
+
+    await h.usePlayer.getState().setZone('spotify:dev');
+
+    expect(devicePosts(h).map((p) => p.body.type)).toEqual(['play']);
   });
 });
 

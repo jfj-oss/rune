@@ -76,6 +76,86 @@ describe('PcBackend', () => {
     expect(states.at(-1)!.zone).toBe('pc');
   });
 
+  it('clears a Spotify app left repeating when a one-song Spotify queue starts (repeat "off" included)', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    // Left behind by the Spotify app or an earlier session: a one-song context would loop forever.
+    zones['spotify:dev'].state = { ...zones['spotify:dev'].state, repeat: 'all', shuffle: true };
+    const items = [S(1)];
+
+    await pc.send(play(items), items);
+
+    expect(zones['spotify:dev'].state.repeat).toBe('off');
+    expect(zones['spotify:dev'].state.shuffle).toBe(false);
+    expect(zones['spotify:dev'].log).toEqual(['play:sp:1@0', 'repeat', 'shuffle']);
+    // The bar shows the setting of the zone that is actually playing.
+    expect(pc.currentMode).toBe('spotify');
+    expect(pc.state.repeat).toBe('off');
+    expect(pc.state.shuffle).toBe(false);
+  });
+
+  it('sends no repeat/shuffle request when the Spotify app already matches rune', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    const items = [S(1)];
+
+    await pc.send(play(items), items);
+
+    expect(zones['spotify:dev'].log).toEqual(['play:sp:1@0']);
+  });
+
+  it('carries rune’s repeat and shuffle over to the Spotify app ("all" and on too)', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    await pc.send(play([L(1)]), [L(1)]);
+    await pc.send({ type: 'repeat', mode: 'all' });
+    await pc.send({ type: 'shuffle', on: true });
+    const items = [S(1)];
+
+    await pc.send(play(items), items);
+
+    expect(zones['spotify:dev'].state.repeat).toBe('all');
+    expect(zones['spotify:dev'].state.shuffle).toBe(true);
+    expect(pc.state.repeat).toBe('all');
+  });
+
+  it('a mixed queue clears the app’s own repeat/shuffle: rune drives it one song at a time', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    // Left that way by the Spotify app: reported to rune, so its state knows.
+    await zones['spotify:dev'].send({ type: 'repeat', mode: 'one' });
+    await zones['spotify:dev'].send({ type: 'shuffle', on: true });
+    const items = [L(1), S(1)];
+
+    await pc.send(play(items), items);
+    await flush();
+
+    expect(pc.currentMode).toBe('mixed');
+    expect(zones['spotify:dev'].state.repeat).toBe('off');
+    expect(zones['spotify:dev'].state.shuffle).toBe(false);
+    // Rune's own queue setting is untouched: the bar shows the queue that plays.
+    expect(pc.state.repeat).toBe('off');
+    expect(pc.state.shuffle).toBe(false);
+  });
+
+  it('shows the playing Spotify app’s repeat and shuffle, also when they change outside', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    await zones['spotify:dev'].send({ type: 'play', trackIds: ['sp:1'] });
+    expect(pc.currentMode).toBe('spotify');
+
+    // Changed in the Spotify app itself: the bar follows.
+    await zones['spotify:dev'].send({ type: 'repeat', mode: 'all' });
+    await zones['spotify:dev'].send({ type: 'shuffle', on: true });
+    expect(pc.state.repeat).toBe('all');
+    expect(pc.state.shuffle).toBe(true);
+
+    // And the button drives that same zone.
+    await pc.send({ type: 'repeat', mode: 'one' });
+    expect(zones['spotify:dev'].state.repeat).toBe('one');
+    expect(pc.state.repeat).toBe('one');
+  });
+
   it('refuses Spotify when the Spotify app is not on the PC', async () => {
     const { pc } = make(false);
     live = pc;
