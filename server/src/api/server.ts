@@ -40,6 +40,7 @@ import { MpvOutput, SpotifyAppOutput } from '../play/outputs.js';
 import { albumSummaryFromTrack, mapTrack } from '../spotify/map.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
 import { registerJsonCompression } from './compress.js';
+import { registerCors } from './cors.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
 import { registerFrameRoutes } from './frame.js';
@@ -193,6 +194,8 @@ function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
 export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Promise<BuiltApp> {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
   registerJsonCompression(app);
+  // Narrow, origin-checked CORS for Megatron's play-into-call tab (api/cors.ts).
+  registerCors(app, cfg);
   await app.register(websocket);
   const startedAt = Date.now();
 

@@ -36,6 +36,12 @@ export interface Config {
    *  the Spotify desktop app on the same machine). GET /api/zones matches it so the
    *  UI can route Spotify tracks to the PC's Spotify app. */
   pcSpotifyDevice?: string;
+  /** Extra browser origins allowed to read the small CORS-enabled API that
+   *  Megatron's "Play into call" tab uses (search, album/playlist details,
+   *  cover art, audio stream). Megatron's own browser and desktop origins are
+   *  always allowed; list other devices here, e.g.
+   *  ["http://192.168.1.10:7420"]. */
+  corsOrigins?: string[];
 }
 
 export function loadConfig(): Config {

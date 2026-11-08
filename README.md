@@ -34,6 +34,17 @@ Create `server/config.json` (it stays on your computer; it is in `.gitignore`):
 
 `libraryRoots` is one or more music folders. rune only reads them; it never changes your files.
 
+Megatron can play your local music into a voice call from its "Play into call" picker. Megatron's own browser
+(`http://127.0.0.1:7420`) and desktop app origins are allowed automatically. For a Megatron opened from another
+device, add its address to `corsOrigins`:
+
+```json
+{ "corsOrigins": ["http://192.168.1.10:7420"] }
+```
+
+Only search, album/playlist details, cover art and the audio stream are exposed, and Spotify tracks are never sent
+to Megatron.
+
 Start it:
 
 ```sh

@@ -367,7 +367,10 @@ function gainHeaders(db: Db, trackId: string, cfg: Config): Record<string, strin
     if (!info || info.gainDb === 0) return {};
     return {
       'X-Rune-Gain-Db': info.gainDb.toFixed(1),
-      'Access-Control-Expose-Headers': 'X-Rune-Gain-Db',
+      // Keep the CORS-exposed list complete: this header can override the one
+      // the CORS hook put on the response, and cross-origin readers need to
+      // see Range/seek headers too (api/cors.ts).
+      'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Rune-Gain-Db',
     };
   } catch {
     return {};
