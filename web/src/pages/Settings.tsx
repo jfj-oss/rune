@@ -224,7 +224,9 @@ export default function Settings() {
               </div>
               <div className="statusrow">
                 <span className="statusrow__k">Spotify</span>
-                <span className={`statusrow__v ${h.spotify.connected ? 'status--ok' : 'status--warn'}`}>{h.spotify.connected ? 'Connected' : 'Not connected'}</span>
+                <span className={`statusrow__v ${h.spotify.connected ? 'status--ok' : 'status--warn'}`}>
+                  {h.spotify.connected ? 'Connected' : <>Not connected · <a className="link" href="/api/spotify/login">Connect Spotify</a></>}
+                </span>
               </div>
               {h.spotify.connected ? <SpotifyUsageRow /> : null}
             </section>

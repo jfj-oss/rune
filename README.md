@@ -64,7 +64,8 @@ Each person uses **their own** Spotify app ID (free, two minutes):
 2. Redirect URI: `http://127.0.0.1:4545/api/spotify/callback`. Tick **Web API** and **Web Playback SDK**.
 3. Copy the **Client ID** (there is no secret: rune uses PKCE) into `server/config.json`:
    `"spotifyClientId": "your-client-id"`
-4. Restart rune and press **Connect Spotify** in Settings, in a browser on the same PC.
+4. Restart rune, then in a browser on the same PC open **Settings** and press **Connect Spotify** next to "Spotify:
+   Not connected" (or open `http://127.0.0.1:4545/api/spotify/login` directly) and approve the login.
 
 New Spotify apps are in "development mode": only accounts you add under **User Management** in the dashboard can log
 in, which is fine for your own use.
