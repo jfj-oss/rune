@@ -10,6 +10,12 @@ export interface PlaylistSummary {
   imageUrl?: string;
   trackCount: number;
   source: Source;
+  /**
+   * Spotify playlists only: the signed-in user may change its tracks on Spotify
+   * (it is theirs or collaborative; Liked Songs is always true). Unset for rune
+   * playlists, whose editability is implied by their kind.
+   */
+  canEdit?: boolean;
 }
 
 /** A playlist track plus the album bits needed to render its row / cover. */

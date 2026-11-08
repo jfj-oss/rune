@@ -12,6 +12,9 @@ CREATE TABLE IF NOT EXISTS spotify_auth (
   updated_at INTEGER NOT NULL
 );
 
+-- Spotify's own user id (not just the display name), so a playlist owner can be matched.
+ALTER TABLE spotify_auth ADD COLUMN user_id TEXT;
+
 -- Spotify's artist id, kept on the shared artist row so an artist that already
 -- exists locally is reused (both catalogues then show up on one artist page).
 ALTER TABLE artists ADD COLUMN spotify_id TEXT;

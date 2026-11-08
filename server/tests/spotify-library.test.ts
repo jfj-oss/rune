@@ -249,6 +249,7 @@ describe('syncPlaylists', () => {
       imageUrl: ABBEY_COVER,
       trackCount: 1,
       source: 'spotify',
+      canEdit: true, // liked songs can be unliked
     });
     expect(summaries[1]?.id).toBe('pl:sp:pl1');
 

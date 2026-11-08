@@ -26,6 +26,11 @@ CREATE TABLE IF NOT EXISTS playlist_tracks (
 );
 CREATE INDEX IF NOT EXISTS playlist_tracks_track ON playlist_tracks(track_id);
 
+-- Who owns the playlist on Spotify, and whether it is collaborative: together with
+-- spotify_auth.user_id this decides whether rune may remove its songs on Spotify.
+ALTER TABLE playlists ADD COLUMN owner_id TEXT;
+ALTER TABLE playlists ADD COLUMN collaborative INTEGER NOT NULL DEFAULT 0;
+
 -- Saved albums = 1. Albums that only exist because a playlist (or an on-demand
 -- album view / search result) referenced them = 0. Library listings show only 1.
 ALTER TABLE albums ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;

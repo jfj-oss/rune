@@ -3,7 +3,7 @@ import type { PlaylistTrack, Track } from '@liner/shared';
 import { coverAlbums, type EntryTrack, type RunePlaylistDetail, type RunePlaylistSummary, type SmartSpec } from '../lib/playlists';
 import { mockCover } from './covers';
 import { ALBUMS, FULL_ALBUM_ID } from './data';
-import { PLAYLISTS as SPOTIFY_PLAYLISTS, playlistDetail as spotifyDetail } from './spotify';
+import { LIKED_ID, PLAYLISTS as SPOTIFY_PLAYLISTS, playlistDetail as spotifyDetail, removeFromPlaylistMock, setTrackLiked } from './spotify';
 
 interface Row { id: string; name: string; description?: string; kind: 'static' | 'smart'; tracks: PlaylistTrack[]; spec?: SmartSpec }
 
@@ -145,9 +145,24 @@ export const mockPlaylists = {
   removeAt(id: string, positions: number[]): RunePlaylistDetail {
     if (isSp(id) && !find(id)) {
       const merged = mergedSpotify(id)!;
+      const sum = SPOTIFY_PLAYLISTS.find((p) => p.id === id)!;
       const drop = new Set(positions);
-      if ([...drop].some((p) => merged[p]?.entrySource !== 'rune-overlay')) throw conflict('Spotify tracks cannot be removed here');
-      storeOverlay(id, merged.filter((_, i) => !drop.has(i)));
+      // Spotify removes every copy of a song it is asked to delete; rune's overlay rows go locally.
+      const baseDrops = new Set<string>();
+      for (const p of drop) {
+        const entry = merged[p];
+        if (!entry || entry.entrySource === 'rune-overlay') continue;
+        if (sum.canEdit !== true) throw conflict('This Spotify playlist is not yours and is not collaborative');
+        baseDrops.add(entry.id);
+      }
+      const kept = merged.filter((entry, i) =>
+        !drop.has(i) && !(entry.entrySource !== 'rune-overlay' && baseDrops.has(entry.id)),
+      );
+      if (baseDrops.size > 0) {
+        if (id === LIKED_ID) for (const trackId of baseDrops) setTrackLiked(trackId, false);
+        removeFromPlaylistMock(id, [...baseDrops]);
+      }
+      storeOverlay(id, kept);
       return spotifyView(id)!;
     }
     const r = mustRune(id);

@@ -28,6 +28,9 @@ export const isSmartPlaylist = (p: { id: string; kind?: PlaylistKind }) => isRun
 /** Can the user change this playlist's tracks by hand? (rune playlists only; Spotify ones take overlay rows, see below) */
 export const isEditable = (p: { id: string; kind?: PlaylistKind }) => isRunePlaylist(p.id) && p.kind !== 'smart';
 export const LIKED_PLAYLIST_ID = 'pl:sp:liked';
+/** Spotify playlists whose own rows the signed-in user may change on Spotify (theirs, collaborative, or Liked Songs = unlike). */
+export const isSpotifyEditable = (p: { id: string; canEdit?: boolean }) =>
+  !isRunePlaylist(p.id) && (p.id === LIKED_PLAYLIST_ID || p.canEdit === true);
 /** Spotify can't hold local files, so rune keeps them in an overlay on top of a synced Spotify playlist. */
 export const hasOverlay = (p: { id: string }) => !isRunePlaylist(p.id) && p.id !== LIKED_PLAYLIST_ID;
 /** Can local tracks be added to it? */
@@ -35,9 +38,39 @@ export const canAddTo = (p: { id: string; kind?: PlaylistKind }) => isEditable(p
 /** Is this row one of rune's own (editable) rows inside a Spotify playlist? Local files can only ever be overlay rows. */
 export const isOverlayRow = (playlistId: string, t: { source: string; entrySource?: string }) =>
   !isRunePlaylist(playlistId) && (t.entrySource === 'rune-overlay' || (t.entrySource === undefined && t.source === 'local'));
-/** Can this row be removed / dragged? */
+/** Is this one of rune's own rows (the only ones that can be dragged)? */
 export const rowEditable = (p: { id: string; kind?: PlaylistKind }, t: { source: string; entrySource?: string }) =>
   isEditable(p) || (hasOverlay(p) && isOverlayRow(p.id, t));
+/**
+ * Can this row be removed? Rune playlists: every row. Spotify playlists: rune's overlay
+ * rows, plus Spotify's own rows when the user may edit the playlist (owned/collaborative).
+ */
+export const rowRemovable = (
+  p: { id: string; kind?: PlaylistKind; canEdit?: boolean },
+  t: { source: string; entrySource?: string },
+) => rowEditable(p, t) || (isSpotifyEditable(p) && !isOverlayRow(p.id, t));
+
+/**
+ * Every playlist position a removal takes out. Spotify removes every copy of a URI, so
+ * selecting one copy of a Spotify row selects all of them (rune playlists keep duplicate
+ * entries independent). `d.tracks` must be in playlist order.
+ */
+export function removalPositions(d: RunePlaylistDetail, positions: number[]): number[] {
+  const selected = new Set(positions);
+  if (isRunePlaylist(d.id)) return [...selected].sort((a, b) => a - b);
+  const trackIds = new Set<string>();
+  for (const position of selected) {
+    const track = d.tracks[position];
+    if (track && !isOverlayRow(d.id, track)) trackIds.add(track.id);
+  }
+  if (trackIds.size > 0) {
+    d.tracks.forEach((track, index) => {
+      if (trackIds.has(track.id) && !isOverlayRow(d.id, track)) selected.add(index);
+    });
+  }
+  return [...selected].sort((a, b) => a - b);
+}
+
 export const SPOTIFY_ADD_NOTE = 'Nothing to add';
 
 // ---------- smart rules (mirror of server/src/myplaylists/rules.ts) ----------

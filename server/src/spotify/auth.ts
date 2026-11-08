@@ -355,8 +355,8 @@ export class SpotifyAuth {
     const name = user.display_name || user.id;
     if (!name) return;
     this.db
-      .prepare('UPDATE spotify_auth SET user_name = ?, user_product = ? WHERE id = 1')
-      .run(name, user.product ?? '');
+      .prepare('UPDATE spotify_auth SET user_name = ?, user_product = ?, user_id = ? WHERE id = 1')
+      .run(name, user.product ?? '', user.id ?? null);
   }
 
   private load(): AuthRow | undefined {

@@ -23,12 +23,13 @@ const SPECS: { name: string; owner: string; count: number; desc?: string }[] = [
 const idOf = (name: string) => `pl:sp:${hex16(name)}`;
 
 export const PLAYLISTS: PlaylistSummary[] = [
-  { id: LIKED_ID, name: 'Liked Songs', owner: 'You', trackCount: LIKED_COUNT, source: 'spotify' },
+  { id: LIKED_ID, name: 'Liked Songs', owner: 'You', trackCount: LIKED_COUNT, source: 'spotify', canEdit: true },
   ...SPECS.map((p): PlaylistSummary => {
     const id = idOf(p.name);
     // cover of one of the albums, like a Spotify mosaic's first tile
     const al = ALBUMS[hashString(id) % ALBUMS.length]!;
-    return { id, name: p.name, owner: p.owner, trackCount: p.count, imageUrl: mockCover(al.id, al.title), source: 'spotify' };
+    // "You" owns it; someone else's (and Spotify's own) playlists stay read-only.
+    return { id, name: p.name, owner: p.owner, trackCount: p.count, imageUrl: mockCover(al.id, al.title), source: 'spotify', canEdit: p.owner === 'You' };
   }),
 ];
 
@@ -64,6 +65,15 @@ export function playlistDetail(id: string): PlaylistDetail | undefined {
     cache.set(id, hit);
   }
   return hit;
+}
+
+/** Spotify removes every copy of a URI: mirror that in the mock playlist. */
+export function removeFromPlaylistMock(id: string, trackIds: string[]): void {
+  const d = playlistDetail(id);
+  if (!d) return;
+  const drop = new Set(trackIds);
+  d.tracks = d.tracks.filter((t) => !drop.has(t.id));
+  d.trackCount = d.tracks.length;
 }
 
 // ---------- liked tracks ----------

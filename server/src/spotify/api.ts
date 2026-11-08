@@ -71,6 +71,8 @@ export interface SpotifyPlaylist {
   description?: string | null;
   images?: SpotifyImage[];
   owner?: { id: string; display_name?: string | null };
+  /** True when the playlist accepts edits from users other than its owner. */
+  collaborative?: boolean;
   tracks?: { total: number };
   /** Newer API shape for the same thing (see normalizePlaylist). */
   items?: { total: number };

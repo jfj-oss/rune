@@ -72,7 +72,10 @@ export function registerLikedRoutes(r: FastifyInstance, db: Db, deps?: LikedRout
     if (ids.length > MAX_IDS) return badRequest(reply, `at most ${MAX_IDS} ids`);
     if (!(await deps.connected())) return badRequest(reply, 'not_connected');
     if (!deps.grantedScopes().includes(WRITE_SCOPE)) {
-      return badRequest(reply, new SpotifyReconnectNeeded().message);
+      return badRequest(
+        reply,
+        new SpotifyReconnectNeeded(liked ? 'like songs' : 'unlike songs').message,
+      );
     }
     try {
       const result = await setTracksLiked(deps.api, db, ids, liked);

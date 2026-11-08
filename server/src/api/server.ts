@@ -44,6 +44,7 @@ import { registerCors } from './cors.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
 import { registerLikedRoutes } from './liked.js';
+import { removeSpotifyPlaylistTracks } from './spotifyPlaylistWrite.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
 import { albumsByIds, coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
@@ -1085,6 +1086,22 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           }
           broadcast({ type: 'library-changed' });
         },
+        ...(spotify
+          ? {
+              removeFromSpotifyPlaylist: async (playlistId: string, trackIds: string[]) => {
+                await removeSpotifyPlaylistTracks(
+                  {
+                    auth: spotify.auth,
+                    api: spotify.api,
+                    db,
+                    onChange: () => broadcast({ type: 'library-changed' }),
+                  },
+                  playlistId,
+                  trackIds,
+                );
+              },
+            }
+          : {}),
       });
       registerPeaksRoutes(r, peaks);
       registerPeopleRoutes(r, db);

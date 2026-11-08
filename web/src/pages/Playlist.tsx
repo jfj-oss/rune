@@ -21,7 +21,7 @@ import { useScrollRoot } from '../hooks/scrollRoot';
 import { usePlaylistActions } from '../hooks/usePlaylistEdit';
 import { isLiked, playlistItem, playlistItems, playlistUri, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, formatDuration, formatTotalLength, plural } from '../lib/format';
-import { hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, orderPlaylist, rowEditable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
+import { LIKED_PLAYLIST_ID, hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, isSpotifyEditable, orderPlaylist, rowEditable, rowRemovable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
 import { currentItem, usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
 
@@ -59,6 +59,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const rune = isRunePlaylist(d.id);
   const smart = isSmartPlaylist(d);
   const editable = isEditable(d);
+  const spotifyEditable = isSpotifyEditable(d);
   const mixed = isMixed(d.tracks);
   const bgSrc = d.imageUrl ?? (d.tracks[0] ? coverSrc(d.tracks[0].album, 200) : undefined);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -129,7 +130,13 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
               ) : (
                 <>
                   <span className="badge badge--spotify"><i className="badge__dot" />From Spotify</span>
-                  <span className="badge" title="Spotify’s own tracks can only be changed in Spotify. Local files you add here are kept in rune."><Lock size={11} /> Spotify rows locked</span>
+                  {spotifyEditable ? (
+                    <span className="badge" title={liked ? 'Removing a song here unlikes it on Spotify.' : 'This playlist is yours (or collaborative), so rune can remove songs from it on Spotify.'}>
+                      <Check size={11} /> {liked ? 'Unlike to remove' : 'You can edit this playlist'}
+                    </span>
+                  ) : (
+                    <span className="badge" title="Spotify’s own tracks can only be changed in Spotify. Local files you add here are kept in rune."><Lock size={11} /> Spotify rows locked</span>
+                  )}
                 </>
               )}
             </div>
@@ -159,7 +166,15 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                 )}
               </Popover>
             </div>
-            {!rune && <p className="ahero__note"><Lock size={12} /> Synced from Spotify, so its Spotify tracks stay locked. Add local files with “Add to playlist” — they stay in rune, never go to Spotify, and can be moved or removed. “Duplicate as rune playlist” makes a copy where everything is editable.</p>}
+            {!rune && (spotifyEditable ? (
+              liked ? (
+                <p className="ahero__note"><Check size={12} /> Liked Songs mirrors your Spotify likes. Removing a song here unlikes it on Spotify.</p>
+              ) : (
+                <p className="ahero__note"><Check size={12} /> You can edit this Spotify playlist, so removing a song removes it on Spotify too — every copy of it. Local files you add stay in rune and never go to Spotify.</p>
+              )
+            ) : (
+              <p className="ahero__note"><Lock size={12} /> Synced from Spotify, so its Spotify tracks stay locked. Add local files with “Add to playlist” — they stay in rune, never go to Spotify, and can be moved or removed. “Duplicate as rune playlist” makes a copy where everything is editable.</p>
+            ))}
           </div>
         </div>
       </section>
@@ -171,7 +186,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
               {!smart && <><br /><br /><Link className="btn" to="/albums">Browse albums</Link></>}
             </Empty>
           ) : <Empty title="No tracks yet">This playlist is empty, or hasn’t finished syncing.</Empty>
-        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d)} mixed={mixed} origIndex={origIndex} reorder={!sorted} />}
+        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d) || spotifyEditable} mixed={mixed} origIndex={origIndex} reorder={!sorted} />}
       </div>
       {confirmDelete && (
         <Dialog
@@ -221,7 +236,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
   useEffect(() => { setSel((s) => (s.size && [...s].some((i) => i >= n) ? new Set([...s].filter((i) => i < n)) : s)); }, [n]);
   const clearSel = useCallback(() => { setSel(new Set()); setAnchor(null); setSelectMode(false); }, []);
   const pick = (i: number, e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
-    if (!rowEditable(d, d.tracks[i]!)) return;
+    if (!rowRemovable(d, d.tracks[i]!)) return;
     const r = selectRow(sel, anchor, i, { shift: e.shiftKey, toggle: e.metaKey || e.ctrlKey || selectMode });
     setSel(r.sel);
     setAnchor(r.anchor);
@@ -240,7 +255,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && sel.size) { e.preventDefault(); removeSelected(); }
       else if (e.key === 'Escape' && sel.size) clearSel();
-      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); setSel(new Set(d.tracks.flatMap((t, i) => (rowEditable(d, t) ? [i] : [])))); }
+      else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); setSel(new Set(d.tracks.flatMap((t, i) => (rowRemovable(d, t) ? [i] : [])))); }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
@@ -315,7 +330,9 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
   useEffect(() => { v.measure(); }, [offset, v]);
 
   const spotifyList = !isRunePlaylist(d.id);
-  const mineCount = d.tracks.reduce((c, t) => c + (rowEditable(d, t) ? 1 : 0), 0);
+  const spotifyEditable = isSpotifyEditable(d);
+  const liked = d.id === LIKED_PLAYLIST_ID;
+  const removableCount = d.tracks.reduce((c, t) => c + (rowRemovable(d, t) ? 1 : 0), 0);
   const selectedItems = () => [...sel].sort((a, b) => a - b).map((i) => items[i]!).filter(Boolean);
 
   return (
@@ -324,10 +341,14 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
         <div className={`ptools${sel.size ? ' ptools--on' : ''}`} role="toolbar" aria-label="Selection">
           {sel.size === 0 ? (
             <>
-              {mineCount > 0 && <button className={`btn btn--sm btn--ghost${selectMode ? ' is-on' : ''}`} aria-pressed={selectMode} onClick={() => setSelectMode((m) => !m)}><Check size={14} /> Select</button>}
+              {removableCount > 0 && <button className={`btn btn--sm btn--ghost${selectMode ? ' is-on' : ''}`} aria-pressed={selectMode} onClick={() => setSelectMode((m) => !m)}><Check size={14} /> Select</button>}
               <span className="ptools__hint">
                 {spotifyList
-                  ? (mineCount > 0 ? <><HardDrive size={13} /> Your local rows can be {reorder ? <>dragged <GripVertical size={13} /> and </> : ''}removed · Spotify rows are locked</> : <>Add local files with “Add to playlist” on any track or album · Spotify rows are locked</>)
+                  ? spotifyEditable
+                    ? (liked
+                        ? <>Select to unlike tracks on Spotify</>
+                        : <>Select to remove tracks from Spotify — every copy of a song goes{reorder ? <> · drag <GripVertical size={13} /> your local rows to reorder</> : ''}</>)
+                    : (removableCount > 0 ? <><HardDrive size={13} /> Your local rows can be {reorder ? <>dragged <GripVertical size={13} /> and </> : ''}removed · Spotify rows are locked</> : <>Add local files with “Add to playlist” on any track or album · Spotify rows are locked</>)
                   : reorder ? <>Drag <GripVertical size={13} /> to reorder · click to play · shift or ⌘-click to select</> : <>Newest first · switch to “Playlist order” to drag rows · shift or ⌘-click to select</>}
               </span>
             </>
@@ -352,7 +373,8 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
           const playing = curId === t.id;
           const item = playlistItem(t);
           const go = () => void playItems(items, i, { context: ctx });
-          const mine = rowEditable(d, t); // rune playlists: every row; Spotify playlists: only rune's local rows
+          const movable = rowEditable(d, t); // rune playlists: every row; Spotify playlists: only rune's local rows
+          const removable = rowRemovable(d, t);
           const overlay = isOverlayRow(d.id, t) && !isRunePlaylist(d.id);
           const picked = sel.has(i);
           let shift = 0;
@@ -372,20 +394,20 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
               onClick={(e) => {
                 if ((e.target as HTMLElement).closest('a,button,.pop,[role="menu"]')) return;
                 // one click plays; selecting is shift / ⌘-click, or any click while "Select" is on
-                if (editable && mine && (selectMode || sel.size > 0 || e.shiftKey || e.metaKey || e.ctrlKey)) pick(i, e);
+                if (editable && removable && (selectMode || sel.size > 0 || e.shiftKey || e.metaKey || e.ctrlKey)) pick(i, e);
                 else go();
               }}
               onContextMenu={trackMenuHandler(item)}
             >
- {editable && !mine && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
+ {editable && !removable && <span className="prow__lock" title="Synced from Spotify — locked"><Lock size={12} /></span>}
               {/* edit mode has a fixed first column (lock / grip): keep it filled so every row lines up */}
-              {editable && mine && !reorder && <span aria-hidden />}
-              {editable && mine && reorder && (
+              {editable && removable && (!movable || !reorder) && <span aria-hidden />}
+              {editable && movable && reorder && (
                 <button className="prow__grip" aria-label={`Drag to reorder ${t.title}`} onPointerDown={(e) => onGripDown(e, i)} onPointerMove={onGripMove} onPointerUp={() => endDrag(true)} onPointerCancel={() => endDrag(false)}>
                   <GripVertical size={16} />
                 </button>
               )}
-              {editable && mine && (selectMode || sel.size > 0) ? (
+              {editable && removable && (selectMode || sel.size > 0) ? (
                 <button className={`prow__check${picked ? ' is-on' : ''}`} role="checkbox" aria-checked={picked} aria-label={`Select ${t.title}`} onClick={(e) => { e.stopPropagation(); pick(i, { shiftKey: e.shiftKey, metaKey: true, ctrlKey: false }); }}>
                   {picked && <Check size={13} strokeWidth={3} />}
                 </button>
@@ -416,7 +438,7 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
                   <TrackMenuItems
                     item={item}
                     close={close}
-                    extra={editable && mine ? <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>Remove from playlist</MenuItem> : undefined}
+                    extra={editable && removable ? <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>{liked ? 'Remove from Liked Songs' : 'Remove from playlist'}</MenuItem> : undefined}
                   />
                 )}
               </Popover>

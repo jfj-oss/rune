@@ -370,12 +370,14 @@ export async function syncPlaylists(
     const ctx = createStore(db, now);
     const upsertPlaylist = db.prepare(
       `INSERT INTO playlists
-         (id, source, name, description, owner, image_url, snapshot_id, track_count, position, updated_at)
-       VALUES (?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, source, name, description, owner, owner_id, collaborative, image_url, snapshot_id, track_count, position, updated_at)
+       VALUES (?, 'spotify', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          description = excluded.description,
          owner = excluded.owner,
+         owner_id = excluded.owner_id,
+         collaborative = excluded.collaborative,
          image_url = excluded.image_url,
          snapshot_id = excluded.snapshot_id,
          track_count = excluded.track_count,
@@ -383,8 +385,8 @@ export async function syncPlaylists(
          updated_at = excluded.updated_at`,
     );
     const updateMetadata = db.prepare(
-      `UPDATE playlists SET name = ?, description = ?, owner = ?, image_url = ?,
-         position = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE playlists SET name = ?, description = ?, owner = ?, owner_id = ?, collaborative = ?,
+         image_url = ?, position = ?, updated_at = ? WHERE id = ?`,
     );
     const deleteEntries = db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ?');
     const insertEntry = db.prepare(
@@ -400,8 +402,10 @@ export async function syncPlaylists(
     upsertPlaylist.run(
       LIKED_SONGS_PLAYLIST_ID,
       LIKED_SONGS_NAME,
-      null,
-      null,
+      null, // description
+      null, // owner
+      null, // owner_id
+      0, // collaborative
       likedImage,
       null,
       0,
@@ -434,6 +438,8 @@ export async function syncPlaylists(
           p.name,
           p.description ?? null,
           ownerName(p),
+          p.owner?.id ?? null,
+          p.collaborative ? 1 : 0,
           image,
           p.snapshot_id ?? null,
           0,
@@ -453,7 +459,17 @@ export async function syncPlaylists(
         result.tracks += count;
       } else {
         // Snapshot unchanged: refresh metadata but keep the stored track list.
-        updateMetadata.run(p.name, p.description ?? null, ownerName(p), image, index + 1, now(), id);
+        updateMetadata.run(
+          p.name,
+          p.description ?? null,
+          ownerName(p),
+          p.owner?.id ?? null,
+          p.collaborative ? 1 : 0,
+          image,
+          index + 1,
+          now(),
+          id,
+        );
       }
       result.playlists++;
     });
@@ -489,22 +505,62 @@ interface PlaylistRow {
   name: string;
   description: string | null;
   owner: string | null;
+  owner_id: string | null;
+  collaborative: number;
   image_url: string | null;
   track_count: number;
 }
 
 const PLAYLIST_SELECT = `
-  SELECT id, source, name, description, owner, image_url, track_count
+  SELECT id, source, name, description, owner, owner_id, collaborative, image_url, track_count
   FROM playlists`;
 
-function summary(r: PlaylistRow): PlaylistSummary {
+interface SpotifyViewer {
+  id: string | null;
+  name: string | null;
+}
+
+function spotifyViewer(db: Db): SpotifyViewer {
+  ensureSpotifySchema(db); // the auth table may not exist yet when only library reads ran
+  const row = db
+    .prepare('SELECT user_id, user_name FROM spotify_auth WHERE id = 1')
+    .get() as { user_id: string | null; user_name: string | null } | undefined;
+  return { id: row?.user_id ?? null, name: row?.user_name ?? null };
+}
+
+/**
+ * Whether the signed-in user may change this playlist's tracks on Spotify: theirs
+ * (owner id matches) or collaborative. Liked Songs is always editable (unlike).
+ * Logins made before Spotify ids were stored, and playlists synced before owner ids
+ * were kept, fall back to comparing the owner display name.
+ */
+function canEditSpotifyRow(me: SpotifyViewer, r: PlaylistRow): boolean {
+  if (r.id === LIKED_SONGS_PLAYLIST_ID) return true;
+  if (r.source !== 'spotify' || !r.id.startsWith('pl:sp:')) return false;
+  if (r.collaborative) return true;
+  if (r.owner_id && me.id) return r.owner_id === me.id;
+  return !!r.owner && me.name === r.owner;
+}
+
+/** Exported so the playlist-removal path can enforce the same rule as the UI. */
+export function spotifyPlaylistEditable(db: Db, id: string): boolean {
+  ensureSpotifyLibrarySchema(db);
+  const row = db
+    .prepare(`${PLAYLIST_SELECT} WHERE id = ?`)
+    .get(id) as PlaylistRow | undefined;
+  return !!row && canEditSpotifyRow(spotifyViewer(db), row);
+}
+
+function summary(db: Db, me: SpotifyViewer, r: PlaylistRow): PlaylistSummary {
+  const source = r.source === 'local' ? 'local' : 'spotify';
   return {
     id: r.id,
     name: r.name,
     ...(r.owner ? { owner: r.owner } : {}),
     ...(r.image_url ? { imageUrl: r.image_url } : {}),
     trackCount: r.track_count,
-    source: r.source === 'local' ? 'local' : 'spotify',
+    source,
+    ...(source === 'spotify' ? { canEdit: canEditSpotifyRow(me, r) } : {}),
   };
 }
 
@@ -515,9 +571,10 @@ export function listPlaylists(db: Db): PlaylistSummary[] {
   const rows = db
     .prepare(`${PLAYLIST_SELECT} ORDER BY position, name COLLATE NOCASE`)
     .all() as PlaylistRow[];
+  const me = spotifyViewer(db);
   // trackCount includes the user's local overlay entries for Spotify playlists.
   return rows.map((row) => ({
-    ...summary(row),
+    ...summary(db, me, row),
     trackCount: row.track_count + overlayCount(db, row.id),
   }));
 }
@@ -567,7 +624,7 @@ export function getPlaylist(db: Db, id: string): PlaylistDetail | undefined {
   }
 
   return {
-    ...summary(row),
+    ...summary(db, spotifyViewer(db), row),
     trackCount: row.track_count + overlayCount(db, id),
     ...(row.description ? { description: row.description } : {}),
     tracks,
@@ -651,10 +708,10 @@ export async function setSpotifyAlbumSaved(
 
 // ---------- adding Spotify songs to Spotify playlists ----------
 
-/** Thrown when the stored login predates the playlist-write permission. */
+/** Thrown when the stored login predates a write permission (add, remove or unlike). */
 export class SpotifyReconnectNeeded extends Error {
-  constructor() {
-    super('Reconnect Spotify once (Settings → Spotify) so rune may add songs to your Spotify playlists');
+  constructor(action = 'add songs to your Spotify playlists') {
+    super(`Reconnect Spotify once (Settings → Spotify) so rune may ${action}`);
     this.name = 'SpotifyReconnectNeeded';
   }
 }
@@ -733,6 +790,97 @@ export async function addTracksToSpotifyPlaylist(
   tx();
   void snapshot; // the next sync picks up Spotify's new snapshot and confirms the order
   return ids.length;
+}
+
+// ---------- removing Spotify songs from Spotify playlists ----------
+
+export interface PlaylistRemoval {
+  /** Distinct songs sent to Spotify. */
+  tracks: number;
+  /** Local rows removed; a song held more than once counts once per copy. */
+  copies: number;
+}
+
+/**
+ * Remove Spotify songs from a synced Spotify playlist the user may edit, on Spotify
+ * itself, then mirror the change locally. Spotify's DELETE /playlists/{id}/items
+ * (the old /tracks path answers 403 since February 2026) takes `{items:[{uri}]}`
+ * and removes *every* copy of a URI, so the local mirror drops every copy too.
+ * The playlist's snapshot_id is sent when known and updated from the response.
+ *
+ * Liked Songs is not a playlist edit: unlike through setTracksLiked instead.
+ */
+export async function removeTracksFromSpotifyPlaylist(
+  api: PlaylistWriteApi,
+  db: Db,
+  playlistId: string,
+  trackIds: string[],
+  opts: { now?: () => number } = {},
+): Promise<PlaylistRemoval> {
+  ensureSpotifySchema(db);
+  ensureSpotifyLibrarySchema(db);
+  const now = opts.now ?? Date.now;
+  if (playlistId === LIKED_SONGS_PLAYLIST_ID) {
+    throw new Error('Liked Songs removals are unlikes: use setTracksLiked(..., false)');
+  }
+  const ids = [
+    ...new Set(
+      trackIds
+        .filter((id) => id.startsWith('sp:'))
+        .map((id) => id.slice(3))
+        .filter(Boolean),
+    ),
+  ];
+  if (ids.length === 0) return { tracks: 0, copies: 0 };
+
+  const localIds = ids.map((id) => `sp:${id}`);
+  const copies = (
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM playlist_tracks
+         WHERE playlist_id = ? AND track_id IN (${localIds.map(() => '?').join(',')})`,
+      )
+      .get(playlistId, ...localIds) as { n: number }
+  ).n;
+
+  const spId = playlistId.startsWith('pl:sp:') ? playlistId.slice(6) : playlistId;
+  const stored = db
+    .prepare('SELECT snapshot_id FROM playlists WHERE id = ?')
+    .get(playlistId) as { snapshot_id: string | null } | undefined;
+  let snapshot = stored?.snapshot_id ?? undefined;
+  for (let i = 0; i < ids.length; i += 100) {
+    const body: { items: { uri: string }[]; snapshot_id?: string } = {
+      items: ids.slice(i, i + 100).map((id) => ({ uri: `spotify:track:${id}` })),
+      ...(snapshot ? { snapshot_id: snapshot } : {}),
+    };
+    const res = await api.request<{ snapshot_id?: string } | undefined>(
+      `/playlists/${encodeURIComponent(spId)}/items`,
+      { method: 'DELETE', body },
+    );
+    snapshot = res?.snapshot_id ?? snapshot;
+  }
+
+  const at = now();
+  const tx = db.transaction(() => {
+    const del = db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?');
+    for (const id of localIds) del.run(playlistId, id);
+    // Removing rows leaves gaps: renumber the survivors densely (same as unliking).
+    const rows = db
+      .prepare('SELECT position FROM playlist_tracks WHERE playlist_id = ? ORDER BY position')
+      .all(playlistId) as { position: number }[];
+    const move = db.prepare('UPDATE playlist_tracks SET position = ? WHERE playlist_id = ? AND position = ?');
+    rows.forEach((row, index) => {
+      if (row.position !== index) move.run(index, playlistId, row.position);
+    });
+    db.prepare('UPDATE playlists SET track_count = ?, snapshot_id = ?, updated_at = ? WHERE id = ?').run(
+      rows.length,
+      snapshot ?? null,
+      at,
+      playlistId,
+    );
+  });
+  tx();
+  return { tracks: ids.length, copies };
 }
 
 // ---------- Liked Songs: local reads + like/unlike ----------

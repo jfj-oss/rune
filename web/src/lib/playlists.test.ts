@@ -1,6 +1,6 @@
 import type { PlaylistTrack } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
-import { canAddTo, hasOverlay, isOverlayRow, rowEditable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, moved, orderByRecent, orderPlaylist, selectRow, type RunePlaylistDetail } from './playlists';
+import { canAddTo, hasOverlay, isOverlayRow, isSpotifyEditable, removalPositions, rowEditable, rowRemovable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, moved, orderByRecent, orderPlaylist, selectRow, type RunePlaylistDetail } from './playlists';
 
 const tr = (id: string, album = 'a1', source: 'local' | 'spotify' = 'local'): PlaylistTrack => ({
   id, albumId: album, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000, album: { id: album, title: album },
@@ -109,6 +109,49 @@ describe('Spotify playlists with rune’s local overlay', () => {
     const items = [item('l:1', 'local'), item('sp:1', 'spotify'), item('l:2', 'local')];
     expect(splitForTarget('pl:sp:abc', items)).toEqual({ add: items, refused: 0 });
     expect(splitForTarget('pl:rune:1', items)).toEqual({ add: items, refused: 0 });
+  });
+});
+
+describe('removing Spotify rows', () => {
+  const owned = { id: 'pl:sp:abc', canEdit: true };
+  const locked = { id: 'pl:sp:def', canEdit: false };
+  it('knows which Spotify playlists the user may edit', () => {
+    expect(isSpotifyEditable(owned)).toBe(true);
+    expect(isSpotifyEditable(locked)).toBe(false);
+    expect(isSpotifyEditable({ id: 'pl:sp:liked' })).toBe(true);
+    expect(isSpotifyEditable({ id: 'pl:rune:1' })).toBe(false);
+  });
+  it('unlocks Spotify rows only where the playlist may be edited', () => {
+    const spotifyRow = { source: 'spotify' as const, entrySource: 'spotify-playlist' as const };
+    const overlayRow = { source: 'local' as const, entrySource: 'rune-overlay' as const };
+    expect(rowRemovable(owned, spotifyRow)).toBe(true);
+    expect(rowRemovable(locked, spotifyRow)).toBe(false);
+    expect(rowRemovable(locked, overlayRow)).toBe(true);
+    expect(rowRemovable({ id: 'pl:sp:liked' }, spotifyRow)).toBe(true);
+    expect(rowRemovable({ id: 'pl:rune:1', kind: 'static' }, spotifyRow)).toBe(true);
+    expect(rowRemovable({ id: 'pl:rune:1', kind: 'smart' }, spotifyRow)).toBe(false);
+  });
+  it('expands a selection to every copy of the song Spotify removes', () => {
+    const d: RunePlaylistDetail = {
+      id: 'pl:sp:abc', name: 'S', source: 'spotify', canEdit: true, trackCount: 4,
+      tracks: [tr('sp:1', 'a', 'spotify'), tr('sp:2', 'b', 'spotify'), tr('sp:2', 'b', 'spotify'), tr('sp:3', 'c', 'spotify')],
+    };
+    expect(removalPositions(d, [1])).toEqual([1, 2]);
+    expect(removalPositions(d, [2])).toEqual([1, 2]);
+    expect(removalPositions(d, [3])).toEqual([3]);
+    expect(removalPositions(d, [0, 3])).toEqual([0, 3]);
+  });
+  it('leaves rune playlists’ independent duplicate entries alone', () => {
+    const d = base([tr('l:1'), tr('l:2'), tr('l:1')]);
+    expect(removalPositions(d, [0])).toEqual([0]);
+  });
+  it('does not expand rune’s overlay rows into the Spotify entries', () => {
+    const overlay = { ...tr('l:1'), entrySource: 'rune-overlay' as const };
+    const d: RunePlaylistDetail = {
+      id: 'pl:sp:abc', name: 'S', source: 'spotify', canEdit: true, trackCount: 2,
+      tracks: [overlay, tr('sp:1', 'a', 'spotify')],
+    };
+    expect(removalPositions(d, [0])).toEqual([0]);
   });
 });
 

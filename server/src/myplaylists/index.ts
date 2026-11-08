@@ -41,6 +41,7 @@ import {
   type SmartSpec,
 } from './rules.js';
 import { ensureMyPlaylistSchema } from './schema.js';
+import { spotifyPlaylistEditable } from '../spotify/library.js';
 
 export const RUNE_PLAYLIST_PREFIX = 'pl:rune:';
 /** Rune playlists sort before Spotify's (whose positions start at 0). */
@@ -48,6 +49,17 @@ const RUNE_POSITION_BASE = -1_000_000;
 
 export class PlaylistNotFoundError extends Error {}
 export class PlaylistConflictError extends Error {}
+
+/** Spotify's shared client is rate-limited/locked out: answer 429, retry later. */
+export class PlaylistRateLimitError extends Error {
+  constructor(
+    message = 'Spotify is busy (rate limit) — try again in a few minutes',
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = 'PlaylistRateLimitError';
+  }
+}
 
 export interface RunePlaylistSummary extends PlaylistSummary {
   /** 'static' (manual track list) or 'smart' (rules evaluated on every read). */
@@ -270,6 +282,9 @@ function summaryFor(
   if (rune) {
     summary.kind = isSmart(row) ? 'smart' : 'static';
     summary.coverAlbumIds = mosaicAlbumIds(db, trackIds ?? []);
+  } else {
+    // Spotify playlists only: can the signed-in user change its tracks on Spotify?
+    summary.canEdit = spotifyPlaylistEditable(db, row.id);
   }
   return summary;
 }
@@ -582,11 +597,20 @@ function parsePositions(value: unknown): number[] {
   });
 }
 
-export function removePlaylistTracks(
+export interface RemoveTracksOptions {
+  /**
+   * Removes Spotify songs from the playlist on Spotify itself and mirrors the change
+   * locally. Absent when Spotify writes are not wired (tests, no Spotify setup).
+   */
+  removeFromSpotifyPlaylist?(playlistId: string, trackIds: string[]): Promise<void>;
+}
+
+export async function removePlaylistTracks(
   db: Db,
   id: string,
   body: RemoveTracksBody,
-): RunePlaylistDetail {
+  opts: RemoveTracksOptions = {},
+): Promise<RunePlaylistDetail> {
   ensureMyPlaylistSchema(db);
   const row = getRow(db, id);
   if (!row) throw new PlaylistNotFoundError('playlist not found');
@@ -607,30 +631,43 @@ export function removePlaylistTracks(
     return getPlaylistDetail(db, id) as RunePlaylistDetail;
   }
 
-  // Synced Spotify playlist: only rune's overlay entries may be removed.
+  // Synced Spotify playlist: rune's overlay entries go locally; Spotify's own rows go
+  // to Spotify when the user may edit the playlist (theirs or collaborative).
   const entries = spotifyMergedEntries(db, id);
   const entryIds = parseEntryIds(body?.entryIds);
   const positions = parsePositions(body?.positions);
   if (entryIds.length === 0 && positions.length === 0) {
     throw new PlaylistInputError('positions or entryIds must be a non-empty array');
   }
-  const spotifyMessage =
-    'Spotify tracks can only be removed in the Spotify app; remove local entries with entryId';
   const drop = new Set<string>();
+  const spotifyTrackIds = new Set<string>();
+  const chosen: MergedEntry[] = [];
   for (const position of positions) {
-    if (position >= entries.length) continue;
-    const entry = entries[position];
-    if (!entry) continue;
-    if (entry.entrySource !== 'rune-overlay') throw new PlaylistConflictError(spotifyMessage);
-    drop.add(entry.entryId);
+    const entry = position < entries.length ? entries[position] : undefined;
+    if (entry) chosen.push(entry);
   }
   for (const entryId of entryIds) {
     const entry = entries.find((e) => e.entryId === entryId);
     if (!entry) throw new PlaylistInputError(`unknown entry id: ${entryId}`);
-    if (entry.entrySource !== 'rune-overlay') throw new PlaylistConflictError(spotifyMessage);
-    drop.add(entry.entryId);
+    chosen.push(entry);
   }
-  deleteOverlayEntries(db, id, [...drop]);
+  for (const entry of chosen) {
+    if (entry.entrySource === 'rune-overlay') drop.add(entry.entryId);
+    else spotifyTrackIds.add(entry.trackId);
+  }
+
+  if (spotifyTrackIds.size > 0) {
+    if (!spotifyPlaylistEditable(db, id)) {
+      throw new PlaylistConflictError(
+        'This Spotify playlist is not yours and is not collaborative, so rune cannot remove its songs',
+      );
+    }
+    if (!opts.removeFromSpotifyPlaylist) {
+      throw new PlaylistConflictError('Spotify writes are not connected, so its songs cannot be removed');
+    }
+    await opts.removeFromSpotifyPlaylist(id, [...spotifyTrackIds]);
+  }
+  if (drop.size > 0) deleteOverlayEntries(db, id, [...drop]);
   return getPlaylistDetail(db, id) as RunePlaylistDetail;
 }
 
@@ -775,6 +812,12 @@ function sendInputError(reply: { code: (n: number) => { send: (b: unknown) => un
   if (err instanceof PlaylistInputError) return reply.code(400).send({ error: err.message });
   if (err instanceof PlaylistNotFoundError) return reply.code(404).send({ error: err.message });
   if (err instanceof PlaylistConflictError) return reply.code(409).send({ error: err.message });
+  if (err instanceof PlaylistRateLimitError) {
+    return reply.code(429).send({
+      error: err.message,
+      ...(err.retryAfterMs !== undefined ? { retryAfterMs: err.retryAfterMs } : {}),
+    });
+  }
   throw err;
 }
 
@@ -821,6 +864,8 @@ function importBody(body: unknown): { content: string; name?: string; descriptio
 export interface MyPlaylistRouteOptions {
   /** Adds Spotify songs to a synced Spotify playlist on Spotify itself (and mirrors it locally). */
   addToSpotifyPlaylist?(playlistId: string, trackIds: string[]): Promise<void>;
+  /** Removes Spotify songs from a synced Spotify playlist on Spotify itself (and mirrors it locally). */
+  removeFromSpotifyPlaylist?(playlistId: string, trackIds: string[]): Promise<void>;
   /** Where chosen playlist pictures live, so a deleted playlist can take its picture with it. */
   dataDir?: string;
 }
@@ -907,9 +952,13 @@ export function registerMyPlaylistRoutes(app: FastifyInstance, db: Db, opts: MyP
 
   app.delete<{ Params: { id: string }; Body: RemoveTracksBody }>(
     '/playlists/:id/tracks',
-    (request, reply) => {
+    async (request, reply) => {
       try {
-        return removePlaylistTracks(db, request.params.id, request.body ?? {});
+        return await removePlaylistTracks(db, request.params.id, request.body ?? {}, {
+          ...(opts.removeFromSpotifyPlaylist
+            ? { removeFromSpotifyPlaylist: opts.removeFromSpotifyPlaylist }
+            : {}),
+        });
       } catch (err) {
         return sendInputError(reply, err);
       }

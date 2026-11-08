@@ -3,7 +3,8 @@ import { useCallback } from 'react';
 import { http, type ApiError } from '../api';
 import { playlistApi } from '../playlistApi';
 import {
-  SPOTIFY_ADD_NOTE, applyEdit, applyEditToSummary, isRunePlaylist, noteRecent, splitForTarget, toPlaylistTrack,
+  LIKED_PLAYLIST_ID, SPOTIFY_ADD_NOTE, applyEdit, applyEditToSummary, isRunePlaylist, noteRecent,
+  removalPositions, splitForTarget, toPlaylistTrack,
   type PlaylistEdit, type RunePlaylistDetail, type RunePlaylistSummary, type SmartBody,
 } from '../lib/playlists';
 import type { PlayItem } from '../lib/types';
@@ -133,11 +134,18 @@ export function usePlaylistActions() {
   const rename = useCallback((id: string, name: string) => optimisticEdit(qc, id, { type: 'rename', name }, () => playlistApi.update(id, { name }), 'Could not rename the playlist'), [qc]);
   const describe = useCallback((id: string, description: string) => optimisticEdit(qc, id, { type: 'describe', description }, () => playlistApi.update(id, { description }), 'Could not save the description'), [qc]);
   const removeAt = useCallback(async (id: string, positions: number[]) => {
-    // in a Spotify playlist only rune's own rows can go; name them by entry id when the server gave us ids
-    const entryIds = isRunePlaylist(id) ? undefined : positions.map((p) => qc.getQueryData<RunePlaylistDetail>(DETAIL(id))?.tracks[p]?.entryId);
+    const detail = qc.getQueryData<RunePlaylistDetail>(DETAIL(id));
+    // Spotify removes every copy of a song, so the optimistic edit drops the copies too.
+    const expanded = detail ? removalPositions(detail, positions) : positions;
+    // in a Spotify playlist the server also accepts positions; name the entries when it gave us ids
+    const entryIds = isRunePlaylist(id) ? undefined : expanded.map((p) => detail?.tracks[p]?.entryId);
     const ids = entryIds && entryIds.every((x): x is string => !!x) ? entryIds : undefined;
-    const ok = await optimisticEdit(qc, id, { type: 'remove', positions }, () => playlistApi.removeTracks(id, positions, ids), 'Could not remove the tracks');
-    if (ok) toast(`Removed ${plural(positions.length, 'track')}`);
+    const ok = await optimisticEdit(qc, id, { type: 'remove', positions: expanded }, () => playlistApi.removeTracks(id, expanded, ids), 'Could not remove the tracks');
+    if (ok) {
+      if (id === LIKED_PLAYLIST_ID) toast(`Unliked ${plural(expanded.length, 'track')}`);
+      else if (expanded.length > positions.length) toast(`Removed all ${plural(expanded.length, 'copy', 'copies')}`);
+      else toast(`Removed ${plural(expanded.length, 'track')}`);
+    }
     return ok;
   }, [qc, toast]);
   const move = useCallback((id: string, from: number, to: number) => optimisticEdit(qc, id, { type: 'move', from, to }, () => playlistApi.move(id, from, to), 'Could not reorder the playlist'), [qc]);
