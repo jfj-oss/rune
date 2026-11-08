@@ -1,6 +1,6 @@
 import type { AlbumDetails, CriticQuote, CriticScore } from '@liner/shared';
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { aggregateScore, formatScoreValue, normalizeScore, SCORE_SCALE_HINT, scoreSuffix, scoreTone } from '../../lib/scores';
 import { quotesNotInReception } from '../../lib/reviewContext';
 import { GlassStars } from './GlassStars';
@@ -13,7 +13,12 @@ import { SourceLink } from '../Rows';
  * Serif prose clamped to `lines`; "Read more" expands it in place (smooth height transition) into a
  * scrollable view of the full stored text, "Show less" folds it back.
  */
-export function Prose({ text, lines = 10, className = '', maxHeight = 560 }: { text: string; lines?: number; className?: string; maxHeight?: number }) {
+export function Prose({ text, lines = 10, className = '', maxHeight = 560, fill }: {
+  text: string; lines?: number; className?: string; maxHeight?: number;
+  /** Grow the folded view to use the height of a column beside it: `beside` is that column, `own` the column the prose
+   *  sits in (everything in it besides the prose is subtracted). Ignored when the columns are stacked. */
+  fill?: { beside: React.RefObject<HTMLElement | null>; own: React.RefObject<HTMLElement | null> };
+}) {
   const clip = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const id = useId();
@@ -26,16 +31,30 @@ export function Prose({ text, lines = 10, className = '', maxHeight = 560 }: { t
     if (!el) return;
     const measure = () => {
       const lh = parseFloat(getComputedStyle(el).lineHeight) || 28;
-      const next = { full: Math.ceil(el.scrollHeight), collapsed: Math.round(lh * lines) };
+      let collapsed = Math.round(lh * lines);
+      const b = fill?.beside.current, o = fill?.own.current, c = clip.current;
+      if (b && o && c) {
+        const br = b.getBoundingClientRect(), or = o.getBoundingClientRect();
+        // side by side (the scores column starts level with this one): use the free height beside it, in whole lines
+        if (Math.abs(br.top - or.top) < 48) {
+          const rest = or.height - c.getBoundingClientRect().height;
+          const room = Math.floor((br.height - rest) / lh) * lh;
+          if (room > collapsed) collapsed = Math.round(room);
+        }
+      }
+      const next = { full: Math.ceil(el.scrollHeight), collapsed };
       setDims((d) => (d && d.full === next.full && d.collapsed === next.collapsed ? d : next));
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (fill?.beside.current) ro.observe(fill.beside.current);
     return () => ro.disconnect();
-  }, [text, lines]);
+  }, [text, lines, fill]);
 
-  const cap = Math.min(maxHeight, Math.round((typeof window === 'undefined' ? 800 : window.innerHeight) * 0.7));
+  const capBase = Math.min(maxHeight, Math.round((typeof window === 'undefined' ? 800 : window.innerHeight) * 0.7));
+  // never smaller than the folded view, or "Read more" would shrink it
+  const cap = Math.max(capBase, dims?.collapsed ?? 0);
   const overflow = !!dims && dims.full > dims.collapsed + 4;
   const scrollable = open && !!dims && dims.full > cap;
   const height = !dims ? undefined : open ? Math.min(dims.full, cap) : overflow ? dims.collapsed : dims.full;
@@ -150,22 +169,25 @@ function QuoteCard({ q, details }: { q: CriticQuote; details: AlbumDetails }) {
 
 export function Reception({ details }: { details: AlbumDetails }) {
   const { reception, scores, quotes } = details;
+  const mainRef = useRef<HTMLDivElement>(null);
+  const scoresRef = useRef<HTMLElement>(null);
+  const fill = useMemo(() => ({ beside: scoresRef, own: mainRef }), []);
   const open = usePreview((p) => p.open);
   // an excerpt already printed word for word in the reception text above is not repeated as a pull quote
   const shownQuotes = quotesNotInReception(quotes, reception?.value);
   return (
     <div className="recep">
-      <div className="recep__main">
+      <div className="recep__main" ref={mainRef}>
         {reception && (
           <>
-            <Prose text={reception.value} lines={10} />
+            <Prose text={reception.value} lines={10} fill={scores.length > 0 ? fill : undefined} />
             <SourceLink source={reception.source} url={reception.url} onPreview={() => open(textPreview('Critical reception', 'Critical reception', reception))} />
           </>
         )}
         {shownQuotes.length > 0 && <div className="quotes">{shownQuotes.map((q, i) => <QuoteCard key={i} q={q} details={details} />)}</div>}
       </div>
       {scores.length > 0 && (
-        <aside className="recep__scores" aria-label="Critic scores">
+        <aside className="recep__scores" aria-label="Critic scores" ref={scoresRef}>
           <h3 className="eyebrow">Scores</h3>
           <ScoreLegend />
           {scores.map((s) => <ScoreRow key={s.outlet} s={s} details={details} />)}
