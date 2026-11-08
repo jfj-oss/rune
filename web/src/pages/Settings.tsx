@@ -56,6 +56,30 @@ function SpotifyUsageRow() {
   );
 }
 
+/** The two colours of "Dither · Custom": the base dots and the highlights (e.g. purple with orange highlights). */
+const DUOTONE_PRESETS: { name: string; mid: string; light: string }[] = [
+  { name: 'Purple + orange', mid: '#5a2a9e', light: '#ff7a3d' },
+  { name: 'Teal + gold', mid: '#0f5560', light: '#f2c14e' },
+  { name: 'Red + cream', mid: '#7a1820', light: '#f3e2c0' },
+  { name: 'Blue + pink', mid: '#1d3f8a', light: '#ff6fa8' },
+];
+function DuotonePick() {
+  const d = useUi((s) => s.duotone);
+  const setDuotone = useUi((s) => s.setDuotone);
+  return (
+    <div className="duopick">
+      <label className="duopick__c"><input type="color" value={d.mid} onChange={(e) => setDuotone({ ...d, mid: e.target.value })} /><span><b>Base</b><span className="muted">Most of the dots</span></span></label>
+      <label className="duopick__c"><input type="color" value={d.light} onChange={(e) => setDuotone({ ...d, light: e.target.value })} /><span><b>Highlights</b><span className="muted">The brightest parts</span></span></label>
+      <div className="duopick__presets">
+        {DUOTONE_PRESETS.map((p) => (
+          <button key={p.name} type="button" className="duopick__preset" title={p.name} aria-label={p.name} onClick={() => setDuotone({ mid: p.mid, light: p.light })}
+            style={{ background: `linear-gradient(135deg, ${p.mid} 0 55%, ${p.light} 55% 100%)` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Background picker (the desktop top-bar menu has the same list); shared by every device. */
 function AmbientPicker() {
   const ambient = useUi((s) => s.ambient);
@@ -75,6 +99,7 @@ function AmbientPicker() {
           </button>
         ))}
       </div>
+      {ambient === 'dither-custom' && <DuotonePick />}
       <div className="dotpick">
         <div><b>Dot size</b><span className="muted">Grain of the Dither backgrounds</span></div>
         <div className="seg" role="radiogroup" aria-label="Dot size">

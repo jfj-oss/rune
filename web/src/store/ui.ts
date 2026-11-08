@@ -15,17 +15,17 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-slate' | 'dither-amber' | 'dither-copper' | 'dither-rose' | 'dither-cycle' | 'dither-album';
+export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-slate' | 'dither-amber' | 'dither-copper' | 'dither-rose' | 'dither-cycle' | 'dither-album' | 'dither-custom';
 /** Non-Dither choices: only Off (plain dark) is left; the old gradient backdrops were removed. */
 export const AMBIENTS: Ambient[] = ['off'];
 /** The removed gradient backdrops, mapped to the nearest Dither colour for anyone who still has one saved. */
 const RETIRED_AMBIENT: Record<string, Ambient> = { cycle: 'dither-cycle', blue: 'dither-blue', purple: 'dither-purple', slate: 'dither-blue', green: 'dither-green' };
 const upgradeAmbient = (v: unknown): unknown => (typeof v === 'string' && v in RETIRED_AMBIENT ? RETIRED_AMBIENT[v] : v);
 /** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
-export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-olive', 'dither-lime', 'dither-teal', 'dither-slate', 'dither-amber', 'dither-copper', 'dither-rose', 'dither-cycle', 'dither-album'];
+export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-olive', 'dither-lime', 'dither-teal', 'dither-slate', 'dither-amber', 'dither-copper', 'dither-rose', 'dither-cycle', 'dither-album', 'dither-custom'];
 export const AMBIENT_LABEL: Record<Ambient, string> = {
   off: 'Off',
-  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-olive': 'Dither · Olive', 'dither-lime': 'Dither · Lime', 'dither-teal': 'Dither · Teal', 'dither-slate': 'Dither · Slate', 'dither-amber': 'Dither · Amber', 'dither-copper': 'Dither · Copper', 'dither-rose': 'Dither · Rose', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album',
+  dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-olive': 'Dither · Olive', 'dither-lime': 'Dither · Lime', 'dither-teal': 'Dither · Teal', 'dither-slate': 'Dither · Slate', 'dither-amber': 'Dither · Amber', 'dither-copper': 'Dither · Copper', 'dither-rose': 'Dither · Rose', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album', 'dither-custom': 'Dither · Custom',
 };
 const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
 
@@ -76,6 +76,8 @@ interface UiStore {
   setAmbient(a: Ambient): void;
   dots: DotSize;
   setDots(d: DotSize): void;
+  duotone: Duotone;
+  setDuotone(d: Duotone): void;
   /** Palette of the album page being viewed: while set, every Dither mode shows it (Ambient). */
   pagePalette: DitherPalette | null;
   setPagePalette(p: DitherPalette | null): void;
@@ -96,6 +98,16 @@ interface UiStore {
   toast(text: string): void;
 }
 
+/** "Dither · Custom": two colours the user picks (base dots and highlights), shared like the ambient (`ui.duotone`). */
+export interface Duotone { mid: string; light: string }
+export const DEFAULT_DUOTONE: Duotone = { mid: '#5a2a9e', light: '#ff7a3d' };
+const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+const isDuotone = (v: unknown): v is Duotone => !!v && typeof v === 'object' && isHex((v as Duotone).mid) && isHex((v as Duotone).light);
+function loadDuotone(): Duotone {
+  try { const v = JSON.parse(localStorage.getItem('rune.duotone') ?? 'null'); if (isDuotone(v)) return v; } catch { /* storage blocked */ }
+  return DEFAULT_DUOTONE;
+}
+
 let toastN = 0;
 const initialAmbient = loadAmbient();
 applyAmbient(initialAmbient);
@@ -113,6 +125,12 @@ export const useUi = create<UiStore>((set) => ({
     try { localStorage.setItem('rune.dots', d); } catch { /* storage blocked */ }
     set({ dots: d });
     void syncDots('push', d);
+  },
+  duotone: loadDuotone(),
+  setDuotone: (d) => {
+    try { localStorage.setItem('rune.duotone', JSON.stringify(d)); } catch { /* storage blocked */ }
+    set({ duotone: d });
+    void syncDuotone('push', d);
   },
   pagePalette: null,
   setPagePalette: (pagePalette) => set({ pagePalette }),
@@ -204,6 +222,30 @@ async function syncDots(dir: 'pull' | 'push', d?: DotSize): Promise<void> {
   } catch { /* offline: keep the local choice */ }
 }
 if (typeof window !== 'undefined' && !dotsFromUrl) void syncDots('pull');
+
+/** Same for the custom two-tone colours (server key `ui.duotone`). Pushes are debounced: a colour picker fires on
+    every drag step. */
+let duotoneTimer: ReturnType<typeof setTimeout> | undefined;
+async function syncDuotone(dir: 'pull' | 'push', d?: Duotone): Promise<void> {
+  try {
+    const { isMock } = await import('../api');
+    if (isMock) return;
+    if (dir === 'push') {
+      clearTimeout(duotoneTimer);
+      duotoneTimer = setTimeout(() => { void fetch('/api/settings/duotone', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ duotone: d }) }).catch(() => undefined); }, 600);
+      return;
+    }
+    const res = await fetch('/api/settings/duotone');
+    if (!res.ok) return;
+    const { duotone } = (await res.json()) as { duotone: unknown };
+    if (!isDuotone(duotone)) return;
+    const cur = useUi.getState().duotone;
+    if (duotone.mid === cur.mid && duotone.light === cur.light) return;
+    try { localStorage.setItem('rune.duotone', JSON.stringify(duotone)); } catch { /* storage blocked */ }
+    useUi.setState({ duotone });
+  } catch { /* offline: keep the local choice */ }
+}
+if (typeof window !== 'undefined') void syncDuotone('pull');
 
 /** Hotkeys live on the server too (`ui.hotkeys`): Brave here clears site data on exit, which wiped them. */
 async function syncHotkeys(dir: 'pull' | 'push'): Promise<void> {

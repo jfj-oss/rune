@@ -1142,6 +1142,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         return { dots: d };
       });
 
+      // "Dither · Custom" colours ({ mid, light } as #rrggbb), shared the same way.
+      r.get('/settings/duotone', async () => {
+        const raw = getState('ui.duotone');
+        try { return { duotone: raw ? JSON.parse(raw) : null }; } catch { return { duotone: null }; }
+      });
+      r.post<{ Body: { duotone?: unknown } }>('/settings/duotone', async (req, reply) => {
+        const d = req.body?.duotone as { mid?: unknown; light?: unknown } | undefined;
+        const hex = (v: unknown) => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+        if (!d || !hex(d.mid) || !hex(d.light)) return reply.code(400).send({ error: 'duotone needs mid and light as #rrggbb' });
+        const duotone = { mid: (d.mid as string).toLowerCase(), light: (d.light as string).toLowerCase() };
+        setState('ui.duotone', JSON.stringify(duotone));
+        return { duotone };
+      });
+
       // Spotify tracks the user also has locally: the client swaps them for the local copy before playing.
       r.post<{ Body: unknown }>('/local-twins', async (req, reply) => {
         const queries = parseTwinQueries(req.body);

@@ -111,3 +111,14 @@
 @media (max-width: 899px) { .ahero__txt::before, .asec::before { inset-inline: -10px; } .ahero__txt::before { inset-block: -8px -4px; } }
 .drawer { background: #11121a; }
 .srow { background: rgba(255, 255, 255, 0.07); }
+
+/* "Dither · Custom": preview dot and the two colour pickers in Settings */
+.ambdot--dither-custom { background: radial-gradient(circle, #000 0 30%, transparent 40%) 0 0 / 3px 3px, linear-gradient(135deg, #5a2a9e 0 55%, #ff7a3d 55% 100%); }
+.duopick { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 14px; }
+.duopick__c { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.duopick__c span { display: flex; flex-direction: column; line-height: 1.25; }
+.duopick__c input[type=color] { width: 40px; height: 40px; padding: 0; border: 1px solid color-mix(in srgb, #fff 18%, transparent); border-radius: 10px; background: none; cursor: pointer; }
+.duopick__c input[type=color]::-webkit-color-swatch-wrapper { padding: 3px; }
+.duopick__c input[type=color]::-webkit-color-swatch { border: 0; border-radius: 7px; }
+.duopick__presets { display: flex; gap: 8px; }
+.duopick__preset { width: 28px; height: 28px; border-radius: 50%; border: 1px solid color-mix(in srgb, #fff 20%, transparent); cursor: pointer; }

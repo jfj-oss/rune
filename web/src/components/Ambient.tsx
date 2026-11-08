@@ -7,8 +7,16 @@ import type { BackdropColour } from './DitherBackdrop';
 
 const DitherBackdrop = lazy(() => import('./DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
 
-const ditherColour = (a: AmbientMode): DitherColour | 'album' | null =>
-  a === 'dither' ? 'red' : a === 'dither-album' ? 'album' : a.startsWith('dither-') ? (a.slice(7) as DitherColour) : null;
+const ditherColour = (a: AmbientMode): DitherColour | 'album' | 'custom' | null =>
+  a === 'dither' ? 'red' : a === 'dither-album' ? 'album' : a === 'dither-custom' ? 'custom' : a.startsWith('dither-') ? (a.slice(7) as DitherColour) : null;
+
+const rgb = (h: string): [number, number, number] => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+
+/** "Dither · Custom": the two colours from Settings (base dots, highlights), whatever page is open. */
+function CustomDither() {
+  const d = useUi((s) => s.duotone);
+  return <DitherBackdrop colour={{ mid: rgb(d.mid), light: rgb(d.light) }} main />;
+}
 
 /** "Dither · Album": the dots take the colour of the playing album's cover (purple when nothing plays). */
 function AlbumDither() {
@@ -32,7 +40,7 @@ export function Ambient() {
     <div className="ambient" aria-hidden="true">
       {colour ? (
         npOpen ? null : (
-          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : <DitherBackdrop colour={page ?? colour} main />}</Suspense>
+          <Suspense fallback={null}>{colour === 'album' ? <AlbumDither /> : colour === 'custom' ? <CustomDither /> : <DitherBackdrop colour={page ?? colour} main />}</Suspense>
         )
       ) : null}
     </div>
