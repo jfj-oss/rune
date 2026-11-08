@@ -662,6 +662,7 @@ export class SpotifyReconnectNeeded extends Error {
 export interface PlaylistWriteApi {
   request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
   tracks(ids: string[]): Promise<SpotifyTrack[]>;
+  saveTracks(ids: string[]): Promise<void>;
 }
 
 /**
@@ -699,9 +700,8 @@ export async function addTracksToSpotifyPlaylist(
 
   const at = now();
   if (playlistId === LIKED_SONGS_PLAYLIST_ID) {
-    for (let i = 0; i < ids.length; i += 50) {
-      await api.request<void>('/me/tracks', { method: 'PUT', body: { ids: ids.slice(i, i + 50) } });
-    }
+    // PUT /me/library (spotify:track: URIs, 40 per call); the old PUT /me/tracks answers 403 since February 2026
+    for (let i = 0; i < ids.length; i += 40) await api.saveTracks(ids.slice(i, i + 40));
     // Liked Songs are stored newest first: shift everything down, put the new ones on top.
     const tx = db.transaction(() => {
       const n = ids.length;
@@ -762,6 +762,8 @@ export function likedTrackIds(db: Db, trackIds: string[]): string[] {
 export interface LikedWriteApi {
   request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
   tracks(ids: string[]): Promise<SpotifyTrack[]>;
+  saveTracks(ids: string[]): Promise<void>;
+  removeSavedTracks(ids: string[]): Promise<void>;
 }
 
 export interface LikedWriteResult {
@@ -811,12 +813,7 @@ export async function setTracksLiked(
       { now },
     );
   } else {
-    for (let i = 0; i < changing.length; i += 50) {
-      await api.request<void>('/me/tracks', {
-        method: 'DELETE',
-        body: { ids: changing.slice(i, i + 50) },
-      });
-    }
+    for (let i = 0; i < changing.length; i += 40) await api.removeSavedTracks(changing.slice(i, i + 40));
     const tx = db.transaction(() => {
       const del = db.prepare('DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?');
       for (const id of changing) del.run(LIKED_SONGS_PLAYLIST_ID, `sp:${id}`);

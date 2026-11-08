@@ -634,6 +634,16 @@ export class SpotifyApi {
     return this.request<void>(this.query('/me/library', { uris: albumUris(ids) }), { method: 'PUT' });
   }
 
+  /** PUT /me/library — like songs (Liked Songs). Spotify removed PUT /me/tracks in February 2026 (403 now). At most 40. */
+  saveTracks(ids: string[]): Promise<void> {
+    return this.request<void>(this.query('/me/library', { uris: trackUris(ids) }), { method: 'PUT' });
+  }
+
+  /** DELETE /me/library — unlike songs. At most 40. */
+  removeSavedTracks(ids: string[]): Promise<void> {
+    return this.request<void>(this.query('/me/library', { uris: trackUris(ids) }), { method: 'DELETE' });
+  }
+
   /** DELETE /me/library — remove albums from the user's library. */
   removeSavedAlbums(ids: string[]): Promise<void> {
     return this.request<void>(this.query('/me/library', { uris: albumUris(ids) }), { method: 'DELETE' });
@@ -813,6 +823,7 @@ function clamp(n: number, min: number, max: number): number {
 /** <50% normal, <80% tight, <100% low, otherwise out. */
 /** At most 40 items per /me/library call. */
 const albumUris = (ids: string[]): string => ids.slice(0, 40).map((id) => `spotify:album:${id}`).join(',');
+const trackUris = (ids: string[]): string => ids.slice(0, 40).map((id) => `spotify:track:${id}`).join(',');
 
 export function budgetLevelFor(used24h: number, dailyBudget: number): SpotifyBudgetLevel {
   if (used24h < dailyBudget * 0.5) return 'normal';

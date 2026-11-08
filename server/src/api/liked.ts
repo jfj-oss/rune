@@ -18,6 +18,8 @@ import {
 export interface LikedWriteApi {
   request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
   tracks(ids: string[]): Promise<SpotifyTrack[]>;
+  saveTracks(ids: string[]): Promise<void>;
+  removeSavedTracks(ids: string[]): Promise<void>;
 }
 
 export interface LikedRouteDeps {

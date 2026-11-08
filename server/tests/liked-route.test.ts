@@ -56,7 +56,7 @@ async function setup(opts: SetupOptions = {}) {
   seed(db);
   const { fetch, calls } = fakeFetch((url, init) => {
     const method = init?.method ?? 'GET';
-    if (url.pathname === '/v1/me/tracks') {
+    if (url.pathname === '/v1/me/tracks' || url.pathname === '/v1/me/library') {
       const fail = opts.fail;
       if (fail && fail.method === method) {
         return jsonResponse(fail.status, { error: 'no' }, fail.retryAfter ? { 'retry-after': fail.retryAfter } : {});
@@ -84,7 +84,7 @@ async function setup(opts: SetupOptions = {}) {
 }
 
 const likedWrites = (calls: FetchCall[], method: string) =>
-  calls.filter((c) => (c.init?.method ?? 'GET') === method && c.url.pathname === '/v1/me/tracks');
+  calls.filter((c) => (c.init?.method ?? 'GET') === method && c.url.pathname === '/v1/me/library');
 
 const entries = (db: Db) =>
   db
@@ -130,7 +130,7 @@ describe('POST/DELETE /tracks/liked', () => {
     expect(res.json()).toEqual({ liked: true, changed: 2 });
 
     expect(likedWrites(s.calls, 'PUT')).toHaveLength(1);
-    expect(JSON.parse(String(likedWrites(s.calls, 'PUT')[0]!.init!.body))).toEqual({ ids: ['t1', 't2'] });
+    expect(likedWrites(s.calls, 'PUT')[0]!.url.searchParams.get('uris')).toBe('spotify:track:t1,spotify:track:t2');
     expect(entries(s.db)).toEqual([
       { position: 0, track_id: 'sp:t1' },
       { position: 1, track_id: 'sp:t2' },
@@ -161,7 +161,7 @@ describe('POST/DELETE /tracks/liked', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ liked: false, changed: 1 });
     expect(likedWrites(s.calls, 'DELETE')).toHaveLength(1);
-    expect(JSON.parse(String(likedWrites(s.calls, 'DELETE')[0]!.init!.body))).toEqual({ ids: ['t2'] });
+    expect(likedWrites(s.calls, 'DELETE')[0]!.url.searchParams.get('uris')).toBe('spotify:track:t2');
     expect(entries(s.db)).toEqual([
       { position: 0, track_id: 'sp:t1' },
       { position: 1, track_id: 'sp:t3' },
@@ -178,7 +178,7 @@ describe('POST/DELETE /tracks/liked', () => {
     like(s.db, 'sp:t1', 0);
     const res = await app!.inject({ method: 'DELETE', url: '/api/tracks/liked', payload: { ids: ['sp:t1', 'sp:t9'] } });
     expect(res.json()).toEqual({ liked: false, changed: 1 });
-    expect(JSON.parse(String(likedWrites(s.calls, 'DELETE')[0]!.init!.body))).toEqual({ ids: ['t1'] });
+    expect(likedWrites(s.calls, 'DELETE')[0]!.url.searchParams.get('uris')).toBe('spotify:track:t1');
     expect(entries(s.db)).toEqual([]);
   });
 
