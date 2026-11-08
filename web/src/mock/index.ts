@@ -3,7 +3,7 @@ import type { RunePlaylistDetail, RunePlaylistSummary } from '../lib/playlists';
 import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from '../lib/types';
 import { registerTitles } from './covers';
 import { mockPlaylists } from './playlists';
-import { inLibrary, isSaved, setSaved } from './spotify';
+import { inLibrary, isSaved, isTrackLiked, setSaved, setTrackLiked } from './spotify';
 import { ALBUMS, CANDIDATES, DETAILS, LOWCONF_ALBUM_ID, SUMMARIES, artistRefs, buildArtist, toSummary } from './data';
 
 registerTitles(ALBUMS);
@@ -83,6 +83,8 @@ export const mockApi = {
   },
   async albumSaved(id: string): Promise<boolean> { return wait(isSaved(id), 40); },
   async setAlbumSaved(id: string, on: boolean): Promise<void> { setSaved(id, on); return wait(undefined, 120); },
+  async trackLiked(id: string): Promise<boolean> { return wait(isTrackLiked(id), 40); },
+  async setTrackLiked(id: string, on: boolean): Promise<void> { setTrackLiked(id, on); return wait(undefined, 120); },
   async candidates(_id: string): Promise<MatchCandidate[]> { return wait(CANDIDATES, 250); },
   async match(albumId: string, _mb: string): Promise<void> {
     const a = ALBUMS.find((x) => x.id === albumId);

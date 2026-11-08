@@ -9,6 +9,7 @@ import type { PlayItem } from '../lib/types';
 import { useDiscoverUi } from '../store/discoverUi';
 import { usePlayer } from '../store/player';
 import { AddToPlaylistItem } from './AddToPlaylist';
+import { LikedMenuItem } from './Liked';
 import { MenuItem } from './Popover';
 
 /**
@@ -28,6 +29,7 @@ export function TrackMenuItems({ item, close, extra }: { item: PlayItem; close()
       <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([item], true); }}>Play next</MenuItem>
       <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([item]); }}>Add to queue</MenuItem>
       <AddToPlaylistItem close={close} target={{ what: item.track.title, resolve: () => [item] }} />
+      <LikedMenuItem track={item.track} close={close} />
       <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(item.album.id)}`); }}>Go to album</MenuItem>
       {item.track.artists[0] && (
         <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(item.track.artists[0]!.id)}`); }}>Go to artist</MenuItem>

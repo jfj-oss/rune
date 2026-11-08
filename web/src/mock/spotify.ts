@@ -66,6 +66,12 @@ export function playlistDetail(id: string): PlaylistDetail | undefined {
   return hit;
 }
 
+// ---------- liked tracks ----------
+// A deterministic seed (so the demo has some hearts) plus explicit toggles.
+const likedOverrides = new Map<string, boolean>();
+export const isTrackLiked = (id: string) => likedOverrides.get(id) ?? hashString(id) % 5 === 0;
+export const setTrackLiked = (id: string, on: boolean) => { likedOverrides.set(id, on); };
+
 // ---------- saved albums ----------
 const saved = new Set(ALBUMS.filter((a) => a.source === 'spotify' && !CATALOG_IDS.has(a.id)).map((a) => a.id));
 export const isSaved = (id: string) => saved.has(id);

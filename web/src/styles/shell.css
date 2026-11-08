@@ -55,8 +55,14 @@
 .npbar__art { width: 56px; height: 56px; flex: none; border-radius: var(--r); transition: transform var(--t); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); }
 .npbar__art:hover { transform: scale(1.05); }
 .npbar__txt { min-width: 0; }
+.npbar__titlerow { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.npbar__titlerow .npbar__title { flex: 1 1 auto; min-width: 0; }
 .npbar__title { display: block; font-weight: 600; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .npbar__title:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* Liked Songs heart next to the title: quiet until the song is liked. */
+.likebtn { width: 28px; height: 28px; color: var(--text-3); }
+.likebtn:hover:not(:disabled) { color: var(--text); }
+.likebtn.is-on { color: var(--on); }
 .npbar__sub { font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .npbar__idle { color: var(--text-3); font-size: 14px; padding-left: 4px; }
 .npbar__center { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
