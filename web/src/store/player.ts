@@ -13,7 +13,7 @@ import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
 import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
 import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
-import { emptyState, livePosition, type Backend } from '../player/types';
+import { emptyState, livePosition, type Backend, type PlayModes } from '../player/types';
 import { helloAction, holdNotice, RELOAD_NOTICE, usesServerQueue } from '../player/serverQueue';
 import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
 import { loadLocal, saveLocal, useUi } from './ui';
@@ -108,11 +108,14 @@ function recordPlayed(state: PlayerState, prev: { albumId: string | null }) {
 const CONNECT_WINDOW = 100;
 
 async function startOn(b: Backend, z: ZoneInfo, items: PlayItem[], startIndex: number, shuffled?: boolean) {
+  // The setting shown in the bar now is rune's, and the target must end up with it — "off" included, or a Spotify
+  // device left repeating would loop the queue (or the one song) rune just sent it.
+  const want: PlayModes = { shuffle: shuffled ?? b.state.shuffle, repeat: b.state.repeat };
   let list = items;
   let start = startIndex;
   if (z.kind === 'spotify' && list.length > CONNECT_WINDOW) { list = list.slice(start, start + CONNECT_WINDOW); start = 0; }
   await b.send({ type: 'play', trackIds: list.map((i) => i.track.id), startIndex: start }, list);
-  if (shuffled) await b.send({ type: 'shuffle', on: true });
+  await b.matchModes?.(want);
 }
 
 /** The current zone can't play this: use the remembered choice, or ask ("Play on…" sheet). */
@@ -287,7 +290,9 @@ export const usePlayer = create<PlayerStore>((set, get) => {
               if (s.status === 'playing' || s.status === 'loading') await prev.send({ type: 'pause' }).catch(() => undefined);
               attach(b);
               await b.send({ type: 'play', trackIds: playable.map((i) => i.track.id), startIndex, positionMs, paused }, playable);
-              if (s.repeat !== 'off') await b.send({ type: 'repeat', mode: s.repeat }).catch(() => undefined);
+              // Carry rune's repeat and shuffle too, "off" included: a Spotify target left repeating would loop
+              // the queue (or the one song) it was just handed.
+              await b.matchModes?.({ shuffle: s.shuffle, repeat: s.repeat });
               // keep the loudness: the target may sit at its own, much lower level (the PC's Spotify app was at 10% = silent)
               if (volume > 0 && Math.abs(b.state.volume - volume) > 1) await b.send({ type: 'volume', volume }).catch(() => undefined);
               if (playable.length < items.length) notice(`Moved ${playable.length} of ${items.length} queued tracks (the rest can't play on ${target.name})`);

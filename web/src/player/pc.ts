@@ -2,7 +2,8 @@ import type { PlayerState } from '@liner/shared';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import { HybridEngine } from './hybrid';
 import { LocalBackend } from './local';
-import { emptyState, livePosition, type Backend } from './types';
+import { matchBackendModes, PLAIN_MODES } from './modes';
+import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 import { ZoneEngine, type ZoneTransport } from './zoneEngine';
 
 export interface PcDevice {
@@ -158,16 +159,35 @@ export class PcBackend implements Backend {
     return c.send(cmd, items);
   }
 
+  /**
+   * Make what sounds match rune's repeat/shuffle. The Spotify app is a player of its own: when it holds the queue it
+   * must follow rune's setting ("off" included), and when rune drives it a song at a time (a mixed queue) it must
+   * neither repeat nor reorder what it is sent.
+   */
+  async matchModes(want: PlayModes): Promise<void> {
+    if (this.mode === 'mixed') {
+      if (this.sp) await matchBackendModes(this.sp, PLAIN_MODES);
+      if (this.mixed) await matchBackendModes(this.mixed, want);
+      return;
+    }
+    const c = this.child(this.mode);
+    if (c) await matchBackendModes(c, want);
+  }
+
   // ----- starting / queueing -----
 
   private async start(cmd: Extract<ExtCommand, { type: 'play' }>, items: PlayItem[]) {
     const target = modeFor(items);
     if (target !== 'pc' && !this.device) throw new Error('rune starts Spotify on the PC for this');
+    const want: PlayModes = { shuffle: this.state.shuffle, repeat: this.state.repeat };
     const volume = this.userVolume();
     const moved = target !== this.mode;
     await this.switchTo(target);
     const c = this.ensure(target)!;
+    // A mixed queue sends one song at a time: clear the app's own repeat/shuffle before its first song starts.
+    if (target === 'mixed' && this.sp) await matchBackendModes(this.sp, PLAIN_MODES);
     await c.send(cmd, items);
+    await this.matchModes(want);
     if (moved && target !== 'mixed' && c.state.volume !== volume && volume > 0) await c.send({ type: 'volume', volume }).catch(() => undefined);
   }
 
@@ -187,12 +207,15 @@ export class PcBackend implements Backend {
     }
     // the queue turns mixed: move what is playing into the tab-driven hybrid queue, then add
     const queue: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
-    const repeat = s.repeat;
+    const modes: PlayModes = { shuffle: s.shuffle, repeat: s.repeat };
     const volume = this.userVolume();
     await this.switchTo('mixed');
     const m = this.ensure('mixed')!;
+    // rune drives a mixed queue one song at a time: the app must not repeat (or shuffle) what it is sent.
+    if (this.sp) await matchBackendModes(this.sp, PLAIN_MODES);
     await m.send({ type: 'play', trackIds: [], startIndex: s.index, positionMs: livePosition(s), paused: s.status === 'paused' }, queue);
-    if (repeat !== 'off') await m.send({ type: 'repeat', mode: repeat });
+    // The mixed queue is rune's own: carry the setting it had, "off" included.
+    await this.matchModes(modes);
     if (volume > 0) await m.send({ type: 'volume', volume });
     await m.send(cmd, items);
     this.deps.notice?.('Mixed queue — keep a rune tab open so it can switch between local and Spotify tracks');

@@ -413,7 +413,8 @@ export class SpotifySdkEngine implements Engine {
       this.window = list.map((t) => spotifyIdOf(t.id));
       await this.playOnDevice(deviceId, list.map(uriOf), startMs, () => seq !== this.seq);
       if (seq !== this.seq) return;
-      if (list.length > 1) void this.ensurePlainOrder(deviceId);
+      // Every load, a one-song queue too: Spotify's own repeat "context" would loop the single song it was sent.
+      void this.ensurePlainOrder(deviceId);
       if (!autoplay) await this.player?.pause().catch(() => undefined);
     } catch (e) {
       clientLog('error', `spotify sdk: load failed — ${(e as Error).message}`);
@@ -424,17 +425,24 @@ export class SpotifySdkEngine implements Engine {
   /** Start one track on this tab's device via the Web API (the SDK has no "play this" call). */
   /** Turn off Spotify's own shuffle / repeat on this device: rune already sends songs in play order. */
   private async ensurePlainOrder(deviceId: string) {
-    const s = this.last?.s;
-    if (this.modesChecked && !s?.shuffle && !s?.repeat_mode) return;
+    // What this device last reported. Nothing reported yet: try both, but once.
+    const known = this.report;
+    const shuffle = known ? known.shuffle : true;
+    const repeat = known ? known.repeat !== 0 : true;
+    if (!shuffle && !repeat) return; // already plain: no request
+    if (!known && this.modesChecked) return;
     this.modesChecked = true;
     try {
       const token = await spotifyToken();
       const h = { Authorization: `Bearer ${token}` };
       const dev = `device_id=${encodeURIComponent(deviceId)}`;
-      const shuffle = await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=false&${dev}`, { method: 'PUT', headers: h });
-      // Out of quota: do not send the second write (or retry).
-      if (shuffle.status === 429) return;
-      await fetch(`https://api.spotify.com/v1/me/player/repeat?state=off&${dev}`, { method: 'PUT', headers: h });
+      // Only the mode that is actually on: Spotify's request budget is tight.
+      if (shuffle) {
+        const res = await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=false&${dev}`, { method: 'PUT', headers: h });
+        // Out of quota: do not send the second write (or retry).
+        if (res.status === 429) return;
+      }
+      if (repeat) await fetch(`https://api.spotify.com/v1/me/player/repeat?state=off&${dev}`, { method: 'PUT', headers: h });
     } catch { /* best effort: rune still corrects the song at each change */ }
   }
 

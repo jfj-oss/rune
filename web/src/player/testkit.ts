@@ -38,6 +38,8 @@ export class FakeZone implements ZoneTransport {
       case 'resume': this.bump({ status: 'playing' }); break;
       case 'seek': this.bump({ positionMs: cmd.positionMs }); break;
       case 'volume': this.bump({ volume: cmd.volume }); break;
+      case 'shuffle': this.bump({ shuffle: cmd.on }); break;
+      case 'repeat': this.bump({ repeat: cmd.mode }); break;
       default: break;
     }
     return this.state;
