@@ -2,6 +2,7 @@
 // session via registerRadioStationRoutes(app, iradio).
 import { createReadStream } from 'node:fs';
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { StationUrlBlockedError } from './guard.js';
 import { proxyRadioStream } from './stream.js';
 import type { AddFavouriteInput, RadioSearchParams, RadioSort } from './types.js';
 import type { Iradio } from './index.js';
@@ -57,6 +58,7 @@ export function registerRadioStationRoutes(app: FastifyInstance, iradio: Iradio)
       if (!station) return reply.code(404).send({ error: 'station not found' });
       return station;
     } catch (err) {
+      if (err instanceof StationUrlBlockedError) return reply.code(400).send({ error: err.message });
       return reply.code(502).send({ error: (err as Error).message });
     }
   });
@@ -98,6 +100,10 @@ export function registerRadioStationRoutes(app: FastifyInstance, iradio: Iradio)
         });
         return reply;
       } catch (err) {
+        // A stored favourite whose address is no longer allowed stays in the list; it just won't play.
+        if (!reply.sent && err instanceof StationUrlBlockedError) {
+          return reply.code(422).send({ error: err.message });
+        }
         if (!reply.sent) return reply.code(502).send({ error: (err as Error).message });
         return reply;
       }

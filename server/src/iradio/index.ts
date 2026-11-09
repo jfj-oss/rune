@@ -18,6 +18,7 @@ import {
   setFavourite,
   upsertStation,
 } from './store.js';
+import { StationUrlBlockedError, createGuardedFetch, isAcceptableStationUrl, type StreamGuard } from './guard.js';
 import { resolveStationStreamUrl, type MediaDeps } from './stream.js';
 import { stationUuid, type AddFavouriteInput, type RadioSearchParams, type RadioSearchResult, type RadioStation } from './types.js';
 
@@ -29,6 +30,8 @@ export interface CreateIradioOptions {
   fetchImpl?: typeof fetch;
   /** Injected fetch for logos and stream proxying (tests). */
   mediaFetch?: typeof fetch;
+  /** Tests only: relax the station address policy (see guard.ts). */
+  mediaGuard?: StreamGuard;
   minRequestIntervalMs?: number;
   timeoutMs?: number;
   cacheTtlMs?: number;
@@ -59,8 +62,10 @@ class IradioImpl implements Iradio {
   private readonly cfg: Config;
   private readonly api: RadioBrowserApi;
   private readonly mediaFetch: typeof fetch;
+  private readonly guard: StreamGuard;
 
-  constructor(db: Db, cfg: Config, api: RadioBrowserApi, mediaFetch: typeof fetch) {
+  constructor(db: Db, cfg: Config, api: RadioBrowserApi, mediaFetch: typeof fetch, guard: StreamGuard) {
+    this.guard = guard;
     this.db = db;
     this.cfg = cfg;
     this.api = api;
@@ -104,10 +109,12 @@ class IradioImpl implements Iradio {
       // never resolved). Prefer it over another API round-trip.
       const snapshot = input.station;
       if (snapshot && typeof snapshot.name === 'string' && typeof snapshot.url === 'string') {
+        this.assertStoredUrls(snapshot);
         upsertStation(this.db, { ...snapshot, stationuuid: uuid } as Parameters<typeof upsertStation>[1]);
       } else {
         const raw = await this.api.stationByUuid(uuid).catch(() => undefined);
         if (!raw) return undefined;
+        this.assertStoredUrls(raw);
         upsertStation(this.db, raw);
       }
       station = getStation(this.db, uuid);
@@ -117,6 +124,16 @@ class IradioImpl implements Iradio {
     // Fetch the logo now so favourites look right offline; failure is harmless.
     await cacheStationLogo(this.db, this.cfg, station, this.mediaFetch).catch(() => undefined);
     return getStation(this.db, station.id);
+  }
+
+  /** Refuse to store a station whose address is not plain http(s) to a public host. */
+  private assertStoredUrls(raw: { url?: unknown; url_resolved?: unknown }): void {
+    if (!isAcceptableStationUrl(raw.url, this.guard)) {
+      throw new StationUrlBlockedError('the stream URL must be a public http or https address');
+    }
+    if (raw.url_resolved != null && raw.url_resolved !== '' && !isAcceptableStationUrl(raw.url_resolved, this.guard)) {
+      throw new StationUrlBlockedError('the resolved stream URL must be a public http or https address');
+    }
   }
 
   removeFavourite(id: string): boolean {
@@ -140,7 +157,7 @@ class IradioImpl implements Iradio {
   }
 
   mediaDeps(): MediaDeps {
-    return { userAgent: radioUserAgent(this.cfg), fetchImpl: this.mediaFetch };
+    return { userAgent: radioUserAgent(this.cfg), fetchImpl: this.mediaFetch, guard: this.guard };
   }
 
   close(): void {
@@ -172,7 +189,8 @@ export function createIradio(db: Db, cfg: Config, opts: CreateIradioOptions = {}
     ...(opts.random !== undefined ? { random: opts.random } : {}),
   };
   const api = custom ? new RadioBrowserApi(clientOptions) : sharedRadioClient(cfg);
-  return new IradioImpl(db, cfg, api, opts.mediaFetch ?? globalThis.fetch);
+  const guard = opts.mediaGuard ?? {};
+  return new IradioImpl(db, cfg, api, opts.mediaFetch ?? createGuardedFetch(guard), guard);
 }
 
 function favouriteUuid(input: AddFavouriteInput): string | undefined {
@@ -189,4 +207,5 @@ export { registerRadioStationRoutes } from './routes.js';
 export * from './types.js';
 export { ensureRadioSchema } from './store.js';
 export { parseM3u, parsePls, parsePlaylist, playlistKind, resolvePlaylistUrl } from './stream.js';
+export { StationUrlBlockedError } from './guard.js';
 export type { MediaDeps } from './stream.js';

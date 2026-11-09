@@ -13,6 +13,7 @@ import type { PlaybackZone } from '../modules.js';
 import { ensureLoudnessSchema, gainInfoForTrack } from '../loudness/index.js';
 import { buildFileOptions } from './file-options.js';
 import { markStationPlayed, resolveRadioStreamUrlForTrack } from '../iradio/playback.js';
+import { StationUrlBlockedError, assertStationUrl } from '../iradio/guard.js';
 import { nowPlayingFromMetadata } from '../iradio/nowplaying.js';
 import { MpvIpc, type MpvArg, type MpvMessage } from './mpv-ipc.js';
 import { levelingLabel } from './signal-path.js';
@@ -876,10 +877,15 @@ class PcZoneImpl implements PcZone {
     if (isRadioTrack(item.track)) {
       // The queued URL may be a .pls/.m3u wrapper; resolve it before handing it
       // to mpv (mpv cannot play every playlist flavour remote servers use).
+      // A stored station whose address fails the policy throws StationUrlBlockedError (kept, not played).
       const resolved = await resolveRadioStreamUrlForTrack(this.db, this.cfg, item.track.id).catch(
-        () => undefined,
+        (err: unknown) => {
+          if (err instanceof StationUrlBlockedError) throw err;
+          return undefined;
+        },
       );
       if (resolved) path = resolved;
+      else if (path) await assertStationUrl(path);
     }
     if (!path) throw new Error(`track ${item.track.id} has no local file or stream URL`);
     const args: MpvArg[] = ['loadfile', path, flag];

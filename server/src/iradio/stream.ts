@@ -12,10 +12,39 @@ import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
 import { getStationRow, saveStreamUrl } from './store.js';
 import type { RadioStation } from './types.js';
+import { StationUrlBlockedError, assertStationUrl, guardedLookup, type StreamGuard } from './guard.js';
+
+export { StationUrlBlockedError } from './guard.js';
 
 export interface MediaDeps {
   userAgent: string;
   fetchImpl: typeof fetch;
+  /** Address policy for station URLs (strict when omitted). Tests relax it. */
+  guard?: StreamGuard;
+}
+
+const REDIRECT_CODES = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * fetch with redirects followed by hand, so every hop is vetted by the address policy before a
+ * connection is made. (The default fetchImpl also refuses blocked addresses at connect time.)
+ */
+async function fetchFollow(
+  start: string,
+  init: RequestInit,
+  deps: MediaDeps,
+): Promise<{ res: Response; url: string }> {
+  let current = start;
+  for (let hop = 0; ; hop++) {
+    const vetted = await assertStationUrl(current, deps.guard);
+    const res = await deps.fetchImpl(vetted.toString(), { ...init, redirect: 'manual' });
+    if (!REDIRECT_CODES.has(res.status)) return { res, url: res.url || vetted.toString() };
+    const location = res.headers.get('location');
+    await res.body?.cancel().catch(() => undefined);
+    if (!location) throw new Error(`upstream HTTP ${res.status} without a location`);
+    if (hop >= MAX_REDIRECTS) throw new Error('too many upstream redirects');
+    current = new URL(location, vetted).toString();
+  }
 }
 
 const TEXT_TIMEOUT_MS = 10_000;
@@ -124,14 +153,17 @@ async function fetchText(url: string, deps: MediaDeps): Promise<string | undefin
   const timer = setTimeout(() => controller.abort(), TEXT_TIMEOUT_MS);
   timer.unref?.();
   try {
-    const res = await deps.fetchImpl(url, {
-      headers: {
-        'User-Agent': deps.userAgent,
-        Accept: 'audio/x-scpls,audio/x-mpegurl,audio/mpegurl,text/plain,*/*',
+    const { res } = await fetchFollow(
+      url,
+      {
+        headers: {
+          'User-Agent': deps.userAgent,
+          Accept: 'audio/x-scpls,audio/x-mpegurl,audio/mpegurl,text/plain,*/*',
+        },
+        signal: controller.signal,
       },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
+      deps,
+    );
     if (!res.ok) return undefined;
     const length = Number(res.headers.get('content-length') ?? '');
     if (Number.isFinite(length) && length > MAX_PLAYLIST_BYTES) return undefined;
@@ -168,22 +200,32 @@ export async function openUpstream(
   signal?: AbortSignal,
 ): Promise<UpstreamStream> {
   try {
-    const res = await deps.fetchImpl(url, {
-      headers: MEDIA_HEADERS(deps.userAgent),
-      redirect: 'follow',
-      signal,
-    });
+    const { res, url: finalUrl } = await fetchFollow(
+      url,
+      { headers: MEDIA_HEADERS(deps.userAgent), signal },
+      deps,
+    );
     if (!res.ok || !res.body) throw new Error(`upstream HTTP ${res.status}`);
     return {
       status: res.status,
       headers: headersToObject(res.headers),
       body: Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
-      url: res.url || url,
+      url: finalUrl,
     };
   } catch (err) {
+    const blocked = blockedCause(err);
+    if (blocked) throw blocked;
     if (signal?.aborted) throw err;
     return openIcyUpstream(url, deps, signal);
   }
+}
+
+/** A policy refusal, possibly wrapped by undici as the cause of a failed fetch. */
+function blockedCause(err: unknown): StationUrlBlockedError | undefined {
+  for (let e: unknown = err, i = 0; e && i < 4; i++, e = (e as { cause?: unknown }).cause) {
+    if (e instanceof StationUrlBlockedError) return e;
+  }
+  return undefined;
 }
 
 function headersToObject(headers: Headers): Record<string, string> {
@@ -201,15 +243,13 @@ async function openIcyUpstream(
   depth = 0,
 ): Promise<UpstreamStream> {
   if (depth > MAX_REDIRECTS) throw new Error('too many upstream redirects');
-  const target = new URL(url);
-  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-    throw new Error(`unsupported stream protocol ${target.protocol}`);
-  }
+  const target = await assertStationUrl(url, deps.guard);
+  const lookupFn = guardedLookup(deps.guard) as net.LookupFunction;
   const secure = target.protocol === 'https:';
   const port = target.port ? Number(target.port) : secure ? 443 : 80;
   const socket = secure
-    ? tls.connect({ host: target.hostname, port, servername: target.hostname })
-    : net.connect({ host: target.hostname, port });
+    ? tls.connect({ host: target.hostname.replace(/^\[|\]$/g, ''), port, servername: target.hostname, lookup: lookupFn })
+    : net.connect({ host: target.hostname.replace(/^\[|\]$/g, ''), port, lookup: lookupFn });
   socket.setNoDelay(true);
 
   return new Promise<UpstreamStream>((resolve, reject) => {

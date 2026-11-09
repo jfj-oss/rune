@@ -132,6 +132,9 @@ async function setup(): Promise<Ctx> {
   const iradio = createIradio(db, cfg, {
     baseUrl: 'https://radio.test',
     fetchImpl: fixtures.fetchImpl,
+    // The fake stream servers are on loopback, which the real policy refuses (see iradio-guard.test.ts).
+    mediaFetch: globalThis.fetch,
+    mediaGuard: { allowPrivate: true },
     minRequestIntervalMs: 0,
   });
   const app = Fastify({ logger: false, forceCloseConnections: true });

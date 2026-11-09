@@ -493,6 +493,7 @@ describe('playlist resolution', () => {
     const resolved = await resolvePlaylistUrl('http://host/a.pls', {
       userAgent: 'test',
       fetchImpl: mediaFetch,
+      guard: { allowPrivate: true },
     });
     expect(resolved).toBe('http://host/stream');
     expect(seen).toEqual(['http://host/a.pls', 'http://host/b.m3u']);

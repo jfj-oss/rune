@@ -6,7 +6,8 @@ import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
 import { RadioBrowserApi } from './client.js';
 import { getStation } from './store.js';
-import { resolveStationStreamUrl } from './stream.js';
+import { assertStationUrl, createGuardedFetch } from './guard.js';
+import { resolveStationStreamUrl, type MediaDeps } from './stream.js';
 
 export function radioUserAgent(cfg: Config): string {
   return `${cfg.userAgent} radio-browser/1.0`;
@@ -66,22 +67,35 @@ export async function markStationPlayed(
   await markStationPlayedWith(sharedRadioClient(cfg), db, id, now);
 }
 
-/** Direct stream URL for a queued radio track (resolves playlist wrappers). */
+let defaultGuardedFetch: typeof fetch | undefined;
+
+/**
+ * Direct stream URL for a queued radio track (resolves playlist wrappers). The result is checked
+ * against the station address policy; a station that fails it throws StationUrlBlockedError so the
+ * zone reports a clear error instead of handing the URL to mpv. The station stays in the database.
+ */
 export async function resolveRadioStreamUrlForTrack(
   db: Db,
   cfg: Config,
   id: string,
+  deps: Partial<MediaDeps> = {},
 ): Promise<string | undefined> {
   const station = getStation(db, id);
   if (!station) return undefined;
+  const guard = deps.guard ?? {};
+  defaultGuardedFetch ??= createGuardedFetch();
+  let url: string;
   try {
-    return await resolveStationStreamUrl(db, station, {
+    url = await resolveStationStreamUrl(db, station, {
       userAgent: radioUserAgent(cfg),
-      fetchImpl: globalThis.fetch,
+      fetchImpl: deps.fetchImpl ?? defaultGuardedFetch,
+      guard,
     });
   } catch {
-    return station.urlResolved ?? station.url;
+    url = station.urlResolved ?? station.url;
   }
+  await assertStationUrl(url, guard);
+  return url;
 }
 
 /** Clear click de-duplication state (tests only). */
