@@ -104,12 +104,26 @@ function runFile(file: string, args: string[], opts: { cwd: string; timeoutMs: n
   });
 }
 
-/** The request came from the same origin that serves the page (or no Origin header, e.g. curl). */
+/** The connection comes from this machine (Tailscale serve proxies from 127.0.0.1; a LAN peer never does). */
+function fromLoopback(req: FastifyRequest): boolean {
+  const addr = req.socket?.remoteAddress ?? '';
+  return addr === '::1' || addr === '127.0.0.1' || /^::ffff:127\./i.test(addr) || /^127\./.test(addr);
+}
+
+/**
+ * The request came from the same origin that serves the page (or has no Origin header, e.g. curl: a browser
+ * always sends one on a POST, so this check is about cross-site pages, not about who may use the API).
+ *
+ * The page's host is the Host header, except behind the local reverse proxy (Tailscale serve): there the proxy
+ * connects from loopback and its X-Forwarded-Host names the host the browser used. A forwarded host sent by any
+ * other peer is attacker-controlled and ignored.
+ */
 export function isSameOriginRequest(req: FastifyRequest): boolean {
   const origin = req.headers.origin;
   if (!origin) return true;
   const forwarded = req.headers['x-forwarded-host'];
-  const host = String(Array.isArray(forwarded) ? forwarded[0] : (forwarded ?? req.headers.host ?? '')).split(',')[0]?.trim() ?? '';
+  const trusted = fromLoopback(req) ? (Array.isArray(forwarded) ? forwarded[0] : forwarded) : undefined;
+  const host = String(trusted ?? req.headers.host ?? '').split(',')[0]?.trim() ?? '';
   if (!host) return false;
   try {
     return new URL(origin).host === host;

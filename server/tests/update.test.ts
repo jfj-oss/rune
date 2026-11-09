@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createUpdateService, isSameOriginRequest } from '../src/update.js';
+import Fastify from 'fastify';
+import { createUpdateService, isSameOriginRequest, registerUpdateRoutes } from '../src/update.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -284,8 +285,8 @@ describe('update install', () => {
 });
 
 describe('same-origin guard', () => {
-  const req = (headers: Record<string, string | string[] | undefined>) =>
-    ({ headers } as unknown as Parameters<typeof isSameOriginRequest>[0]);
+  const req = (headers: Record<string, string | string[] | undefined>, remoteAddress = '192.168.1.50') =>
+    ({ headers, socket: { remoteAddress } } as unknown as Parameters<typeof isSameOriginRequest>[0]);
 
   it('allows requests with no Origin header', () => {
     expect(isSameOriginRequest(req({ host: 'rune.local' }))).toBe(true);
@@ -297,5 +298,61 @@ describe('same-origin guard', () => {
 
   it('blocks a foreign Origin', () => {
     expect(isSameOriginRequest(req({ origin: 'https://evil.example', host: 'rune.local' }))).toBe(false);
+  });
+
+  it('ignores a forged X-Forwarded-Host from a non-local peer', () => {
+    expect(
+      isSameOriginRequest(req({ origin: 'https://evil.example', host: 'rune.local:4545', 'x-forwarded-host': 'evil.example' })),
+    ).toBe(false);
+    expect(
+      isSameOriginRequest(
+        req({ origin: 'https://evil.example', host: 'rune.local:4545', 'x-forwarded-host': 'evil.example' }, '100.64.1.2'),
+      ),
+    ).toBe(false);
+  });
+
+  it('a real Origin that matches Host from a LAN peer still passes, forwarded header or not', () => {
+    expect(isSameOriginRequest(req({ origin: 'http://192.168.1.9:4545', host: '192.168.1.9:4545' }))).toBe(true);
+    expect(
+      isSameOriginRequest(req({ origin: 'http://192.168.1.9:4545', host: '192.168.1.9:4545', 'x-forwarded-host': 'evil.example' })),
+    ).toBe(true);
+  });
+
+  it('behind Tailscale serve (loopback peer) the forwarded host is the page host', () => {
+    const headers = {
+      origin: 'https://horse.taile1d3f4.ts.net:8445',
+      host: '127.0.0.1:4545',
+      'x-forwarded-host': 'horse.taile1d3f4.ts.net:8445',
+    };
+    for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) expect(isSameOriginRequest(req(headers, peer))).toBe(true);
+    // and a foreign page through the same proxy is still refused
+    expect(isSameOriginRequest(req({ ...headers, origin: 'https://evil.example' }, '127.0.0.1'))).toBe(false);
+  });
+
+  it('through the route: forged header from a non-loopback peer is 403, Tailscale-style request reaches the service', async () => {
+    const app = Fastify({ logger: false });
+    let installs = 0;
+    registerUpdateRoutes(app, { install: async () => (installs++, { ok: true, stage: 'restart-needed' }), status: async () => ({}) } as never);
+    await app.ready();
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/update/install',
+      remoteAddress: '192.168.1.50',
+      headers: { origin: 'https://evil.example', host: 'rune.local:4545', 'x-forwarded-host': 'evil.example' },
+    });
+    expect(forged.statusCode).toBe(403);
+    const tailscale = await app.inject({
+      method: 'POST',
+      url: '/update/install',
+      remoteAddress: '127.0.0.1',
+      headers: {
+        origin: 'https://horse.taile1d3f4.ts.net:8445',
+        host: '127.0.0.1:4545',
+        'x-forwarded-host': 'horse.taile1d3f4.ts.net:8445',
+      },
+    });
+    expect(tailscale.statusCode).toBe(200);
+    expect(installs).toBe(1);
+    await app.close();
   });
 });
