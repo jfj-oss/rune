@@ -1476,8 +1476,14 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       // Browsers report their errors here (e.g. the Spotify Web Playback SDK on the Mac)
       // so problems on other devices show up in the server log.
       const clientLog: { at: number; ua?: string; level: string; msg: string; data?: unknown }[] = [];
-      r.post<{ Body: { level?: string; msg?: string; data?: unknown } }>('/client-log', async (req) => {
-        const e = { at: Date.now(), ua: req.headers['user-agent'], level: String(req.body?.level ?? 'info').slice(0, 10), msg: String(req.body?.msg ?? '').slice(0, 500), data: req.body?.data };
+      // Small by design: 300 entries are kept in memory and each is written to the log.
+      r.post<{ Body: { level?: string; msg?: string; data?: unknown } }>('/client-log', { bodyLimit: 16 * 1024 }, async (req) => {
+        let data = req.body?.data;
+        if (data !== undefined) {
+          const text = JSON.stringify(data) ?? '';
+          if (text.length > 2000) data = `${text.slice(0, 2000)}… (truncated, ${text.length} chars)`;
+        }
+        const e = { at: Date.now(), ua: req.headers['user-agent'], level: String(req.body?.level ?? 'info').slice(0, 10), msg: String(req.body?.msg ?? '').slice(0, 500), data };
         clientLog.push(e);
         if (clientLog.length > 300) clientLog.shift();
         app.log.warn({ client: e }, 'client log');
