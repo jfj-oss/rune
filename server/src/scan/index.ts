@@ -6,7 +6,7 @@
 // unchanged files are not parsed again. Only albums whose computed state changed
 // are written and re-indexed.
 
-import { promises as fsp, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { promises as fsp, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { parseFile } from 'music-metadata';
 import type { IAudioMetadata } from 'music-metadata';
@@ -280,10 +280,43 @@ interface WalkResult {
   imagesByDir: Map<string, string[]>;
   errors: number;
   issues: ScanError[];
+  /** Per library root: did the walk read it cleanly, and how many audio files did it find. */
+  roots: Map<string, { readable: boolean; errors: number; audio: number }>;
+}
+
+/** A root is mounted when it lives on a different device than its parent directory. */
+function isMountPoint(root: string): boolean {
+  try {
+    return statSync(root).dev !== statSync(dirname(root)).dev;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Roots whose missing tracks may be deleted this scan. A root that could not be read cleanly is never
+ * purged, and neither is one that came back empty or lost most of its files while known tracks exist,
+ * unless the root is verifiably a mounted filesystem that was read without errors.
+ */
+function rootsSafeToPurge(db: Db, walked: WalkResult): Set<string> {
+  const ok = new Set<string>();
+  const count = db.prepare(
+    "SELECT count(DISTINCT path) AS n FROM tracks WHERE source = 'local' AND substr(path, 1, length(?)) = ?",
+  );
+  for (const [root, st] of walked.roots) {
+    if (!st.readable || st.errors > 0) continue;
+    const prefix = root.endsWith(sep) ? root : root + sep;
+    const known = (count.get(prefix, prefix) as { n: number }).n;
+    const emptied = known > 0 && st.audio === 0;
+    const bigDrop = known >= 10 && st.audio < known * 0.5;
+    if ((emptied || bigDrop) && !isMountPoint(root)) continue;
+    ok.add(root);
+  }
+  return ok;
 }
 
 async function walkRoots(roots: string[]): Promise<WalkResult> {
-  const result: WalkResult = { audio: [], cueByDir: new Map(), imagesByDir: new Map(), errors: 0, issues: [] };
+  const result: WalkResult = { audio: [], cueByDir: new Map(), imagesByDir: new Map(), errors: 0, issues: [], roots: new Map() };
 
   const push = (map: Map<string, string[]>, dir: string, file: string): void => {
     const list = map.get(dir);
@@ -291,11 +324,16 @@ async function walkRoots(roots: string[]): Promise<WalkResult> {
     else map.set(dir, [file]);
   };
 
+  let current = { readable: true, errors: 0, audio: 0 };
+  let currentRoot = '';
+
   async function walk(dir: string): Promise<void> {
     let entries;
     try {
       entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch {
+      current.errors++;
+      if (dir === currentRoot) current.readable = false;
       result.errors++;
       result.issues.push({ path: dir, reason: 'folder could not be read' });
       return;
@@ -309,13 +347,21 @@ async function walkRoots(roots: string[]): Promise<WalkResult> {
       }
       if (!entry.isFile()) continue;
       const ext = extname(entry.name).toLowerCase();
-      if (AUDIO_EXTENSIONS.has(ext)) result.audio.push(path);
+      if (AUDIO_EXTENSIONS.has(ext)) {
+        result.audio.push(path);
+        current.audio++;
+      }
       else if (ext === '.cue') push(result.cueByDir, dir, path);
       else if (IMAGE_EXTENSIONS.has(ext)) push(result.imagesByDir, dir, path);
     }
   }
 
-  for (const root of roots) await walk(root);
+  for (const root of roots) {
+    currentRoot = root;
+    current = { readable: true, errors: 0, audio: 0 };
+    await walk(root);
+    result.roots.set(root, current);
+  }
   return result;
 }
 
@@ -1559,6 +1605,12 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
       errors += walked.errors;
       issues.push(...walked.issues);
       const seenPaths = new Set(walked.audio);
+      const purgeable = rootsSafeToPurge(db, walked);
+      for (const root of walked.roots.keys()) {
+        if (!purgeable.has(root)) {
+          issues.push({ path: root, reason: 'library folder looks unavailable or emptied; its tracks were kept' });
+        }
+      }
 
       // ---- 2. parse audio (concurrent, cached by mtime+size)
       type CacheRow = { path: string; mtime: number; size: number; meta: string };
@@ -1762,11 +1814,21 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
 
       const vanishedFiles = cacheRows.filter((r) => !seenPaths.has(r.path)).length;
 
+      // Never delete anything under a root we cannot vouch for (see rootsSafeToPurge).
+      const protectedRoots = [...walked.roots.keys()].filter((r) => !purgeable.has(r));
+      db.exec('CREATE TEMP TABLE IF NOT EXISTS scan_protected_roots (root TEXT PRIMARY KEY)');
+      db.exec('DELETE FROM scan_protected_roots');
+      const insertProtected = db.prepare('INSERT OR IGNORE INTO scan_protected_roots (root) VALUES (?)');
+      for (const r of protectedRoots) insertProtected.run(r.endsWith(sep) ? r : r + sep);
+      const underProtected = (col: string): string =>
+        `EXISTS (SELECT 1 FROM scan_protected_roots pr WHERE substr(${col}, 1, length(pr.root)) = pr.root)`;
+
       const deletedTracks =
         removedTracks +
         db
           .prepare(
-            "DELETE FROM tracks WHERE source = 'local' AND id NOT IN (SELECT id FROM scan_expected_tracks)",
+            `DELETE FROM tracks WHERE source = 'local' AND id NOT IN (SELECT id FROM scan_expected_tracks)
+             AND NOT (path IS NOT NULL AND ${underProtected('path')})`,
           )
           .run().changes;
       const deletedAlbums = db
@@ -1787,7 +1849,10 @@ export function createScanner(db: Db, cfg: Config): ScannerWithStats {
         for (const path of paths) insertSeen.run(path);
       });
       insertSeenAll(seenPaths);
-      db.exec('DELETE FROM scan_files WHERE path NOT IN (SELECT path FROM scan_seen_paths)');
+      db.exec(
+        `DELETE FROM scan_files WHERE path NOT IN (SELECT path FROM scan_seen_paths)
+         AND NOT ${underProtected('path')}`,
+      );
 
       // Keep the cache in sync for new/changed files (unchanged rows are already there).
       const upsertCache = db.prepare(
