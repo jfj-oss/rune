@@ -37,7 +37,7 @@ let devices: () => ReturnType<typeof jsonResponse> = () => jsonResponse(200, { d
 
 /** The device list is cached for 5 s: step past that before each read. */
 const zones = async () => {
-  clock += 6_000;
+  clock += 121_000;
   const res = await app.inject({ method: 'GET', url: '/api/zones' });
   expect(res.statusCode).toBe(200);
   return (res.json() as { id: string; spotifyDeviceId?: string; spotifyDeviceName?: string }[]).find((z) => z.id === 'pc')!;
@@ -90,7 +90,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
       });
     };
 
-    clock += 6_000; // the previous test's device list is still cached
+    clock += 121_000; // the previous test's device list is still cached
     const first = await app.inject({ method: 'GET', url: '/api/zones' });
     expect(first.statusCode).toBe(200);
     const phone = (first.json() as { id: string; deviceType?: string; isActive?: boolean; isRestricted?: boolean }[])
@@ -98,7 +98,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
     expect(phone).toMatchObject({ deviceType: 'Smartphone', isActive: false, isRestricted: false });
     expect(calls).toBe(1);
 
-    clock += 2_000; // inside the 5 s cache, outside the 1.5 s fresh window
+    clock += 2_000; // inside the 2-minute cache, outside the 1.5 s fresh window
     await app.inject({ method: 'GET', url: '/api/zones' });
     expect(calls).toBe(1); // an ordinary read keeps the cache
     await app.inject({ method: 'GET', url: '/api/zones?refresh=1' });

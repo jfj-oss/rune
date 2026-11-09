@@ -161,13 +161,13 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
         throw err;
       }
     },
-    // User-facing reads are allowed at every level but 'out': then serve what the DB has.
-    searchCatalog: (q) =>
-      api.budgetLevel() === 'out' ? Promise.resolve({ albums: [], artists: [], tracks: [] }) : catalog.search(q),
+    // What a person asks for is a handful of requests, and the budget exists to stop background polling, so a search or an
+    // artist page is still served when the budget is used up. Only a real 429 (the breaker in SpotifyApi) stops them.
+    searchCatalog: (q) => catalog.search(q),
     fetchAlbum: (albumId) =>
       api.budgetLevel() === 'out' ? Promise.resolve(getAlbum(db, albumId)) : fetchSpotifyAlbum(api, db, albumId, { now }),
-    artistPage: (artistId) => (api.budgetLevel() === 'out' ? null : artistPages.get(artistId)),
-    artistImage: (artistId) => (api.budgetLevel() === 'out' ? Promise.resolve(null) : artistPages.image(artistId)),
+    artistPage: (artistId) => artistPages.get(artistId),
+    artistImage: (artistId) => artistPages.image(artistId),
     setAlbumSaved: async (albumId, saved) => {
       if (saved && !getAlbum(db, albumId)) {
         await fetchSpotifyAlbum(api, db, albumId, { now });

@@ -140,12 +140,12 @@ describe('a linked local artist page', () => {
     });
   });
 
-  it('skips Spotify at low budget', async () => {
+  it('still asks Spotify at low budget: someone opened this page', async () => {
     await start(90, 100);
     answer = good;
     const { status, body } = await page('ar:l1');
     expect(status).toBe(200);
     expect(body.name).toBe('Local Band');
-    expect(spotifyCalls()).toBe(0);
+    expect(spotifyCalls()).toBeGreaterThan(0);
   });
 });

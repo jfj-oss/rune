@@ -1236,12 +1236,16 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         const a = getArtist(db, req.params.id);
         // Spotify artists (search results, playlist artists) and local artists linked to one: add the Spotify
         // discography. A local artist only uses it under the same name, in case the stored link is wrong.
-        const linked = spotify && a ? (db.prepare('SELECT spotify_id AS id FROM artists WHERE id = ?').get(req.params.id) as { id: string | null } | undefined)?.id : null;
+        // A second local entry for the same artist (a different spelling source) may not carry the link: use its twin's.
+        const linked = spotify && a
+          ? ((db.prepare('SELECT spotify_id AS id FROM artists WHERE id = ?').get(req.params.id) as { id: string | null } | undefined)?.id
+            ?? (db.prepare('SELECT spotify_id AS id FROM artists WHERE name = ? COLLATE NOCASE AND spotify_id IS NOT NULL LIMIT 1').get(a.name) as { id: string } | undefined)?.id
+            ?? null)
+          : null;
         // A linked local artist has a page without Spotify, so Spotify may add to it but never hold it up.
         const hasLocalPage = !!(linked && a);
         if (hasLocalPage) {
-          const level = spotify!.api.budgetLevel();
-          if (level === 'low' || level === 'out' || (artistFailedUntil.get(linked!) ?? 0) > Date.now()) return a;
+          if ((artistFailedUntil.get(linked!) ?? 0) > Date.now()) return a;
         }
         try {
           if (spotify && (await spotify.auth.status()).connected) {

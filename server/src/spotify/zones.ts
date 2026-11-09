@@ -1427,7 +1427,9 @@ export function createSpotifyZones(api: SpotifyZoneApi, opts: ConnectZoneOptions
 /** How long one /me/player (or /me/player/queue) answer is reused by all zones. */
 const SHARED_READ_MS = 800;
 /** The device list changes rarely; GET /zones can afford a 5 s cache. */
-const DEVICES_READ_MS = 5000;
+const DEVICES_READ_MS = 120_000;
+/** A fresh read (the picker opening) when the budget is tight: still current, but no more often than this. */
+const DEVICES_FRESH_LOW_MS = 5000;
 /** A picker opening asks for a fresh list, but not more than once in this window (a request each time is waste). */
 const DEVICES_FRESH_MS = 1500;
 
@@ -1546,7 +1548,7 @@ export function sharedPlaybackReads(
       // A fresh read is a user-facing action (the picker opened), but at a low or used-up budget the cached list is
       // good enough: an extra request there costs more than a few seconds of staleness.
       const level = budgetLevel?.() ?? 'normal';
-      const ttl = fresh && level !== 'low' && level !== 'out' ? DEVICES_FRESH_MS : DEVICES_READ_MS;
+      const ttl = !fresh ? DEVICES_READ_MS : level === 'low' || level === 'out' ? DEVICES_FRESH_LOW_MS : DEVICES_FRESH_MS;
       return read(
         devices,
         (s) => (devices = s),
