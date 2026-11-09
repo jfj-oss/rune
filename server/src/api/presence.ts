@@ -14,6 +14,8 @@ export interface ClientPresence {
   setViewing(client: object, zones: string[]): string[];
   /** Some visible client views this zone. */
   viewing(zone: string): boolean;
+  /** Some visible client has explicitly said it views this zone (a client that never says does not count). */
+  declared(zone: string): boolean;
 }
 
 /** At most this many zones per client are kept: a page shows one zone and drives one or two more. */
@@ -46,6 +48,12 @@ export function createClientPresence(): ClientPresence {
       views.set(client, now);
       // A client that never said viewed everything already.
       return before ? [...now].filter((z) => !before.has(z)) : [];
+    },
+    declared(zone) {
+      for (const [client, v] of visible) {
+        if (v && views.get(client)?.has(zone)) return true;
+      }
+      return false;
     },
     viewing(zone) {
       for (const [client, v] of visible) {

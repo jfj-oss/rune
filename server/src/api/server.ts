@@ -115,6 +115,8 @@ export interface BuiltApp {
   close: () => Promise<void>;
   /** Graceful SIGINT/SIGTERM teardown: watcher, in-flight work, WAL checkpoint, modules, Db. */
   shutdown: (reason?: string) => Promise<ShutdownResult>;
+  /** The Connect zones with a polling subscription (tests). */
+  watchedSpotifyZones: () => string[];
 }
 
 /** The local (library-only) half of GET /search, as returned by the cache. */
@@ -601,14 +603,22 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     return z;
   }
 
-  /** After a (re)start nothing would watch the Spotify devices until a page asked: watch them all now. */
+  /**
+   * Which Connect devices get a subscription (and so a polling loop): the PC's own Spotify app, the account's
+   * active device and any zone a tab has said it views. Every other device is only listed; the picker's
+   * on-demand fresh read of the device list gives it all it needs, and a command or a tab viewing it starts watching.
+   */
+  const worthWatching = (z: { id: Zone; isActive?: boolean }): boolean =>
+    z.id === pcSpotifyDevice?.id || z.isActive === true || presence.declared(z.id);
+
+  /** After a (re)start nothing would watch the Spotify devices until a page asked: watch the ones that matter now. */
   async function watchAllSpotifyZones(): Promise<void> {
     if (!spotify) return;
     try {
       if (!(await spotify.auth.status()).connected) return;
       const list = await spotify.zones.listZones();
       notePcSpotify(list);
-      for (const z of list) watchSpotifyZone(z.id);
+      for (const z of list) if (worthWatching(z)) watchSpotifyZone(z.id);
     } catch (err) {
       app.log.warn({ err }, 'watching spotify devices failed');
     }
@@ -961,7 +971,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           } else if (m.type === 'viewing') {
             if (!Array.isArray(m.zones) || !m.zones.every((z) => typeof z === 'string' && z.length <= 200)) return;
             // A zone a tab starts showing is read now, not at its next (possibly far-off) poll.
-            for (const z of presence.setViewing(socket, m.zones as string[])) spotify?.zones.get(z)?.wake();
+            const started = presence.setViewing(socket, m.zones as string[]);
+            // A tab showing a Connect device makes it worth a subscription (the list may not have been read since a restart).
+            for (const z of m.zones as string[]) if (z.startsWith('spotify:')) watchSpotifyZone(z);
+            for (const z of started) spotify?.zones.get(z)?.wake();
           } else if (m.type === 'sdk-state') {
             spotify?.reportLocalPlayback(msg);
           }
@@ -1377,7 +1390,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           try {
             const spotifyZones = await spotify.zones.listZones({ fresh });
             notePcSpotify(spotifyZones);
-            for (const z of spotifyZones) watchSpotifyZone(z.id);
+            for (const z of spotifyZones) if (worthWatching(z)) watchSpotifyZone(z.id);
             zones.push(...spotifyZones);
           } catch (e) {
             app.log.warn({ err: e }, 'spotify devices failed');
@@ -1630,7 +1643,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     logger: app.log,
   });
 
-  return { app, close, shutdown };
+  return { app, close, shutdown, watchedSpotifyZones: () => [...spotifyListeners.keys()] };
 }
 
 /** Player states carry Track objects; never leak file paths. */
