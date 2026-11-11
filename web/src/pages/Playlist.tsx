@@ -13,6 +13,7 @@ import { Dialog } from '../components/Dialog';
 import { Eq } from '../components/Eq';
 import { InlineText } from '../components/InlineText';
 import { MobileBack } from '../components/MobileBack';
+import { PinMenuItem } from '../components/Pin';
 import { MenuItem, Popover } from '../components/Popover';
 import { isChosenImage, PlaylistCover } from '../components/PlaylistCover';
 import { Empty } from '../components/Rows';
@@ -21,9 +22,10 @@ import { useScrollRoot } from '../hooks/scrollRoot';
 import { usePlaylistActions } from '../hooks/usePlaylistEdit';
 import { isLiked, playlistItem, playlistItems, playlistUri, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, formatDuration, formatTotalLength, plural } from '../lib/format';
-import { LIKED_PLAYLIST_ID, hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, isSpotifyEditable, orderPlaylist, rowEditable, rowRemovable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
+import { LIKED_PLAYLIST_ID, hasOverlay, isEditable, isMixed, isOverlayRow, isRunePlaylist, isSmartPlaylist, isSpotifyEditable, missingWriteScope, orderPlaylist, rowEditable, rowRemovable, selectRow, type RunePlaylistDetail } from '../lib/playlists';
 import { currentItem, usePlayer } from '../store/player';
 import { usePlaylistUi } from '../store/playlistUi';
+import { useSpotify } from '../store/spotify';
 
 export default function PlaylistPage() {
   const id = decodeURIComponent(useParams().id ?? '');
@@ -64,6 +66,9 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
   const bgSrc = d.imageUrl ?? (d.tracks[0] ? coverSrc(d.tracks[0].album, 200) : undefined);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const art = isChosenImage(d.imageUrl) ? null : genArtFor(d.id);
+  // The login may predate the permission a removal needs: say so up front and offer the reconnect.
+  const scopes = useSpotify((s) => s.scopes);
+  const scopeMissing = spotifyEditable && missingWriteScope(scopes, d.id) !== null;
 
   // F = shuffle-play this playlist (not while typing or while a hotkey button is listening)
   const playRef = useRef(play);
@@ -131,11 +136,11 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                 <>
                   <span className="badge badge--spotify"><i className="badge__dot" />From Spotify</span>
                   {spotifyEditable ? (
-                    <span className="badge" title={liked ? 'Removing a song here unlikes it on Spotify.' : 'This playlist is yours (or collaborative), so rune can remove songs from it on Spotify.'}>
-                      <Check size={11} /> {liked ? 'Unlike to remove' : 'You can edit this playlist'}
+                    <span className="badge" title={liked ? 'Removing a song here unlikes it on Spotify, after you confirm.' : 'This playlist is yours (or collaborative): rune can remove its songs on Spotify, after you confirm.'}>
+                      <Check size={11} /> {liked ? 'Removing here unlikes on Spotify' : 'Removable on Spotify'}
                     </span>
                   ) : (
-                    <span className="badge" title="Spotify’s own tracks can only be changed in Spotify. Local files you add here are kept in rune."><Lock size={11} /> Spotify rows locked</span>
+                    <span className="badge" title="Not your playlist and not collaborative, so Spotify does not let rune remove its songs. Local files you add here are kept in rune."><Lock size={11} /> Spotify rows locked · not yours</span>
                   )}
                 </>
               )}
@@ -149,7 +154,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                   {order === 'added' ? <><ArrowDownWideNarrow size={16} /> Newest first</> : <><ListOrdered size={16} /> Playlist order</>}
                 </button>
               )}
-              {!rune && <button className="btn" onClick={() => void duplicate()}><Copy size={16} /> Duplicate as rune playlist</button>}
+              {!rune && <button className="btn" onClick={() => void duplicate()} title="Duplicate as rune playlist"><Copy size={16} /><span>Duplicate<span className="phone-hide"> as rune playlist</span></span></button>}
               <PlaylistHotkey id={d.id} name={d.name} />
               <Popover
                 placement="bottom-start"
@@ -158,6 +163,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                 {(close) => (
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void usePlayer.getState().enqueueItems(items, true); }}>Play next</MenuItem>
+                    <PinMenuItem id={d.id} pinned={d.pinned} close={close} />
                     {rune && <MenuItem icon={<Copy size={16} />} onClick={() => { close(); void duplicate(); }}>Duplicate</MenuItem>}
                     {isChosenImage(d.imageUrl) && <MenuItem icon={<ImageOff size={16} />} onClick={() => { close(); void actions.clearImage(d.id); }}>Remove picture</MenuItem>}
                     <MenuItem icon={<Download size={16} />} onClick={() => { close(); void actions.exportM3u8(d.id, d.name); }}>Export .m3u8</MenuItem>
@@ -167,13 +173,15 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
               </Popover>
             </div>
             {!rune && (spotifyEditable ? (
-              liked ? (
-                <p className="ahero__note"><Check size={12} /> Liked Songs mirrors your Spotify likes. Removing a song here unlikes it on Spotify.</p>
+              scopeMissing ? (
+                <p className="ahero__note ahero__note--warn"><Lock size={12} /> <span>Your Spotify login predates the permission rune needs to {liked ? 'unlike songs' : 'remove songs from your Spotify playlists'}. <a className="link" href="/api/spotify/login">Reconnect Spotify</a> once and removing works here.</span></p>
+              ) : liked ? (
+                <p className="ahero__note"><Check size={12} /> Liked Songs mirrors your Spotify likes. Removing a song here (after a confirmation) unlikes it on Spotify.</p>
               ) : (
-                <p className="ahero__note"><Check size={12} /> You can edit this Spotify playlist, so removing a song removes it on Spotify too — every copy of it. Local files you add stay in rune and never go to Spotify.</p>
+                <p className="ahero__note"><Check size={12} /> You can edit this Spotify playlist, so removing a song (after a confirmation) removes it on Spotify too — every copy of it. Local files you add stay in rune and never go to Spotify.</p>
               )
             ) : (
-              <p className="ahero__note"><Lock size={12} /> Synced from Spotify, so its Spotify tracks stay locked. Add local files with “Add to playlist” — they stay in rune, never go to Spotify, and can be moved or removed. “Duplicate as rune playlist” makes a copy where everything is editable.</p>
+              <p className="ahero__note"><Lock size={12} /> Synced from Spotify and not yours, so its Spotify tracks stay locked. Add local files with “Add to playlist” — they stay in rune, never go to Spotify, and can be moved or removed. “Duplicate as rune playlist” makes a copy where everything is editable.</p>
             ))}
           </div>
         </div>
@@ -186,7 +194,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
               {!smart && <><br /><br /><Link className="btn" to="/albums">Browse albums</Link></>}
             </Empty>
           ) : <Empty title="No tracks yet">This playlist is empty, or hasn’t finished syncing.</Empty>
-        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d) || spotifyEditable} mixed={mixed} origIndex={origIndex} reorder={!sorted} />}
+        ) : <PlaylistTracks d={d} items={items} editable={editable || hasOverlay(d) || spotifyEditable} mixed={mixed} origIndex={origIndex} reorder={!sorted} scopeMissing={scopeMissing} />}
       </div>
       {confirmDelete && (
         <Dialog
@@ -215,7 +223,7 @@ function SourceBadge({ source, format }: { source: string; format?: string }) {
     : <span className="srcbadge" title="Local file">{format ? format.toUpperCase() : 'Local'}</span>;
 }
 
-function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: RunePlaylistDetail; items: ReturnType<typeof playlistItems>; editable: boolean; mixed: boolean; origIndex: number[]; reorder: boolean }) {
+function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder, scopeMissing }: { d: RunePlaylistDetail; items: ReturnType<typeof playlistItems>; editable: boolean; mixed: boolean; origIndex: number[]; reorder: boolean; /** The Spotify login lacks the permission a removal here needs. */ scopeMissing?: boolean }) {
   /** Shown row -> position in the playlist (rows are shown newest-first unless "Playlist order"). */
   const pos = (i: number) => origIndex[i] ?? i;
   const root = useScrollRoot();
@@ -241,12 +249,22 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
     setSel(r.sel);
     setAnchor(r.anchor);
   };
+  // Removing a Spotify row changes the playlist on Spotify (or unlikes): always ask first. rune's own rows go at once.
+  const [confirm, setConfirm] = useState<{ positions: number[]; title: string | null } | null>(null);
+  // `rows` are shown indexes (d is the shown order); the playlist positions the server takes come from pos().
+  const requestRemove = useCallback((rows: number[], title: string | null) => {
+    const positions = rows.map(pos).sort((a, b) => a - b);
+    const spotifyRows = !isRunePlaylist(d.id) && rows.some((i) => { const t = d.tracks[i]; return !!t && !isOverlayRow(d.id, t); });
+    if (spotifyRows) setConfirm({ positions, title });
+    else void actions.removeAt(d.id, positions);
+  }, [d, actions, origIndex]); // eslint-disable-line react-hooks/exhaustive-deps
   const removeSelected = useCallback(() => {
     if (!sel.size) return;
-    const positions = [...sel].map(pos).sort((a, b) => a - b);
+    const rows = [...sel].sort((a, b) => a - b);
+    const one = rows.length === 1 ? d.tracks[rows[0]!] : undefined;
     clearSel();
-    void actions.removeAt(d.id, positions);
-  }, [sel, clearSel, actions, d.id, origIndex]);
+    requestRemove(rows, one?.title ?? null);
+  }, [sel, clearSel, requestRemove, d]);
 
   useEffect(() => {
     if (!editable) return;
@@ -438,7 +456,8 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
                   <TrackMenuItems
                     item={item}
                     close={close}
-                    extra={editable && removable ? <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); void actions.removeAt(d.id, [pos(i)]); }}>{liked ? 'Remove from Liked Songs' : 'Remove from playlist'}</MenuItem> : undefined}
+                    extra={editable && removable ? <MenuItem icon={<Trash2 size={16} />} danger onClick={() => { close(); requestRemove([i], t.title); }}>{liked ? 'Remove from Liked Songs' : spotifyList && !overlay ? 'Remove from this playlist' : 'Remove from playlist'}</MenuItem> : undefined}
+                    hideLiked={liked}
                   />
                 )}
               </Popover>
@@ -446,6 +465,51 @@ function PlaylistTracks({ d, items, editable, mixed, origIndex, reorder }: { d: 
           );
         })}
       </div>
+      {confirm && (
+        <RemoveConfirm
+          playlistName={liked ? 'Liked Songs' : d.name}
+          liked={liked}
+          count={confirm.positions.length}
+          title={confirm.title}
+          scopeMissing={scopeMissing === true}
+          onClose={() => setConfirm(null)}
+          onConfirm={() => { const c = confirm; setConfirm(null); void actions.removeAt(d.id, c.positions); }}
+        />
+      )}
     </div>
+  );
+}
+
+/** "Remove ‘X’ from <playlist> on Spotify?" — or, when the login lacks the permission, the reconnect instead. */
+function RemoveConfirm({ playlistName, liked, count, title, scopeMissing, onClose, onConfirm }: {
+  playlistName: string; liked: boolean; count: number; title: string | null; scopeMissing: boolean; onClose(): void; onConfirm(): void;
+}) {
+  const what = count === 1 && title ? `“${title}”` : plural(count, 'song');
+  return (
+    <Dialog
+      title={liked ? 'Remove from Liked Songs?' : 'Remove from this playlist?'}
+      onClose={onClose}
+      className="dialog--sheet"
+      footer={scopeMissing ? (
+        <>
+          <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
+          <a className="btn btn--primary" href="/api/spotify/login">Reconnect Spotify</a>
+        </>
+      ) : (
+        <>
+          <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn--danger" autoFocus onClick={onConfirm}><Trash2 size={15} /> Remove</button>
+        </>
+      )}
+    >
+      {scopeMissing ? (
+        <p className="dialog__lead">Your Spotify login predates the permission rune needs to {liked ? 'unlike songs' : 'remove songs from your Spotify playlists'}. Reconnect Spotify once (it takes a few seconds) and try again.</p>
+      ) : (
+        <>
+          <p className="dialog__lead">Remove {what} from {liked ? 'Liked Songs' : `“${playlistName}”`} on Spotify?</p>
+          <p className="dialog__note">{liked ? 'This unlikes it on Spotify itself, so every device sees the change.' : 'Spotify removes every copy of a song from the playlist, on every device.'}</p>
+        </>
+      )}
+    </Dialog>
   );
 }
