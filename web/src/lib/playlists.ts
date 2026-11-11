@@ -73,6 +73,24 @@ export function removalPositions(d: RunePlaylistDetail, positions: number[]): nu
 
 export const SPOTIFY_ADD_NOTE = 'Nothing to add';
 
+/** The Spotify permission a removal on this playlist needs (Liked Songs = unlike, else a playlist edit). */
+export const LIKED_WRITE_SCOPE = 'user-library-modify';
+export const PLAYLIST_WRITE_SCOPES = ['playlist-modify-private', 'playlist-modify-public'];
+/**
+ * Which permission the current login lacks for removing songs here, or null when it may. `scopes` is what
+ * GET /spotify/status reports (names only); an older server sends none, and then nothing is assumed missing.
+ */
+export function missingWriteScope(scopes: readonly string[] | null | undefined, playlistId: string): string | null {
+  if (!scopes || isRunePlaylist(playlistId)) return null;
+  if (playlistId === LIKED_PLAYLIST_ID) return scopes.includes(LIKED_WRITE_SCOPE) ? null : LIKED_WRITE_SCOPE;
+  return PLAYLIST_WRITE_SCOPES.some((s) => scopes.includes(s)) ? null : PLAYLIST_WRITE_SCOPES[0]!;
+}
+
+/** Pinned items first, otherwise the given order (stable). */
+export function pinnedFirst<T extends { pinned?: boolean }>(list: readonly T[]): T[] {
+  return [...list.filter((x) => x.pinned === true), ...list.filter((x) => x.pinned !== true)];
+}
+
 // ---------- smart rules (mirror of server/src/myplaylists/rules.ts) ----------
 export type SmartField = 'genre' | 'artist' | 'year' | 'format' | 'added' | 'plays' | 'lastPlayed' | 'source';
 export interface SmartRule { field: SmartField; op: string; value?: unknown }

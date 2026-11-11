@@ -43,6 +43,7 @@ import { registerJsonCompression } from './compress.js';
 import { registerCors } from './cors.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
+import { registerPinRoutes } from './pins.js';
 import { registerLikedRoutes } from './liked.js';
 import { removeSpotifyPlaylistTracks } from './spotifyPlaylistWrite.js';
 import { registerFrameRoutes } from './frame.js';
@@ -1094,6 +1095,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           label: queryValue(q.label),
           year: year ? Number(year) : undefined,
           artistId: queryValue(q.artist),
+          pinnedFirst: true,
         };
         return listAlbums(db, query);
       });
@@ -1175,6 +1177,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       });
       registerBrowseRoutes(r, db);
       registerSavedRoute(r, db);
+      registerPinRoutes(r, db, { onChange: () => broadcast({ type: 'library-changed' }) });
       registerLikedRoutes(r, db, spotify ? {
         api: spotify.api,
         connected: async () => (await spotify.auth.status()).connected,

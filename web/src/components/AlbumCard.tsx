@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { encId } from '../lib/format';
 import { usePlay } from '../hooks/usePlay';
 import { Cover } from './Cover';
+import { PinMark } from './Pin';
 
 export function FormatBadge({ format, source }: { format?: string; source: string }) {
   const spotify = source === 'spotify';
@@ -26,6 +27,7 @@ export function AlbumCard({ album, width, eager }: { album: AlbumSummary; width?
           <Cover album={album} sizes={`${width ?? 180}px`} eager={eager} />
         </Link>
         <span className="card__badge"><FormatBadge format={album.format} source={album.source} /></span>
+        {album.pinned && <PinMark className="card__pin" />}
         <button className="card__play" aria-label={`Play ${album.title}`} onClick={() => void playAlbum(album.id)}>
           <Play size={18} fill="currentColor" />
         </button>

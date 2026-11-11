@@ -178,7 +178,7 @@ export const api = {
   },
   // ---------- Spotify ----------
   /** `restingUntil`: epoch ms until which Spotify refuses rune's requests (its daily limit), null when it answers. */
-  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string }; restingUntil?: number | null }> {
+  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string }; restingUntil?: number | null; scopes?: string[] }> {
     if (isMock) return (await mock()).mockApi.spotifyStatus();
     try {
       return await http('/spotify/status');
@@ -208,6 +208,11 @@ export const api = {
     await http(`/albums/${encodeURIComponent(id)}/save`, { method: saved ? 'POST' : 'DELETE' });
   },
   /** Is this Spotify track in Liked Songs? Answered from the server's synced copy (no Spotify call). */
+  /** Pin / unpin an album or playlist to the top of its Library list (rune's own pins table). */
+  async setPinned(id: string, pinned: boolean): Promise<void> {
+    if (isMock) return (await mock()).mockApi.setPinned(id, pinned);
+    await http(`/pins/${encodeURIComponent(id)}`, { method: pinned ? 'PUT' : 'DELETE' });
+  },
   async trackLiked(id: string): Promise<boolean> {
     if (isMock) return (await mock()).mockApi.trackLiked(id);
     const res = await http<{ liked: Record<string, boolean> }>(`/tracks/liked${qs({ ids: id })}`);

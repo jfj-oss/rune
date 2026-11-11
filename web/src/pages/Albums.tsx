@@ -8,6 +8,7 @@ import { api } from '../api';
 import { browseApi } from '../browseApi';
 import { AlbumCard, CardSkeleton, FormatBadge } from '../components/AlbumCard';
 import { Cover } from '../components/Cover';
+import { PinMark } from '../components/Pin';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty } from '../components/Rows';
 import { useScrollRoot } from '../hooks/scrollRoot';
@@ -287,7 +288,7 @@ function ListRow({ album }: { album: AlbumSummary }) {
     <div className="lrow">
       <Link to={`/album/${encId(album.id)}`} className="lrow__art" tabIndex={-1}><Cover album={album} sizes="44px" /></Link>
       <div className="lrow__main">
-        <Link to={`/album/${encId(album.id)}`} className="lrow__title">{album.title}</Link>
+        <Link to={`/album/${encId(album.id)}`} className="lrow__title">{album.pinned && <PinMark className="lrow__pin" />}{album.title}</Link>
         <Link to={`/artist/${encId(album.artist.id)}`} className="link lrow__artist">{album.artist.name}</Link>
       </div>
       {album.year ? <Link to={`/albums?year=${album.year}`} className="link lrow__year">{album.year}</Link> : <span />}

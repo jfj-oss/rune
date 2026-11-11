@@ -16,6 +16,8 @@ export interface PlaylistSummary {
    * playlists, whose editability is implied by their kind.
    */
   canEdit?: boolean;
+  /** Pinned to the top of its Library section (rune's own pins table). */
+  pinned?: boolean;
 }
 
 /** A playlist track plus the album bits needed to render its row / cover. */
