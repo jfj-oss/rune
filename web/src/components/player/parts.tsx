@@ -235,9 +235,12 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
 export function zoneHint(z: ZoneInfo, mixed: boolean): string | null {
   if (z.kind === 'spotify') return spotifyDeviceHint(z);
   if (z.kind !== 'pc') return null;
-  if (z.serverQueue) return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)` : 'Local + Spotify (rune starts the Spotify app)';
-  if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)`;
-  return 'Local files · open the Spotify app on the PC for Spotify';
+  // Why the Spotify app stands in for Soloist, without the "using the Spotify app" half the line itself says.
+  const why = z.spotifyNotice ? ` · ${z.spotifyNotice.replace(/ — using the Spotify app$/, '')}` : '';
+  if (z.spotifyEngine === 'soloist') return mixed && !z.serverQueue ? 'Local + Spotify (via Soloist, no app) · keep a rune tab open' : 'Local + Spotify (via Soloist, no app)';
+  if (z.serverQueue) return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)${why}` : `Local + Spotify (rune starts the Spotify app)${why}`;
+  if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open${why}` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)${why}`;
+  return `Local files · open the Spotify app on the PC for Spotify${why}`;
 }
 
 function ZoneList({ close }: { close(): void }) {

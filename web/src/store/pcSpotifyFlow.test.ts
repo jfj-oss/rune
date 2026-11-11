@@ -64,7 +64,18 @@ interface Harness {
   startCalls: () => number;
   /** /zones reads made after the start request (the poll budget). */
   readsAfterStart: () => number;
+  /** Every /zones read. */
+  zoneReads: () => number;
   playerPosts: () => PlayerPost[];
+  /** POST /api/soloist/output bodies, in order. */
+  soloistOutputs: () => string[];
+}
+
+interface SetupExtra {
+  /** Extra fields of the pc zone entry (the Soloist engine, a fallback notice). */
+  pc?: Record<string, unknown>;
+  /** Further zones the server lists. */
+  zones?: Record<string, unknown>[];
 }
 
 /** Fresh store + fake fetch. `deviceAfterReads` = first poll on which the pc device exists (null = never). */
@@ -72,6 +83,7 @@ async function setup(
   deviceAfterReads: number | null,
   pcState?: Partial<PlayerState>,
   deviceModes?: DeviceModes,
+  extra: SetupExtra = {},
 ): Promise<Harness> {
   vi.resetModules();
   vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:4545' });
@@ -79,15 +91,18 @@ async function setup(
 
   let startCalls = 0;
   let readsAfterStart = 0;
+  let zoneReads = 0;
   const playerPosts: PlayerPost[] = [];
+  const soloistOutputs: string[] = [];
   // A Spotify Connect device's own state. A command changes it, as Spotify would; /me/player echoes it.
   const modes: DeviceModes = { ...(deviceModes ?? { shuffle: false, repeat: 'off' }) };
 
   const zones = () => {
     const ready = startCalls > 0 && deviceAfterReads !== null && readsAfterStart >= deviceAfterReads;
     return [
-      { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(ready ? { spotifyDeviceId: 'dev', spotifyDeviceName: 'HORSE' } : {}) },
+      { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(ready ? { spotifyDeviceId: 'dev', spotifyDeviceName: 'HORSE' } : {}), ...(extra.pc ?? {}) },
       ...(deviceModes ? [{ id: 'spotify:dev', name: 'HORSE', kind: 'spotify' }] : []),
+      ...(extra.zones ?? []),
       { id: 'browser', name: 'This computer', kind: 'browser' },
     ];
   };
@@ -97,8 +112,14 @@ async function setup(
     const method = init?.method ?? 'GET';
 
     if (url === '/api/zones') {
+      zoneReads++;
       if (startCalls > 0) readsAfterStart++;
       return json(zones());
+    }
+    if (url === '/api/soloist/output') {
+      const body = JSON.parse(String(init?.body)) as { output: string };
+      soloistOutputs.push(body.output);
+      return json({ output: body.output, problem: null });
     }
     if (url === '/api/spotify/status') return json({ connected: false });
     if (url === '/api/pc/spotify/start') {
@@ -139,7 +160,9 @@ async function setup(
     useUi,
     startCalls: () => startCalls,
     readsAfterStart: () => readsAfterStart,
+    zoneReads: () => zoneReads,
     playerPosts: () => playerPosts,
+    soloistOutputs: () => soloistOutputs,
   };
 }
 
@@ -247,5 +270,61 @@ describe('Spotify on the PC speakers', () => {
     expect(after.zone).toBe('pc');
     expect(after.state.status).toBe('stopped');
     expect(after.zones.find((z) => z.id === 'pc')?.spotifyDeviceId).toBeUndefined();
+  });
+});
+
+describe('Spotify on the PC speakers through Soloist', () => {
+  const SOLOIST_PC = { spotifyEngine: 'soloist', spotifyZone: 'soloist' };
+  const SOLOIST_ZONE = { id: 'soloist', name: 'Spotify (Soloist)', kind: 'spotify', soloist: true, output: 'pc', isActive: true };
+
+  it('plays at once on the soloist zone: no app start, no device polling, the sound on the PC speakers', async () => {
+    const h = await setup(null, undefined, undefined, { pc: SOLOIST_PC, zones: [SOLOIST_ZONE] });
+    const toast = vi.spyOn(h.useUi.getState(), 'toast');
+    const reads = h.zoneReads();
+    await h.usePlayer.getState().playItems([item('sp:1'), item('sp:2')], 0);
+
+    expect(h.startCalls()).toBe(0);
+    expect(h.zoneReads()).toBe(reads); // not one /zones read (each is a Spotify devices call) for the play
+    const plays = h.playerPosts().filter((p) => p.body.type === 'play');
+    expect(plays).toHaveLength(1);
+    expect(plays[0]).toMatchObject({ zone: 'soloist', body: { type: 'play', trackIds: ['sp:1', 'sp:2'], startIndex: 0 } });
+    expect(h.soloistOutputs()).toEqual(['pc']);
+    expect(toast.mock.calls.map((c) => c[0])).not.toContain(PC_SPOTIFY_STARTING);
+    expect(h.usePlayer.getState().zone).toBe('pc');
+    expect(h.usePlayer.getState().state.status).toBe('playing');
+    // The Soloist zone is the pc zone's player on a desktop: one entry in the list.
+    expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc', 'browser']);
+  });
+
+  it('a mixed queue keeps local songs on mpv and sends the Spotify song to Soloist when its turn comes', async () => {
+    const h = await setup(null, undefined, undefined, { pc: SOLOIST_PC, zones: [SOLOIST_ZONE] });
+    await h.usePlayer.getState().playItems([{ ...item('l:1'), track: { ...item('l:1').track, source: 'local' } }, item('sp:1')], 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const plays = h.playerPosts().filter((p) => p.body.type === 'play');
+    expect(plays.map((p) => [p.zone, p.body.trackIds])).toEqual([['pc', ['l:1']]]); // one song at a time into mpv first
+    expect(h.startCalls()).toBe(0);
+    expect(h.soloistOutputs()).toEqual(['pc']);
+    expect(h.usePlayer.getState().state.queue.map((q) => q.track.id)).toEqual(['l:1', 'sp:1']);
+  });
+
+  it('with Soloist unavailable the app route runs as before, and the one-line reason is shown', async () => {
+    vi.useFakeTimers();
+    const notice = 'Soloist needs updating (its build expired) — using the Spotify app';
+    const h = await setup(1, undefined, undefined, { pc: { spotifyEngine: 'app', spotifyNotice: notice }, zones: [SOLOIST_ZONE] });
+    const toast = vi.spyOn(h.useUi.getState(), 'toast');
+    const pending = h.usePlayer.getState().playItems([item('sp:1')], 0);
+    await vi.advanceTimersByTimeAsync(PC_SPOTIFY_POLL_MS);
+    await pending;
+    const messages = toast.mock.calls.map((c) => c[0]);
+    expect(messages[0]).toBe(notice);
+    expect(messages).toContain(PC_SPOTIFY_STARTING);
+    expect(h.startCalls()).toBe(1);
+    expect(h.playerPosts().filter((p) => p.body.type === 'play').map((p) => p.zone)).toEqual(['spotify:dev']);
+    expect(h.soloistOutputs()).toEqual([]);
+    // The same reason is not repeated for every song in a row.
+    const again = h.usePlayer.getState().playItems([item('sp:2')], 0);
+    await vi.advanceTimersByTimeAsync(PC_SPOTIFY_POLL_MS);
+    await again;
+    expect(toast.mock.calls.map((c) => c[0]).filter((m) => m === notice)).toHaveLength(1);
   });
 });

@@ -30,7 +30,7 @@ function make(withDevice = true) {
     remote: (z) => (remotes[z] = new FakeRemote(z, zones[z as keyof typeof zones])),
     transport: (z) => zones[z as keyof typeof zones],
     notice,
-  }, withDevice ? { id: 'dev', name: 'HORSE' } : null);
+  }, withDevice ? { zone: 'spotify:dev', name: 'HORSE' } : null);
   const states: PlayerState[] = [];
   pc.subscribe((s) => states.push(s));
   return { pc, zones, remotes, notice, states };
@@ -354,7 +354,7 @@ describe('PcBackend', () => {
     pc.setDevice(null);
     expect(pc.hasSpotify).toBe(false);
     await expect(pc.send(play([S(1)]), [S(1)])).rejects.toThrow();
-    pc.setDevice({ id: 'dev', name: 'HORSE' });
+    pc.setDevice({ zone: 'spotify:dev', name: 'HORSE' });
     expect(pc.hasSpotify).toBe(true);
   });
 });
