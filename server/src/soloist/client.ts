@@ -147,7 +147,12 @@ export class SoloistClient {
     });
     ws.addEventListener('message', (m) => this.onMessage(String(m.data ?? '')));
     ws.addEventListener('close', () => this.onClose(ws));
-    ws.addEventListener('error', () => { try { ws.close(); } catch { /* already closed */ } });
+    // Node's built-in WebSocket (undici): an error before the socket opened (Soloist not listening yet) fires no 'close',
+    // and close() inside this handler re-fires 'error' until the stack overflows, so the retry never happened. Treat a
+    // pre-open error as the close; only an open socket is closed here.
+    ws.addEventListener('error', () => {
+      if (ws.readyState === 1) { try { ws.close(); } catch { /* already closed */ } } else this.onClose(ws);
+    });
   }
 
   close(): void {

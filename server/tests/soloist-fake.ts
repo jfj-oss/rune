@@ -37,7 +37,7 @@ export class FakeSoloist {
     this.app = Fastify({ logger: false });
   }
 
-  async start(): Promise<string> {
+  async start(listenPort = 0): Promise<string> {
     await this.app.register(websocket);
     this.app.get('/', { websocket: true }, (socket) => {
       this.sockets.add(socket as unknown as Socket);
@@ -46,7 +46,7 @@ export class FakeSoloist {
       this.sendTo(socket as unknown as Socket, this.authState());
       if (this.loggedIn) this.sendTo(socket as unknown as Socket, this.playbackState());
     });
-    await this.app.listen({ port: 0, host: '127.0.0.1' });
+    await this.app.listen({ port: listenPort, host: '127.0.0.1' });
     const address = this.app.server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
     this.url = `ws://127.0.0.1:${port}`;

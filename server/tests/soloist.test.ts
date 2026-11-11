@@ -80,6 +80,24 @@ describe('SoloistClient', () => {
     client.close();
   });
 
+  it('keeps retrying when Soloist is not listening yet at the first connect (Node WebSocket fires no close then)', async () => {
+    // A free port with nothing on it: the first connect is refused, exactly as when rune starts before Soloist binds.
+    const probe = new FakeSoloist();
+    await probe.start();
+    const port = Number(probe.url.split(':').pop());
+    await probe.stop();
+    const client = new SoloistClient({ url: `ws://127.0.0.1:${port}`, reconnectMs: 30, reconnectMaxMs: 60 });
+    client.connect();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(client.view.connected).toBe(false);
+    const late = new FakeSoloist();
+    await late.start(port);
+    await until(() => client.view.connected);
+    expect(client.view.connected).toBe(true);
+    client.close();
+    await late.stop();
+  });
+
   it('reconnects after Soloist goes away and comes back', async () => {
     const client = new SoloistClient({ url: fake.url, reconnectMs: 30, reconnectMaxMs: 60 });
     client.connect();
