@@ -525,9 +525,9 @@ describe('same-origin guard', () => {
 
   it('behind Tailscale serve (loopback peer) the forwarded host is the page host', () => {
     const headers = {
-      origin: 'https://horse.taile1d3f4.ts.net:8445',
+      origin: 'https://pc.example-tailnet.ts.net:8445',
       host: '127.0.0.1:4545',
-      'x-forwarded-host': 'horse.taile1d3f4.ts.net:8445',
+      'x-forwarded-host': 'pc.example-tailnet.ts.net:8445',
     };
     for (const peer of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) expect(isSameOriginRequest(req(headers, peer))).toBe(true);
     // and a foreign page through the same proxy is still refused
@@ -551,9 +551,9 @@ describe('same-origin guard', () => {
       url: '/update/install',
       remoteAddress: '127.0.0.1',
       headers: {
-        origin: 'https://horse.taile1d3f4.ts.net:8445',
+        origin: 'https://pc.example-tailnet.ts.net:8445',
         host: '127.0.0.1:4545',
-        'x-forwarded-host': 'horse.taile1d3f4.ts.net:8445',
+        'x-forwarded-host': 'pc.example-tailnet.ts.net:8445',
       },
     });
     expect(tailscale.statusCode).toBe(200);
