@@ -10,8 +10,17 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { configFilePath, readUserConfig, type Config } from '../config.js';
-import { soloistSettings, type ChildLike, type SoloistRun } from '../soloist/index.js';
+import { soloistSettings, type SoloistRun } from '../soloist/index.js';
 import { fromLoopback, isSameOriginRequest } from '../update.js';
+
+/** The bits of a child process the pairing run uses. */
+export interface PairChild {
+  kill(signal?: NodeJS.Signals): boolean;
+  stdout?: { on(event: 'data', fn: (chunk: unknown) => void): unknown } | null;
+  stderr?: { on(event: 'data', fn: (chunk: unknown) => void): unknown } | null;
+  on(event: 'exit', fn: (code: number | null) => void): unknown;
+  on(event: 'error', fn: (err: Error) => void): unknown;
+}
 
 export interface SetupDeps {
   cfg: Config;
@@ -20,7 +29,7 @@ export interface SetupDeps {
   /** Restart the process (the service manager brings it back). Injected by tests. */
   restart?: () => void;
   underSystemd?: () => boolean;
-  spawn?: (binary: string, args: string[]) => ChildLike & { stdout?: NodeJS.ReadableStream | null; stderr?: NodeJS.ReadableStream | null };
+  spawn?: (binary: string, args: string[]) => PairChild;
   /** Environment for the pairing run (tests). */
   home?: string;
 }
@@ -87,7 +96,7 @@ export function registerSetupRoutes(r: FastifyInstance, deps: SetupDeps): void {
   const underSystemd = deps.underSystemd ?? (() => !!process.env.INVOCATION_ID);
   const restart = deps.restart ?? (() => { setTimeout(() => process.exit(1), 500); });
   let pair: PairState | null = null;
-  let pairChild: ChildLike | null = null;
+  let pairChild: PairChild | null = null;
 
   /** Writes are for the machine rune runs on, from the page itself. */
   function guard(req: FastifyRequest, reply: FastifyReply): boolean {
@@ -229,7 +238,7 @@ export function registerSetupRoutes(r: FastifyInstance, deps: SetupDeps): void {
       state.output = (state.output + redact(String(chunk), [key])).slice(-PAIR_OUTPUT_MAX);
     };
     try {
-      const child = (deps.spawn ?? ((b, a) => nodeSpawn(b, a, { stdio: ['ignore', 'pipe', 'pipe'] })))(s.binary, args);
+      const child: PairChild = (deps.spawn ?? ((b, a) => nodeSpawn(b, a, { stdio: ['ignore', 'pipe', 'pipe'] })))(s.binary, args);
       pairChild = child;
       child.stdout?.on('data', add);
       child.stderr?.on('data', add);

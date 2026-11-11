@@ -88,7 +88,7 @@ async function boot(o: BootOptions = {}) {
   const audio = fakeAudio();
   const spawned: FakeChild[] = [];
   const cfg: Config = {
-    libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album',
+    libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album', pcSpotifyDevice: 'MYPC',
     spotify: { serverQueue: o.serverQueue === true },
     ...(o.spotify ? { spotifyClientId: 'client-abc' } : {}),
   };

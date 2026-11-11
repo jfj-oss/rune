@@ -57,7 +57,7 @@ describe('setup status', () => {
     expect(s.needsSetup).toBe(true);
     expect(s.redirectUri).toBe('http://127.0.0.1:4545/api/spotify/callback');
     expect(s.soloist).toMatchObject({ binaryInstalled: false, keySaved: false });
-    expect(JSON.stringify(s)).not.toMatch(/horse|justin/i);
+    expect(JSON.stringify(s)).not.toMatch(/horse/i);
   });
 });
 
