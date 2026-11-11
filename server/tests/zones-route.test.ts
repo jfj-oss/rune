@@ -35,9 +35,9 @@ let closeApp: () => Promise<void>;
 let clock = 1_000_000;
 let devices: () => ReturnType<typeof jsonResponse> = () => jsonResponse(200, { devices: [HORSE] });
 
-/** The device list is cached for 5 s: step past that before each read. */
+/** With no page open the device list is reused for an hour: step past that before each read. */
 const zones = async () => {
-  clock += 121_000;
+  clock += 3_601_000;
   const res = await app.inject({ method: 'GET', url: '/api/zones' });
   expect(res.statusCode).toBe(200);
   return (res.json() as { id: string; spotifyDeviceId?: string; spotifyDeviceName?: string }[]).find((z) => z.id === 'pc')!;
@@ -90,7 +90,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
       });
     };
 
-    clock += 121_000; // the previous test's device list is still cached
+    clock += 3_601_000; // the previous test's device list is still cached
     const first = await app.inject({ method: 'GET', url: '/api/zones' });
     expect(first.statusCode).toBe(200);
     const phone = (first.json() as { id: string; deviceType?: string; isActive?: boolean; isRestricted?: boolean }[])
@@ -98,10 +98,48 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
     expect(phone).toMatchObject({ deviceType: 'Smartphone', isActive: false, isRestricted: false });
     expect(calls).toBe(1);
 
-    clock += 2_000; // inside the 2-minute cache, outside the 1.5 s fresh window
+    clock += 2_000; // inside the cache, outside the 1.5 s fresh window
     await app.inject({ method: 'GET', url: '/api/zones' });
     expect(calls).toBe(1); // an ordinary read keeps the cache
     await app.inject({ method: 'GET', url: '/api/zones?refresh=1' });
     expect(calls).toBe(2); // the picker opening asks again
+  });
+
+  it('a probe every minute with no page open costs one device read an hour (it was one every two minutes)', async () => {
+    let calls = 0;
+    devices = () => { calls++; return jsonResponse(200, { devices: [HORSE] }); };
+    clock += 3_601_000;
+    for (let minute = 0; minute < 60; minute++) {
+      clock += 60_000;
+      const res = await app.inject({ method: 'GET', url: '/api/zones' });
+      expect(res.statusCode).toBe(200);
+    }
+    expect(calls).toBeLessThanOrEqual(2);
+  });
+
+  it('during a Spotify lockout the Connect devices stay listed, their zones answer, and /status says until when', async () => {
+    devices = () => jsonResponse(200, { devices: [HORSE, { ...SIM_DEVICE, id: 'phone1', name: 'iPhone', type: 'Smartphone', is_active: false, is_restricted: false }] });
+    clock += 3_601_000;
+    await app.inject({ method: 'GET', url: '/api/zones?refresh=1' });
+
+    // Spotify locks the app out for two hours: the breaker trips on the first read and answers every later one itself.
+    devices = () => jsonResponse(429, '', { 'retry-after': '7200' });
+    clock += 3_601_000;
+    const list = (await app.inject({ method: 'GET', url: '/api/zones?refresh=1' })).json() as { id: string }[];
+    expect(list.map((z) => z.id)).toEqual(expect.arrayContaining(['spotify:horse1', 'spotify:phone1']));
+
+    const status = (await app.inject({ method: 'GET', url: '/api/spotify/status' })).json() as { connected: boolean; restingUntil: number | null };
+    expect(status.connected).toBe(true);
+    expect(status.restingUntil).toBe(clock + 7_200_000);
+
+    // A page that remembers a device can still read it (no 404 "unknown zone"), even one never listed.
+    expect((await app.inject({ method: 'GET', url: '/api/player/spotify:phone1' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/player/spotify:0123456789abcdef0123456789abcdef01234567' })).statusCode).toBe(200);
+    // Garbage is still unknown.
+    expect((await app.inject({ method: 'GET', url: '/api/player/spotify:nope' })).statusCode).toBe(404);
+    // A play during the lockout gets the plain-words reason, not a crash.
+    const play = await app.inject({ method: 'POST', url: '/api/player/spotify:phone1', payload: { type: 'play', trackIds: ['sp:abc'], startIndex: 0 } });
+    expect(play.statusCode).toBe(429);
+    expect((play.json() as { error: string }).error).toMatch(/daily limit/);
   });
 });

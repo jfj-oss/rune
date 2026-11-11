@@ -6,7 +6,7 @@ import type { Album, PlaylistDetail, PlaylistSummary } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
 import { getAlbum } from '../api/library.js';
-import { SpotifyApi, type SpotifyBudgetLogger, type SpotifyHourlyUsage, type SpotifyUsageState } from './api.js';
+import { SpotifyApi, type SpotifyBudgetLogger, type SpotifyDevice, type SpotifyHourlyUsage, type SpotifyUsageState } from './api.js';
 import { SpotifyAuth, registerSpotifyRoutes, type SpotifyAuthOptions, type SpotifyStatus } from './auth.js';
 import { SpotifyCatalog, type SearchResults } from './catalog.js';
 import {
@@ -105,6 +105,30 @@ function loadSpotifyUsage(db: Db): SpotifyUsageState | undefined {
   }
 }
 
+const SPOTIFY_DEVICES_KEY = 'spotify.devices';
+
+/** The last device list Spotify gave (ids and names only matter; a corrupt value is "nothing stored"). */
+function loadSpotifyDevices(db: Db): SpotifyDevice[] | undefined {
+  try {
+    const raw = (db.prepare('SELECT value FROM app_state WHERE key = ?').get(SPOTIFY_DEVICES_KEY) as { value: string } | undefined)?.value;
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    const devices = parsed.filter(
+      (d): d is SpotifyDevice => !!d && typeof d === 'object' && typeof (d as SpotifyDevice).id === 'string' && typeof (d as SpotifyDevice).name === 'string',
+    );
+    return devices.length ? devices : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveSpotifyDevices(db: Db, devices: SpotifyDevice[]): void {
+  db.prepare(
+    'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+  ).run(SPOTIFY_DEVICES_KEY, JSON.stringify(devices.filter((d) => !!d.id)));
+}
+
 function saveSpotifyUsage(db: Db, usage: SpotifyUsageState): void {
   db.prepare(
     'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -135,6 +159,11 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     blockedUntil: () => api.blockedUntil(),
     // Background polls slow down as the rolling daily budget fills up.
     budgetLevel: () => api.budgetLevel(),
+    // The last device list outlives a restart: a lockout (or an offline Spotify) must not empty the zone picker.
+    deviceStore: {
+      load: () => loadSpotifyDevices(db),
+      save: (devices) => saveSpotifyDevices(db, devices),
+    },
     ...opts,
     localPlayback,
   });
@@ -184,7 +213,8 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
       return true;
     },
     registerRoutes: (app: FastifyInstance) =>
-      registerSpotifyRoutes(app, db, cfg, { ...opts, auth }),
+      // /status also says until when Spotify is resting (its lockout), so every page can say so instead of failing.
+      registerSpotifyRoutes(app, db, cfg, { ...opts, auth, restingUntil: () => api.blockedUntil() }),
     close: () => api.close(),
   };
 }
