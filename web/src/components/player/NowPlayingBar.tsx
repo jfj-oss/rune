@@ -1,4 +1,4 @@
-import { ListMusic } from 'lucide-react';
+import { ListMusic, MoreHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { encId } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
@@ -7,6 +7,8 @@ import { currentItem, usePlayer } from '../../store/player';
 import { useUi } from '../../store/ui';
 import { Cover } from '../Cover';
 import { LikedHeart } from '../Liked';
+import { Popover } from '../Popover';
+import { TrackMenuItems, trackMenuHandler } from '../TrackMenu';
 import { SeekBar, SignalDot, Transport, VolumeControl, ZonePicker } from './parts';
 
 export function NowPlayingBar() {
@@ -20,7 +22,7 @@ export function NowPlayingBar() {
   const liveSub = meta ? [meta.artist, meta.title !== meta.station ? meta.station : ''].filter(Boolean).join(' · ') : '';
   return (
     <footer className="npbar">
-      <div className="npbar__now">
+      <div className="npbar__now" onContextMenu={cur && !live ? trackMenuHandler(cur) : undefined}>
         {cur ? (
           <>
             <button className="npbar__art" aria-label="Open Now Playing" onClick={() => setNp(true)}>
@@ -33,6 +35,16 @@ export function NowPlayingBar() {
                 <div className="npbar__titlerow">
                   <Link to={`/album/${encId(cur.album.id)}`} className="npbar__title" title={cur.track.title}>{cur.track.title}</Link>
                   <LikedHeart track={cur.track} />
+                  <Popover
+                    placement="top-start"
+                    trigger={({ toggle }) => (
+                      <button className="btn-icon npbar__more" aria-label={`More for ${cur.track.title}`} title="Add to playlist, radio, album…" onClick={toggle}>
+                        <MoreHorizontal size={18} />
+                      </button>
+                    )}
+                  >
+                    {(close) => <TrackMenuItems item={cur} close={close} />}
+                  </Popover>
                 </div>
               )}
               <div className="npbar__sub">
