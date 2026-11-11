@@ -21,6 +21,7 @@ import { QueueDrawer } from './player/Queue';
 import { Sidebar } from './Sidebar';
 import { Toast } from './Toast';
 import { TopBar } from './TopBar';
+import { UpdateChip } from './UpdateChip';
 
 const scrollPos = new Map<string, number>();
 
@@ -91,6 +92,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </main>
       </div>
       {desktop ? <NowPlayingBar /> : (<><MiniPlayer /><MobileTabs /></>)}
+      {!desktop && <UpdateChip className="chip--float" />}
       <QueueDrawer />
       <NowPlaying />
       <MediaSessionBridge />

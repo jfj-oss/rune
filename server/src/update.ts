@@ -6,11 +6,17 @@
 // the build succeeds. Any failure after the merge resets to the previous commit
 // and restores dependencies, so the running copy keeps serving.
 //
+// The service runs straight from the checkout, so code committed on this PC but
+// not yet running counts too ("pendingLocal": HEAD moved since start, or web/dist
+// was built from an older commit). That path skips fetch/merge, reinstalls only if
+// the lockfile changed since the running commit, builds, and restarts. A song that
+// is playing never blocks the install: the restart waits for it to end.
+//
 // The install route takes no request body, so it has no JSON content-type to
 // force a CORS preflight; it therefore checks the Origin against the Host
 // itself (same-origin only). See registerUpdateRoutes.
 import { execFile } from 'node:child_process';
-import { existsSync, renameSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
@@ -23,6 +29,12 @@ export interface UpdateStatus {
   current: string | null;
   /** Short (7 hex) commit of origin/<branch>, after the (rate-limited) fetch. */
   latest: string | null;
+  /** Short (7 hex) commit this process started on (what is actually running). */
+  running: string | null;
+  /** The checkout has code that is not running yet: HEAD moved since start, or web/dist was built from an older commit. */
+  pendingLocal: boolean;
+  /** A newer rune is ready to install: behind origin, or pendingLocal. */
+  available: boolean;
   /** Commits behind origin/<branch>. */
   behind: number;
   /** Commits ahead of origin/<branch> (not published). */
@@ -42,7 +54,8 @@ export type UpdateInstallResult =
   | { ok: false; status: number; error: string };
 
 export interface UpdateService {
-  status(): Promise<UpdateStatus>;
+  /** `force` makes the background `git fetch` run even inside the minimum gap (Settings "Check for updates"). */
+  status(opts?: { force?: boolean }): Promise<UpdateStatus>;
   install(): Promise<UpdateInstallResult>;
 }
 
@@ -66,9 +79,11 @@ export interface UpdateOptions {
   /** Whether rune runs under systemd (INVOCATION_ID set). Injected by tests. */
   underSystemd?: () => boolean;
   now?: () => number;
+  /** Record HEAD at construction as the running commit (default true; the server enables it only from main.ts). */
+  captureRunning?: boolean;
   /** How often to look again while a song started during the build is still going. */
   musicPollMs?: number;
-  /** Minimum gap between background fetches triggered by GET status. */
+  /** Minimum gap between background fetches triggered by GET status (default 15 minutes). */
   fetchMinGapMs?: number;
   logger?: {
     info?: (obj: unknown, msg?: string) => void;
@@ -77,6 +92,8 @@ export interface UpdateOptions {
 }
 
 const SHORT_LEN = 7;
+/** File inside web/dist naming the full commit that build was made from. */
+const BUILD_STAMP = '.built-from';
 const FETCH_TIMEOUT_MS = 20_000;
 const MERGE_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 300_000;
@@ -152,6 +169,8 @@ class UpdateServiceImpl implements UpdateService {
   private installRunning = false;
   private lastFetchAt = 0;
   private fetchPromise: Promise<void> | null = null;
+  /** The commit this process started on, captured once (see captureRunning). */
+  private runningCommit: Promise<string | null>;
 
   constructor(opts: UpdateOptions) {
     this.repoRootInput = opts.repoRoot;
@@ -163,9 +182,45 @@ class UpdateServiceImpl implements UpdateService {
     this.isPlayingOnPc = opts.isPlayingOnPc ?? (() => false);
     this.underSystemd = opts.underSystemd ?? (() => process.env.INVOCATION_ID !== undefined && process.env.INVOCATION_ID !== '');
     this.now = opts.now ?? Date.now;
-    this.fetchMinGapMs = opts.fetchMinGapMs ?? 60_000;
+    this.fetchMinGapMs = opts.fetchMinGapMs ?? 15 * 60_000;
     this.musicPollMs = opts.musicPollMs ?? 5_000;
     this.logger = opts.logger;
+    this.runningCommit = opts.captureRunning === false ? Promise.resolve(null) : this.captureRunning();
+  }
+
+  /**
+   * Record HEAD as the commit that is running (the service starts from the checkout), and stamp web/dist with it
+   * when the build has no stamp yet (an older build, or one made by hand, is assumed to match what started).
+   */
+  private async captureRunning(): Promise<string | null> {
+    try {
+      const sha = await this.headSha();
+      if (sha && existsSync(this.webDist) && !existsSync(join(this.webDist, BUILD_STAMP))) {
+        try {
+          writeFileSync(join(this.webDist, BUILD_STAMP), `${sha}\n`);
+        } catch (err) {
+          this.logger?.warn?.({ err }, 'update build stamp failed');
+        }
+      }
+      return sha;
+    } catch {
+      return null;
+    }
+  }
+
+  private builtFrom(): string | null {
+    try {
+      return readFileSync(join(this.webDist, BUILD_STAMP), 'utf8').trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async isPendingLocal(head: string | null, running: string | null): Promise<boolean> {
+    if (!head || !running) return false;
+    if (head !== running) return true;
+    const built = this.builtFrom();
+    return built !== null && built !== head;
   }
 
   // ------------------------------------------------------------- git helpers
@@ -245,10 +300,10 @@ class UpdateServiceImpl implements UpdateService {
   }
 
   /** Background fetch for GET status: at most once per fetchMinGapMs. */
-  private maybeFetch(branch: string): Promise<void> {
-    const now = this.now();
-    if (now - this.lastFetchAt < this.fetchMinGapMs) return Promise.resolve();
+  private maybeFetch(branch: string, force = false): Promise<void> {
     if (this.fetchPromise) return this.fetchPromise;
+    const now = this.now();
+    if (!force && now - this.lastFetchAt < this.fetchMinGapMs) return Promise.resolve();
     this.lastFetchAt = now;
     const run = this.git(['fetch', 'origin', branch], FETCH_TIMEOUT_MS)
       .then(() => undefined)
@@ -264,9 +319,11 @@ class UpdateServiceImpl implements UpdateService {
 
   // ------------------------------------------------------------- status
 
-  async status(): Promise<UpdateStatus> {
+  async status(opts: { force?: boolean } = {}): Promise<UpdateStatus> {
     const playing = this.isPlayingOnPc();
     const current = await this.headSha();
+    const running = await this.runningCommit;
+    const pendingLocal = await this.isPendingLocal(current, running);
     const inside = await this.insideWorkTree();
     const branch = await this.currentBranch();
     const supported = inside && current !== null && branch !== null && (await this.hasOrigin());
@@ -276,6 +333,9 @@ class UpdateServiceImpl implements UpdateService {
         supported,
         current: current ? current.slice(0, SHORT_LEN) : null,
         latest: null,
+        running: running ? running.slice(0, SHORT_LEN) : null,
+        pendingLocal: false,
+        available: false,
         behind: 0,
         ahead: 0,
         dirty: false,
@@ -285,7 +345,7 @@ class UpdateServiceImpl implements UpdateService {
       };
     }
 
-    await this.maybeFetch(branch!);
+    await this.maybeFetch(branch!, opts.force === true);
     const latest = await this.remoteRef(branch!);
     let ahead = 0;
     let behind = 0;
@@ -299,6 +359,9 @@ class UpdateServiceImpl implements UpdateService {
       supported,
       current: current ? current.slice(0, SHORT_LEN) : null,
       latest: latest ? latest.slice(0, SHORT_LEN) : null,
+      running: running ? running.slice(0, SHORT_LEN) : null,
+      pendingLocal,
+      available: behind > 0 || pendingLocal,
       behind,
       ahead,
       dirty,
@@ -324,10 +387,7 @@ class UpdateServiceImpl implements UpdateService {
         this.stage = null;
         return { ok: false, status: 400, error: 'HEAD is detached' };
       }
-      if (this.isPlayingOnPc()) {
-        this.stage = null;
-        return { ok: false, status: 400, error: 'music is playing' };
-      }
+      // Music playing is fine: the build runs now and the restart waits for the song to end (see below).
       if (await this.trackedDirty()) {
         this.stage = null;
         return { ok: false, status: 400, error: 'tracked files changed' };
@@ -338,42 +398,51 @@ class UpdateServiceImpl implements UpdateService {
         return { ok: false, status: 400, error: 'no HEAD commit' };
       }
 
-      // Downloading: fetch the branch so origin/<branch> is current.
+      const running = await this.runningCommit;
+      const pendingLocal = await this.isPendingLocal(previous, running);
+
+      // Downloading: fetch the branch so origin/<branch> is current. With local code waiting to be built, an
+      // unreachable origin is not fatal: the local-only path below needs nothing from it.
       this.stage = 'downloading';
       try {
         await this.git(['fetch', 'origin', branch], FETCH_TIMEOUT_MS);
         this.lastFetchAt = this.now();
       } catch (err) {
-        this.stage = null;
-        this.error = `downloading: ${messageOf(err)}`;
-        return { ok: false, status: 500, error: this.error };
+        if (!pendingLocal) {
+          this.stage = null;
+          this.error = `downloading: ${messageOf(err)}`;
+          return { ok: false, status: 500, error: this.error };
+        }
       }
 
       const latest = await this.remoteRef(branch);
-      if (!latest) {
+      if (!latest && !pendingLocal) {
         this.stage = null;
         this.error = 'downloading: no upstream branch to update from';
         return { ok: false, status: 400, error: this.error };
       }
 
-      const ab = await this.aheadBehind(branch);
+      const ab = latest ? await this.aheadBehind(branch) : { ahead: 0, behind: 0 };
       if (ab.ahead > 0 && ab.behind > 0) {
         this.stage = null;
         return { ok: false, status: 400, error: 'history has diverged' };
       }
-      if (ab.ahead > 0 && ab.behind === 0) {
+      const localOnly = ab.behind === 0;
+      if (localOnly && !pendingLocal) {
         this.stage = null;
-        const noun = ab.ahead === 1 ? 'change' : 'changes';
-        return { ok: false, status: 400, error: `This copy has ${ab.ahead} ${noun} that are not published` };
-      }
-      if (ab.behind === 0) {
-        this.stage = null;
+        if (ab.ahead > 0) {
+          const noun = ab.ahead === 1 ? 'change' : 'changes';
+          return { ok: false, status: 400, error: `This copy has ${ab.ahead} ${noun} that are not published` };
+        }
         return { ok: false, status: 400, error: 'already up to date' };
       }
 
+      // Dependencies are reinstalled when the lockfile differs between what is running and what will run.
+      const target = localOnly ? previous : latest!;
+      const base = running ?? previous;
       let lockfileChanged = false;
       try {
-        const names = await this.git(['diff', '--name-only', previous, latest, '--', 'pnpm-lock.yaml'], 10_000);
+        const names = await this.git(['diff', '--name-only', base, target, '--', 'pnpm-lock.yaml'], 10_000);
         lockfileChanged = names
           .split('\n')
           .map((line) => line.trim())
@@ -382,12 +451,14 @@ class UpdateServiceImpl implements UpdateService {
         lockfileChanged = false;
       }
 
-      // Merge (still "downloading": the new code is fetched and applied).
-      try {
-        await this.git(['merge', '--ff-only', `origin/${branch}`], MERGE_TIMEOUT_MS);
-      } catch (err) {
-        await this.rollback(previous, false, 'downloading', messageOf(err));
-        return { ok: false, status: 500, error: this.error! };
+      // Merge (still "downloading": the new code is fetched and applied). Nothing to merge for local-only code.
+      if (!localOnly) {
+        try {
+          await this.git(['merge', '--ff-only', `origin/${branch}`], MERGE_TIMEOUT_MS);
+        } catch (err) {
+          await this.rollback(previous, false, 'downloading', messageOf(err));
+          return { ok: false, status: 500, error: this.error! };
+        }
       }
 
       if (lockfileChanged) {
@@ -395,7 +466,7 @@ class UpdateServiceImpl implements UpdateService {
         try {
           await this.installFn();
         } catch (err) {
-          await this.rollback(previous, true, 'installing', messageOf(err));
+          await this.rollback(previous, true, 'installing', messageOf(err), !localOnly);
           return { ok: false, status: 500, error: this.error! };
         }
       }
@@ -405,8 +476,11 @@ class UpdateServiceImpl implements UpdateService {
       rmSync(tempDir, { recursive: true, force: true });
       try {
         await this.buildFn(tempDir);
+        mkdirSync(tempDir, { recursive: true });
+        writeFileSync(join(tempDir, BUILD_STAMP), `${(await this.headSha()) ?? previous}\n`);
       } catch (err) {
-        await this.rollback(previous, lockfileChanged, 'building', messageOf(err));
+        rmSync(tempDir, { recursive: true, force: true });
+        await this.rollback(previous, lockfileChanged, 'building', messageOf(err), !localOnly);
         return { ok: false, status: 500, error: this.error! };
       }
 
@@ -414,7 +488,8 @@ class UpdateServiceImpl implements UpdateService {
       try {
         this.swapDist(tempDir);
       } catch (err) {
-        await this.rollback(previous, lockfileChanged, 'restarting', messageOf(err));
+        rmSync(tempDir, { recursive: true, force: true });
+        await this.rollback(previous, lockfileChanged, 'restarting', messageOf(err), !localOnly);
         return { ok: false, status: 500, error: this.error! };
       }
 
@@ -437,13 +512,19 @@ class UpdateServiceImpl implements UpdateService {
     }
   }
 
-  private async rollback(previous: string, lockfileChanged: boolean, step: string, reason: string): Promise<void> {
-    try {
-      await this.git(['reset', '--hard', previous], MERGE_TIMEOUT_MS);
-    } catch (err) {
-      this.logger?.warn?.({ err }, 'update rollback reset failed');
+  /**
+   * Undo a failed update. After a merge, HEAD goes back to `previous`. For a local-only update nothing was merged
+   * (HEAD holds the user's own commits), so `resetHead` is false and only the build leftovers are dropped.
+   */
+  private async rollback(previous: string, lockfileChanged: boolean, step: string, reason: string, resetHead = true): Promise<void> {
+    if (resetHead) {
+      try {
+        await this.git(['reset', '--hard', previous], MERGE_TIMEOUT_MS);
+      } catch (err) {
+        this.logger?.warn?.({ err }, 'update rollback reset failed');
+      }
     }
-    if (lockfileChanged) {
+    if (lockfileChanged && resetHead) {
       try {
         await this.installFn();
       } catch (err) {
@@ -502,7 +583,9 @@ export function createUpdateService(opts: UpdateOptions): UpdateService {
 export function registerUpdateRoutes(r: FastifyInstance, service: UpdateService): void {
   r.get('/update/status', async (req, reply) => {
     if (!isSameOriginRequest(req)) return reply.code(403).send({ error: 'cross-origin request blocked' });
-    return service.status();
+    // `?check=1` (Settings "Check for updates") forces the background fetch; the chip's poll does not.
+    const q = req.query as { check?: string } | undefined;
+    return service.status({ force: q?.check === '1' });
   });
 
   r.post('/update/install', async (req, reply) => {
