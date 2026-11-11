@@ -75,6 +75,8 @@ function svc(
     install?: () => Promise<void>;
     restart?: () => void | Promise<void>;
     musicPollMs?: number;
+    fetchMinGapMs?: number;
+    now?: () => number;
   },
 ) {
   return createUpdateService({
@@ -86,6 +88,8 @@ function svc(
     install: opts.install,
     restart: opts.restart,
     musicPollMs: opts.musicPollMs,
+    fetchMinGapMs: opts.fetchMinGapMs,
+    now: opts.now,
   });
 }
 
@@ -222,10 +226,28 @@ describe('update install', () => {
     expect(res).toEqual({ ok: false, status: 400, error: 'history has diverged' });
   });
 
-  it('refuses while music is playing', async () => {
+  it('accepts an install while a song plays and restarts only after it ends', async () => {
     const { repoRoot, webDist } = initRepos();
-    const res = await svc({ repoRoot, webDist, isPlayingOnPc: () => true }).install();
-    expect(res).toEqual({ ok: false, status: 400, error: 'music is playing' });
+    addRemoteCommit(repoRoot, 'B');
+    let playing = true;
+    let polls = 0;
+    let restartedWhilePlaying: boolean | null = null;
+    const s = svc({
+      repoRoot,
+      webDist,
+      underSystemd: () => true,
+      musicPollMs: 1,
+      isPlayingOnPc: () => {
+        if (playing && ++polls >= 4) playing = false;
+        return playing;
+      },
+      build: okBuild(),
+      restart: () => {
+        restartedWhilePlaying = playing;
+      },
+    });
+    expect(await s.install()).toEqual({ ok: true, stage: 'restarting' });
+    expect(restartedWhilePlaying).toBe(false);
   });
 
   it('refuses on a detached HEAD', async () => {
@@ -281,6 +303,189 @@ describe('update install', () => {
     releaseBuild();
     const firstResult = await first;
     expect(firstResult).toEqual({ ok: true, stage: 'restart-needed' });
+  });
+});
+
+/** A new local commit that origin does not have (ahead by one). */
+function addLocalCommit(repoRoot: string, name: string, content = name): string {
+  writeFileSync(join(repoRoot, name), content);
+  git(repoRoot, 'add', name);
+  return commit(repoRoot, name);
+}
+
+const okBuild = (label = 'built') => async (toDir: string) => {
+  mkdirSync(toDir, { recursive: true });
+  writeFileSync(join(toDir, 'index.html'), label);
+};
+
+describe('local pending updates', () => {
+  it('is not pending or available when running == HEAD and origin is level; stamps the build', async () => {
+    const { repoRoot, webDist, commitA } = initRepos();
+    const s = svc({ repoRoot, webDist });
+    const st = await s.status();
+    expect(st.running).toBe(commitA.slice(0, 7));
+    expect(st.pendingLocal).toBe(false);
+    expect(st.available).toBe(false);
+    expect(readFileSync(join(webDist, '.built-from'), 'utf8').trim()).toBe(commitA);
+  });
+
+  it('pendingLocal and available when HEAD moved past the running commit', async () => {
+    const { repoRoot, webDist, commitA } = initRepos();
+    const s = svc({ repoRoot, webDist });
+    await s.status(); // capture the running commit
+    const b = addLocalCommit(repoRoot, 'b.txt');
+    const st = await s.status();
+    expect(st.running).toBe(commitA.slice(0, 7));
+    expect(st.current).toBe(b.slice(0, 7));
+    expect(st.ahead).toBe(1);
+    expect(st.behind).toBe(0);
+    expect(st.pendingLocal).toBe(true);
+    expect(st.available).toBe(true);
+  });
+
+  it('pendingLocal when web/dist was built from an older commit than HEAD', async () => {
+    const { repoRoot, webDist, commitA } = initRepos();
+    writeFileSync(join(webDist, '.built-from'), `${commitA}\n`);
+    const b = addLocalCommit(repoRoot, 'b.txt');
+    // a process that starts on B with a dist still built from A
+    const st = await svc({ repoRoot, webDist }).status();
+    expect(st.running).toBe(b.slice(0, 7));
+    expect(st.pendingLocal).toBe(true);
+    expect(st.available).toBe(true);
+  });
+
+  it('available (not pendingLocal) when only behind origin', async () => {
+    const { repoRoot, webDist } = initRepos();
+    addRemoteCommit(repoRoot, 'B');
+    const st = await svc({ repoRoot, webDist }).status();
+    expect(st.pendingLocal).toBe(false);
+    expect(st.available).toBe(true);
+  });
+
+  it('installs local-only commits without fetching or merging, builds, stamps and swaps', async () => {
+    const { repoRoot, webDist } = initRepos();
+    const s = svc({ repoRoot, webDist, build: okBuild(), install: async () => { throw new Error('should not install'); } });
+    await s.status();
+    const b = addLocalCommit(repoRoot, 'b.txt');
+    // break the remote: a fetch would fail, proving the local path does not depend on it
+    git(repoRoot, 'remote', 'set-url', 'origin', join(repoRoot, 'nope.git'));
+    expect(await s.install()).toEqual({ ok: true, stage: 'restart-needed' });
+    expect(git(repoRoot, 'rev-parse', 'HEAD')).toBe(b);
+    expect(readFileSync(join(webDist, 'index.html'), 'utf8')).toBe('built');
+    expect(readFileSync(join(webDist, '.built-from'), 'utf8').trim()).toBe(b);
+  });
+
+  it('local-only install runs dependencies only when the lockfile changed since the running commit', async () => {
+    const { repoRoot, webDist } = initRepos();
+    let installs = 0;
+    const s = svc({ repoRoot, webDist, build: okBuild(), install: async () => void installs++ });
+    await s.status();
+    addLocalCommit(repoRoot, 'b.txt');
+    await s.install();
+    expect(installs).toBe(0);
+
+    const s2 = svc({ repoRoot, webDist, build: okBuild(), install: async () => void installs++ });
+    await s2.status();
+    addLocalCommit(repoRoot, 'pnpm-lock.yaml', 'lock v2');
+    await s2.install();
+    expect(installs).toBe(1);
+  });
+
+  it('local-only: a song started during the build delays the restart', async () => {
+    const { repoRoot, webDist } = initRepos();
+    let playing = false;
+    let polls = 0;
+    let restartedWhilePlaying: boolean | null = null;
+    const s = svc({
+      repoRoot,
+      webDist,
+      underSystemd: () => true,
+      musicPollMs: 1,
+      isPlayingOnPc: () => {
+        if (playing && ++polls >= 3) playing = false;
+        return playing;
+      },
+      build: async (toDir) => {
+        await okBuild()(toDir);
+        playing = true;
+      },
+      restart: () => {
+        restartedWhilePlaying = playing;
+      },
+    });
+    await s.status();
+    addLocalCommit(repoRoot, 'b.txt');
+    expect(await s.install()).toEqual({ ok: true, stage: 'restarting' });
+    expect(restartedWhilePlaying).toBe(false);
+  });
+
+  it('rolls back a failed local build: keeps HEAD (the user\'s commit) and the old dist', async () => {
+    const { repoRoot, webDist } = initRepos();
+    const s = svc({
+      repoRoot,
+      webDist,
+      build: async (toDir) => {
+        mkdirSync(toDir, { recursive: true });
+        writeFileSync(join(toDir, 'partial'), 'x');
+        throw new Error('boom');
+      },
+    });
+    await s.status();
+    const b = addLocalCommit(repoRoot, 'b.txt');
+    const res = await s.install();
+    expect(res).toEqual({ ok: false, status: 500, error: 'building: boom' });
+    expect(git(repoRoot, 'rev-parse', 'HEAD')).toBe(b);
+    expect(readFileSync(join(webDist, 'index.html'), 'utf8')).toBe('old-dist');
+    expect(existsSync(join(repoRoot, 'web', '.dist-update'))).toBe(false);
+    const st = await s.status();
+    expect(st.pendingLocal).toBe(true);
+    expect(st.error).toBe('building: boom');
+  });
+});
+
+describe('background fetch rate limit', () => {
+  it('fetches at most once per gap (default 15 min), and force bypasses it', async () => {
+    const { repoRoot, webDist } = initRepos();
+    let t = 1_000_000;
+    const s = svc({ repoRoot, webDist, now: () => t });
+    await s.status();
+    // someone publishes B; our remote-tracking ref only learns of it on a fetch
+    const other = join(tempDir(), 'other');
+    git(repoRoot, 'clone', '-q', git(repoRoot, 'config', '--get', 'remote.origin.url'), other);
+    writeFileSync(join(other, 'file.txt'), 'B');
+    git(other, 'add', 'file.txt');
+    commit(other, 'B');
+    git(other, 'push', 'origin', 'master');
+
+    t += 14 * 60_000;
+    expect((await s.status()).behind).toBe(0); // inside the gap: no fetch
+    expect((await s.status({ force: true })).behind).toBe(1); // forced
+  });
+
+  it('fetches again after the gap passes', async () => {
+    const { repoRoot, webDist } = initRepos();
+    let t = 1_000_000;
+    const s = svc({ repoRoot, webDist, now: () => t });
+    await s.status();
+    const other = join(tempDir(), 'other');
+    git(repoRoot, 'clone', '-q', git(repoRoot, 'config', '--get', 'remote.origin.url'), other);
+    writeFileSync(join(other, 'file.txt'), 'B');
+    git(other, 'add', 'file.txt');
+    commit(other, 'B');
+    git(other, 'push', 'origin', 'master');
+    t += 15 * 60_000 + 1;
+    expect((await s.status()).behind).toBe(1);
+  });
+
+  it('the status route passes ?check=1 as a forced fetch', async () => {
+    const app = Fastify({ logger: false });
+    const seen: unknown[] = [];
+    registerUpdateRoutes(app, { status: async (o: unknown) => (seen.push(o), {}), install: async () => ({ ok: true, stage: 'restart-needed' }) } as never);
+    await app.ready();
+    await app.inject({ method: 'GET', url: '/update/status' });
+    await app.inject({ method: 'GET', url: '/update/status?check=1' });
+    expect(seen).toEqual([{ force: false }, { force: true }]);
+    await app.close();
   });
 });
 

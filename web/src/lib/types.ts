@@ -91,6 +91,12 @@ export interface UpdateStatus {
   supported: boolean;
   current: string | null;
   latest: string | null;
+  /** Short commit this server process started on. */
+  running: string | null;
+  /** The checkout (or its web build) is newer than what is running. */
+  pendingLocal: boolean;
+  /** A newer rune is ready: behind origin, or pendingLocal. */
+  available: boolean;
   behind: number;
   ahead: number;
   dirty: boolean;

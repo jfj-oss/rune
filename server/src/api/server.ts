@@ -105,6 +105,8 @@ export interface AppOptions {
   /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
   artistWaitMs?: number;
   webDist?: string;
+  /** Record the git commit this process starts on, for the update chip (main.ts enables; tests leave git alone). */
+  updateCaptureRunning?: boolean;
   /** Server-owned queue tests: mpv's run player instead of a real mpv (config spotify.serverQueue picks the mode). */
   pcRunZone?: PcZone;
 }
@@ -926,6 +928,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   const updateService = createUpdateService({
     repoRoot: () => findUpdateRepoRoot(process.cwd()),
     webDist: dist,
+    captureRunning: opts.updateCaptureRunning === true,
     // Music playing (or paused mid-song) on the PC blocks an update, whatever
     // zone owns the PC queue (mpv directly, or the server-owned driver).
     isPlayingOnPc: () => {

@@ -12,6 +12,8 @@ const background = process.env.RUNE_NO_SCAN !== '1';
 const { app, shutdown } = await buildApp(db, cfg, {
   pcZone: process.env.RUNE_NO_PC !== '1',
   scanOnStart: background,
+  // Remember the commit this process starts on, so the update chip can see code committed since.
+  updateCaptureRunning: true,
   watch: background && process.env.RUNE_NO_WATCH !== '1',
   backups: background && process.env.RUNE_NO_BACKUPS !== '1',
   // Phase 0: MPRIS + PipeWire + Connect side by side in spotify-watch.jsonl (listens only).

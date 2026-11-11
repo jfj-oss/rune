@@ -218,3 +218,11 @@
 .qrow:has(.pop--open), .prow:has(.pop--open), .tklayer:has(.pop--open), .vgrid__row:has(.pop--open), .vgrid__list:has(.pop--open) { z-index: 20; }
 /* the mark: a canvas of fine dithered dots (see Logo.tsx) */
 .dotlogo { display: block; flex: none; image-rendering: pixelated; }
+
+/* ---------- update chip (top bar on desktop, floating top-right on the phone) ---------- */
+.chip--update { flex: none; cursor: pointer; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-2); font-weight: 600; }
+button.chip--update:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 34%, transparent); color: var(--text); }
+.chip--update:disabled { cursor: default; opacity: 0.95; }
+.chip--update.is-failed { border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.chip--float { position: fixed; z-index: 46; top: calc(var(--safe-t) + 10px); right: 16px; height: 32px; padding: 0 13px; background: rgba(18, 16, 31, 0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); }
+.dialog--confirm { width: min(380px, 100%); }

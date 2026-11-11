@@ -51,6 +51,36 @@ function qs(params: Record<string, string | number | undefined>): string {
 
 const mock = () => import('./mock');
 
+/** Mock mode only: `?update=1` pretends a newer rune is ready, and an install walks through the steps. */
+const mockUpdate = {
+  start: 0,
+  wanted(): boolean {
+    try {
+      if (typeof window === 'undefined') return false;
+      const q = new URLSearchParams(window.location.search).get('update');
+      if (q === '1') sessionStorage.setItem('rune.mockUpdate', '1');
+      if (q === '0') sessionStorage.removeItem('rune.mockUpdate');
+      return sessionStorage.getItem('rune.mockUpdate') === '1';
+    } catch {
+      return false;
+    }
+  },
+  status(): UpdateStatus {
+    const want = this.wanted();
+    const steps: UpdateStatus['stage'][] = ['downloading', 'installing', 'building', 'waiting-for-music'];
+    const stage = this.start ? (steps[Math.min(steps.length - 1, Math.floor((Date.now() - this.start) / 1500))] ?? null) : null;
+    return {
+      supported: true, current: 'abc1234', latest: 'abc1234', running: want ? 'f00d123' : 'abc1234', pendingLocal: want, available: want,
+      behind: 0, ahead: want ? 6 : 0, dirty: false, playing: false, stage, error: null,
+    };
+  },
+  async install(): Promise<UpdateInstallResult> {
+    this.start = Date.now();
+    await new Promise((r) => setTimeout(r, 30_000));
+    return { ok: true, stage: 'restart-needed' };
+  },
+};
+
 /** Typed API client — one function per route in CONTRACTS.md. */
 export const api = {
   async albums(q: AlbumQuery = {}): Promise<Page<AlbumSummary>> {
@@ -192,14 +222,13 @@ export const api = {
     return http<{ path: string; reason: string }[]>('/scan/errors');
   },
   // ---------- self-update ----------
-  async updateStatus(): Promise<UpdateStatus> {
-    if (isMock) {
-      return { supported: true, current: 'abc1234', latest: 'abc1234', behind: 0, ahead: 0, dirty: false, playing: false, stage: null, error: null };
-    }
-    return http('/update/status');
+  /** `check` forces the server's background `git fetch` (Settings "Check for updates"); polls leave it off. */
+  async updateStatus(check = false): Promise<UpdateStatus> {
+    if (isMock) return mockUpdate.status();
+    return http(`/update/status${check ? '?check=1' : ''}`);
   },
   async updateInstall(): Promise<UpdateInstallResult> {
-    if (isMock) return { ok: true, stage: 'restart-needed' };
+    if (isMock) return mockUpdate.install();
     return http('/update/install', { method: 'POST' });
   },
 };

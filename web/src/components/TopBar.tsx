@@ -8,6 +8,7 @@ import { useSearchNav } from '../store/searchNav';
 import { useRadio } from '../store/radio';
 import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
+import { UpdateChip } from './UpdateChip';
 
 
 export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: boolean }) {
@@ -73,6 +74,7 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
         />
         {value ? <button className="search__clear" aria-label="Clear search" onClick={() => { setValue(''); input.current?.focus(); }}><X size={14} /></button> : <kbd>/</kbd>}
       </label>
+      <UpdateChip />
       <Popover
         placement="bottom-end"
         trigger={({ toggle }) => <button className="btn-icon" aria-label="Settings" onClick={toggle}><Settings size={19} /></button>}
