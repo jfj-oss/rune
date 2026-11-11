@@ -142,7 +142,8 @@ export const api = {
     return http(`/player/${encodeURIComponent(zone)}`, { method: 'POST', body: JSON.stringify(cmd) });
   },
   // ---------- Spotify ----------
-  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string } }> {
+  /** `restingUntil`: epoch ms until which Spotify refuses rune's requests (its daily limit), null when it answers. */
+  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string }; restingUntil?: number | null }> {
     if (isMock) return (await mock()).mockApi.spotifyStatus();
     try {
       return await http('/spotify/status');

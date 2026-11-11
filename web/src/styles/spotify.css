@@ -51,6 +51,8 @@
 .sheet__txt small { font-size: 12.5px; color: var(--text-3); }
 .sheet__note { font-size: 13px; color: var(--text-2); margin-top: 14px; }
 .sheet__note--dim { color: var(--text-3); font-size: 12px; margin-top: 10px; }
+/* Spotify's daily limit is used up: said before the device list, in the warning colour, so no tap is a surprise */
+.sheet__note--resting { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); }
 @media (max-width: 899px) {
   .dialog__scrim:has(.dialog--sheet) { place-items: end center; padding: 0; }
   .dialog--sheet { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: var(--safe-b); }
