@@ -26,7 +26,7 @@ const VOLUME_SEND_MS = 150;
 
 /**
  * Space = play / pause, E / R = volume down / up, 1 / 2 / 3 = previous / restart / next, Z = Home,
- * X = Playlists, the key chosen in Settings (A by default) = the playing song's album, and any playlist hotkeys
+ * X = Playlists, G = shuffle on / off, the key chosen in Settings (A by default) = the playing song's album, and any playlist hotkeys
  * (set on the playlist's page).
  * Anywhere on the page, not while typing.
  */
@@ -115,6 +115,13 @@ export function KeyboardShortcuts() {
           const album = state.queue[state.index]?.album;
           if (album?.id && album.id !== 'sp:unknown') go(`/album/${encId(album.id)}`);
         }
+        return;
+      }
+      if (plain && k === 'g') {
+        e.preventDefault();
+        if (e.repeat) return;
+        const { state, command } = usePlayer.getState();
+        if (state.queue.length) void command({ type: 'shuffle', on: !state.shuffle });
         return;
       }
       if ((k === 'e' || k === 'r') && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
