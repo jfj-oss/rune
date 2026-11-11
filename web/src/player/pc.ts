@@ -6,16 +6,21 @@ import { matchBackendModes, PLAIN_MODES } from './modes';
 import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 import { ZoneEngine, type ZoneTransport } from './zoneEngine';
 
+/** The player on the PC that takes the pc zone's Spotify songs: Soloist (zone 'soloist') or the Spotify app's Connect zone. */
 export interface PcDevice {
-  /** Spotify Connect device id of the Spotify app on the PC. */
-  id: string;
+  /** Server zone id: 'soloist', or 'spotify:<device id>' for the Spotify app on the PC. */
+  zone: string;
   name: string;
 }
+
+export const SOLOIST_ZONE = 'soloist';
 
 /** What PcBackend needs from the outside world (swapped for fakes in tests). */
 export interface PcDeps {
   remote(zone: string): Backend;
   transport(zone: string): ZoneTransport;
+  /** Soloist's sound goes to the PC speakers (a phone that was listening loses the stream: one device, one place). */
+  soloistToPc?(): Promise<unknown>;
   notice?(msg: string): void;
   now?(): number;
 }
@@ -29,9 +34,9 @@ const DUCK_MS = 20_000;
 /**
  * pc queue mode:
  * - `pc`      only local files: the server's own mpv queue (gapless, keeps going with no tab open)
- * - `spotify` only Spotify tracks: the Spotify app's own queue on the PC (also tab-independent)
+ * - `spotify` only Spotify tracks: Soloist's rune-kept queue, or the Spotify app's own queue on the PC (tab-independent)
  * - `mixed`   both in one queue: the queue lives in this tab and each track is loaded into mpv or the
- *             Spotify app one at a time, switching on track change (needs a rune tab open)
+ *             Spotify player one at a time, switching on track change (needs a rune tab open)
  */
 export type PcMode = 'pc' | 'spotify' | 'mixed';
 
@@ -49,7 +54,7 @@ export function isMixedQueue(queue: PlayerState['queue']): boolean {
   return queue.some((q) => q.track.source === 'spotify') && queue.some((q) => q.track.source !== 'spotify');
 }
 
-/** The "Linux PC speakers" zone: mpv, plus (when the Spotify app runs on the PC) Spotify tracks in the same queue. */
+/** The "Linux PC speakers" zone: mpv, plus (through Soloist, or the Spotify app on the PC) Spotify tracks in the same queue. */
 export class PcBackend implements Backend {
   readonly zone = 'pc';
   private pc: Backend;
@@ -73,17 +78,19 @@ export class PcBackend implements Backend {
 
   get currentMode(): PcMode { return this.mode; }
   get hasSpotify(): boolean { return !!this.device; }
+  /** Soloist plays this zone's Spotify songs (no app, no Web API). */
+  get usesSoloist(): boolean { return this.device?.zone === SOLOIST_ZONE; }
 
-  /** The Spotify app on the PC appeared / went away / changed id. */
+  /** The PC's Spotify player appeared / went away / changed (Soloist came up, the app quit, …). */
   setDevice(device: PcDevice | null) {
-    if (device?.id === this.device?.id) { this.device = device; return; }
+    if (device?.zone === this.device?.zone) { this.device = device; return; }
     if (this.mode !== 'pc') this.switchTo('pc');
     this.sp?.dispose();
     this.sp = null;
     if (this.mixed && this.mode !== 'mixed') { this.mixed.dispose(); this.mixed = null; }
     this.device = device;
     if (device) {
-      const sp = this.deps.remote(`spotify:${device.id}`);
+      const sp = this.deps.remote(device.zone);
       this.sp = sp;
       this.offs.push(sp.subscribe((s) => this.onChild('spotify', s)));
     }
@@ -156,7 +163,15 @@ export class PcBackend implements Backend {
     }
     const c = this.child(this.mode);
     if (!c) return;
+    // Play pressed for a Spotify song on the PC speakers: the sound must be there (a phone may have taken the stream).
+    if (cmd.type === 'resume' && this.state.queue[this.state.index]?.track.source === 'spotify') await this.soloistToPc();
     return c.send(cmd, items);
+  }
+
+  /** Before a Spotify song sounds through Soloist for this zone: its output is the PC speakers. Failing is not fatal. */
+  private async soloistToPc(): Promise<void> {
+    if (!this.usesSoloist || !this.deps.soloistToPc) return;
+    await this.deps.soloistToPc().catch(() => undefined);
   }
 
   /**
@@ -182,6 +197,7 @@ export class PcBackend implements Backend {
     const want: PlayModes = { shuffle: this.state.shuffle, repeat: this.state.repeat };
     const volume = this.userVolume();
     const moved = target !== this.mode;
+    if (target !== 'pc') await this.soloistToPc();
     await this.switchTo(target);
     const c = this.ensure(target)!;
     // A mixed queue sends one song at a time: clear the app's own repeat/shuffle before its first song starts.
@@ -195,6 +211,7 @@ export class PcBackend implements Backend {
     if (!items.length) return;
     const need = modeFor(items);
     if (need !== 'pc' && !this.device) throw new Error('rune starts Spotify on the PC for this');
+    if (need !== 'pc') await this.soloistToPc();
     const s = this.state;
     const live = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
     if (!live) {
@@ -229,7 +246,7 @@ export class PcBackend implements Backend {
 
   private ensure(mode: PcMode): Backend | null {
     if (mode === 'mixed' && !this.mixed) {
-      const sp = this.device ? `spotify:${this.device.id}` : null;
+      const sp = this.device?.zone ?? null;
       if (!sp) return null;
       const engine = new HybridEngine(new ZoneEngine(this.deps.transport('pc')), new ZoneEngine(this.deps.transport(sp)));
       this.mixed = new LocalBackend('pc', engine, { volume: this.userVolume() || 100 }, this.deps.notice);

@@ -6,12 +6,12 @@ export interface Caps {
   sdk: boolean;
 }
 
-/** A zone, or just its kind (a pc zone then has no Spotify app). */
-export type ZoneLike = ZoneInfo['kind'] | Pick<ZoneInfo, 'kind' | 'spotifyDeviceId'>;
+/** A zone, or just its kind (a pc zone then has no Spotify player). */
+export type ZoneLike = ZoneInfo['kind'] | Pick<ZoneInfo, 'kind' | 'spotifyDeviceId' | 'spotifyZone'>;
 const kindOf = (z: ZoneLike): ZoneInfo['kind'] => (typeof z === 'string' ? z : z.kind);
 
-/** Does this pc zone have the Spotify desktop app next to it (so it can play Spotify tracks)? */
-export const pcHasSpotify = (z: ZoneLike): boolean => typeof z !== 'string' && z.kind === 'pc' && !!z.spotifyDeviceId;
+/** Does this pc zone have a player for Spotify songs right now (Soloist, or the Spotify desktop app)? */
+export const pcHasSpotify = (z: ZoneLike): boolean => typeof z !== 'string' && z.kind === 'pc' && !!(z.spotifyZone ?? z.spotifyDeviceId);
 
 /** Can a zone play an item of this source? */
 export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boolean {
@@ -94,9 +94,18 @@ export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps)
   return out.sort((a, b) => rank(a.zone) - rank(b.zone));
 }
 
-/** The PC's Spotify app is folded into the pc zone, so it must not show up a second time as a Connect device. */
-export function withoutPcDevice(zones: ZoneInfo[]): ZoneInfo[] {
-  const hidden = new Set(zones.filter((z) => z.kind === 'pc' && z.spotifyDeviceId).map((z) => `spotify:${z.spotifyDeviceId}`));
+/**
+ * The PC's Spotify players are folded into the pc zone (same speakers), so they must not show up a second time: the
+ * Spotify app's Connect device never does, and Soloist does not either while it is the pc zone's engine — except on
+ * a phone (`keepSoloist`), where the Soloist zone is how the phone hears Spotify from the PC over the stream.
+ */
+export function withoutPcDevice(zones: ZoneInfo[], opts: { keepSoloist?: boolean } = {}): ZoneInfo[] {
+  const hidden = new Set<string>();
+  for (const z of zones) {
+    if (z.kind !== 'pc') continue;
+    if (z.spotifyDeviceId) hidden.add(`spotify:${z.spotifyDeviceId}`);
+    if (z.spotifyZone && !(opts.keepSoloist && z.spotifyZone === 'soloist')) hidden.add(z.spotifyZone);
+  }
   return hidden.size ? zones.filter((z) => !(z.kind === 'spotify' && hidden.has(z.id))) : zones;
 }
 
@@ -137,10 +146,12 @@ export function followPcSpeakers(
   event: { zone: string; status: string },
   wasPlaying: boolean,
   page: { zone: string; status: string },
-  pc: Pick<ZoneInfo, 'id' | 'spotifyDeviceId'> | undefined,
+  pc: Pick<ZoneInfo, 'id' | 'spotifyDeviceId' | 'spotifyZone'> | undefined,
 ): boolean {
   if (!pc || page.zone === pc.id || wasPlaying) return false;
   if (event.status !== 'playing' && event.status !== 'loading') return false;
   if (page.status === 'playing' || page.status === 'loading') return false;
-  return event.zone === pc.id || (!!pc.spotifyDeviceId && event.zone === `spotify:${pc.spotifyDeviceId}`);
+  // A page sitting on the Soloist zone (a phone listening) is on that player already.
+  if (pc.spotifyZone && page.zone === pc.spotifyZone) return false;
+  return event.zone === pc.id || (!!pc.spotifyDeviceId && event.zone === `spotify:${pc.spotifyDeviceId}`) || (!!pc.spotifyZone && event.zone === pc.spotifyZone);
 }

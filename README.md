@@ -91,5 +91,13 @@ Once:
 3. Pair it: `soloist -n rune -k "$(cat ~/.config/rune/soloist-key)" --pair` (the session is kept in Soloist's data dir).
 
 rune starts and supervises Soloist itself when both files exist (`soloist.enabled: false` in `config.json` turns it off;
-`soloist.deviceName`, `wsPort` (4547), `sink`, `hlsKbps` are the other keys). In the zone picker: **Spotify (Soloist)**
-plays on the PC speakers; on a phone, pick it (or tap **Hear here**) and the phone plays the stream, lock screen included.
+`soloist.deviceName`, `wsPort` (4547), `sink`, `hlsKbps` are the other keys).
+
+While Soloist is running and signed in, it is also how the **Linux PC speakers** zone plays Spotify songs: no desktop app
+is started, no Connect device is polled, and no Web API request is made (local files stay on mpv in the same queue, and
+only one of them sounds at a time). On a desktop the Soloist zone is therefore folded into the PC speakers zone; on a
+phone it stays in the picker as the way to hear Spotify from the PC on the phone itself (pick it, or tap **Hear here**,
+and the phone plays the stream, lock screen included). Playing a Spotify song on the PC speakers while a phone listens
+moves the sound back to the speakers. When Soloist cannot play (not installed, no key, not paired, crashed, or its build
+expired), the PC speakers zone goes back to the Spotify desktop app and says why in one line, e.g. "Soloist needs
+updating (its build expired) — using the Spotify app".

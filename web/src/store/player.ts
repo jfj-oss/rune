@@ -9,7 +9,7 @@ import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
 import { createTabChannel } from '../player/oneTab';
 import { PcBackend, type PcDevice } from '../player/pc';
-import { needsPcSpotify, startPcSpotifyAndWait } from '../player/pcStart';
+import { needsPcSpotify, pcSpotifyFallbackNotice, pcSpotifyZone, startPcSpotifyAndWait } from '../player/pcStart';
 import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
 import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
@@ -46,21 +46,44 @@ interface PlayerStore {
   command(cmd: ExtCommand): Promise<void>;
 }
 
-const pcDevice = (z: ZoneInfo): PcDevice | null => (z.spotifyDeviceId ? { id: z.spotifyDeviceId, name: z.spotifyDeviceName ?? 'Spotify' } : null);
+/** The player the server names for the pc zone's Spotify songs: Soloist, or the Spotify app's Connect zone. */
+const pcDevice = (z: ZoneInfo): PcDevice | null => {
+  const zone = pcSpotifyZone(z);
+  if (!zone) return null;
+  return { zone, name: zone === 'soloist' ? 'Soloist' : z.spotifyDeviceName ?? 'Spotify' };
+};
 
-/** The Spotify app on the PC can start or quit at any time: keep the pc backend in step with the zone list. */
+/** Soloist and the Spotify app on the PC can come and go at any time: keep the pc backend in step with the zone list. */
 function syncPcDevice(zones: ZoneInfo[]) {
   const z = zones.find((x) => x.kind === 'pc');
   const b = z && backends.get(z.id);
   if (z && b instanceof PcBackend) b.setDevice(pcDevice(z));
 }
 
-/** Server zone list -> what the UI lists (the PC's own Spotify app is folded into the pc zone). */
+/**
+ * Server zone list -> what the UI lists. The PC's Spotify players are folded into the pc zone: the app's Connect device
+ * always, and Soloist while it is the pc zone's engine — except on a phone, where the Soloist zone is the way to hear
+ * Spotify from the PC on the phone itself.
+ */
 function tidyZones(zones: ZoneInfo[]): ZoneInfo[] {
   let out = zones;
   if (!isMock && !out.some((z) => z.kind === 'browser')) out = [...out, BROWSER_ZONE]; // the browser zone lives in this tab
   if (!isMock) out = withoutOwnDevice(out, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
-  return withoutPcDevice(out);
+  return withoutPcDevice(out, { keepSoloist: isHandheld() });
+}
+
+/** How long the same fallback notice ("Soloist needs updating — using the Spotify app") stays quiet after it was shown. */
+const FALLBACK_NOTICE_QUIET_MS = 60_000;
+let lastFallbackNotice: { text: string; at: number } | null = null;
+
+/** Spotify songs head for the pc zone and the Spotify app stands in for Soloist: say why, once in a while. */
+function noteSpotifyFallback(z: ZoneInfo | undefined, items: PlayItem[]): void {
+  const text = pcSpotifyFallbackNotice(z, items);
+  if (!text) return;
+  const now = Date.now();
+  if (lastFallbackNotice && lastFallbackNotice.text === text && now - lastFallbackNotice.at < FALLBACK_NOTICE_QUIET_MS) return;
+  lastFallbackNotice = { text, at: now };
+  useUi.getState().toast(text);
 }
 
 function backendFor(z: ZoneInfo): Backend {
@@ -75,7 +98,7 @@ function backendFor(z: ZoneInfo): Backend {
   else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd, createTabChannel());
   // A server-owned pc queue (server config spotify.serverQueue) needs no driving from here: a plain remote.
   else if (usesServerQueue(z)) b = new RemoteBackend(z.id);
-  else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, notice }, pcDevice(z));
+  else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, soloistToPc: () => api.soloistOutput('pc'), notice }, pcDevice(z));
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
   return b;
@@ -284,8 +307,9 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         const active = (s.status === 'playing' || s.status === 'paused' || s.status === 'loading') && s.index >= 0 && s.queue.length > 0;
         if (active) {
           const items: PlayItem[] = s.queue.map((q) => ({ track: q.track, album: q.album }));
-          // Spotify + Linux PC speakers: rune starts the desktop app first, then this
-          // handoff proceeds exactly as if its Connect device had been there already.
+          // Spotify + Linux PC speakers: Soloist takes them when it can; otherwise rune starts the desktop app first,
+          // then this handoff proceeds exactly as if its Connect device had been there already.
+          noteSpotifyFallback(z, items);
           if (needsPcSpotify(z, items)) {
             const pc = await ensurePcSpotify(items, z);
             if (!pc) return; // timed out: the music stays where it is
@@ -344,9 +368,10 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           }
           start = 0;
         }
-        // Owned songs play from the local file (and then need no Spotify app at all).
+        // Owned songs play from the local file (and then need no Spotify player at all).
         list = await ownCopies(z, list, start);
-        // Sending Spotify tracks to the PC speakers: start the app and wait for it.
+        // Sending Spotify tracks to the PC speakers: Soloist, or (saying why) the app — started and waited for.
+        noteSpotifyFallback(z, list);
         if (needsPcSpotify(z, list)) {
           const pc = await ensurePcSpotify(list, z);
           if (!pc) return; // timed out: nothing was paused or moved
@@ -373,6 +398,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         req = { ...req, items: await ownCopies(z, req.items, req.startIndex) };
         // Chosen from the "Play on…" sheet: starting Spotify is still only a step of
         // actually sending Spotify tracks to the PC speakers.
+        noteSpotifyFallback(z, req.items);
         if (needsPcSpotify(z, req.items)) {
           const pc = await ensurePcSpotify(req.items, z);
           if (!pc) return; // timed out: the music stays where it is
@@ -399,7 +425,8 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         const b = z && backends.get(z.id);
         if (!z || !b || !items.length) return;
         items = await ownCopies(z, items, 0, false);
-        // Queueing Spotify tracks on the PC speakers needs the app too.
+        // Queueing Spotify tracks on the PC speakers needs a Spotify player too.
+        noteSpotifyFallback(z, items);
         if (needsPcSpotify(z, items)) {
           const pc = await ensurePcSpotify(items, z);
           if (!pc) return; // timed out: the queue and playback stay where they are
