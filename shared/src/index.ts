@@ -45,6 +45,8 @@ export interface AlbumSummary {
   coverUrl?: string; // served by our API: /api/cover/:albumId?size=...
   format?: string; // "FLAC 24/96", "MP3 320", "Spotify"
   addedAt: number; // epoch ms
+  /** Pinned to the top of the Library (rune's own pins table). */
+  pinned?: boolean;
 }
 
 export interface Album extends AlbumSummary {

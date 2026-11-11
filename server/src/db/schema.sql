@@ -84,3 +84,11 @@ CREATE TABLE IF NOT EXISTS album_details (
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
   kind UNINDEXED, ref_id UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2'
 );
+
+-- Pins: albums / playlists the user pinned to the top of their Library lists.
+-- item_id is an album id (la:/sp:) or a playlist id (pl:...); no FK, so a pin outlives a rescan.
+CREATE TABLE IF NOT EXISTS pins (
+  item_id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('album', 'playlist')),
+  pinned_at INTEGER NOT NULL
+);

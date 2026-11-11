@@ -32,6 +32,11 @@
 .card:hover .card__play, .card__play:focus-visible { opacity: 1; transform: none; }
 .card__play:hover { background: var(--accent-2); }
 @media (hover: none) { .card__badge { opacity: 1; top: 8px; bottom: auto; } .card__play { display: none; } }
+/* pinned albums / playlists: a small mark at the top-right of the cover, and before a list row's title */
+.pinmark { display: inline-grid; place-items: center; color: var(--accent-2); }
+.card__pin { position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%; background: rgba(12, 12, 16, 0.78); border: 1px solid color-mix(in srgb, #fff 14%, transparent); pointer-events: none; }
+.lrow__pin { margin-right: 6px; vertical-align: -1px; }
+.badge--pinned { color: var(--accent-2); }
 @media (prefers-reduced-motion: reduce) { .card:hover .card__art { transform: none !important; } }
 .card__title { display: block; margin-top: 11px; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card__title:hover { text-decoration: underline; text-underline-offset: 3px; }

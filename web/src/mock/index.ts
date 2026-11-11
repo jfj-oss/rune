@@ -13,10 +13,15 @@ const wait = <T>(v: T, ms = 140): Promise<T> => new Promise((r) => setTimeout(()
 export const MOCK_ZONES: ZoneInfo[] = [
   { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'mock-pc-spotify', spotifyDeviceName: 'HORSE' },
   { id: 'browser', name: 'This browser', kind: 'browser' },
-  { id: 'spotify:iphone', name: 'iPhone — Spotify', kind: 'spotify' },
+  { id: 'spotify:iphone', name: 'iPhone — Spotify', kind: 'spotify', deviceType: 'Smartphone', supportsVolume: false },
 ];
 
+/** Pinned albums / playlists (session only, like the rest of the mock). */
+const pins = new Set<string>();
+const withPin = <T extends { id: string }>(x: T): T & { pinned?: boolean } => (pins.has(x.id) ? { ...x, pinned: true } : x);
+
 export const mockApi = {
+  async setPinned(id: string, pinned: boolean): Promise<void> { if (pinned) pins.add(id); else pins.delete(id); return wait(undefined, 60); },
   async albums(q: AlbumQuery): Promise<Page<AlbumSummary>> {
     let list = SUMMARIES.filter(inLibrary);
     if (q.source && q.source !== 'all') list = list.filter((a) => a.source === q.source);
@@ -39,6 +44,7 @@ export const mockApi = {
       : sort === 'artist' ? a.artist.name.localeCompare(b.artist.name) || (a.year ?? 0) - (b.year ?? 0)
       : sort === 'title' ? a.title.localeCompare(b.title)
       : (b.year ?? 0) - (a.year ?? 0));
+    list = [...list.filter((a) => pins.has(a.id)), ...list.filter((a) => !pins.has(a.id))].map(withPin);
     const off = q.offset ?? 0;
     return wait({ items: list.slice(off, off + (q.limit ?? 60)), total: list.length });
   },
@@ -51,7 +57,7 @@ export const mockApi = {
   async album(id: string): Promise<Album> {
     const a = ALBUMS.find((x) => x.id === id);
     if (!a) throw new Error('not found');
-    return wait(a);
+    return wait(withPin(a));
   },
   async details(id: string): Promise<AlbumDetails | null> {
     return wait(DETAILS[id] ?? null, DETAILS[id] ? 700 : 450);
@@ -74,12 +80,18 @@ export const mockApi = {
     return wait({ albums, artists, tracks }, 180);
   },
   async zones(): Promise<ZoneInfo[]> { return wait(MOCK_ZONES, 30); },
-  async spotifyStatus() { return wait({ connected: true, user: { name: 'mock', product: 'premium' } }, 10); },
-  async playlists(): Promise<RunePlaylistSummary[]> { return wait(mockPlaylists.list(), 160); },
+  async spotifyStatus() {
+    // `?scopes=old` pretends an older login that never granted the write permissions (the reconnect hint shows)
+    let old = false;
+    try { old = sessionStorage.getItem('rune.mockOldScopes') === '1' || new URLSearchParams(window.location.search).get('scopes') === 'old'; if (old) sessionStorage.setItem('rune.mockOldScopes', '1'); } catch { /* ignore */ }
+    const scopes = old ? ['user-library-read', 'playlist-read-private'] : ['user-library-read', 'user-library-modify', 'playlist-read-private', 'playlist-modify-private', 'playlist-modify-public'];
+    return wait({ connected: true, user: { name: 'mock', product: 'premium' }, scopes }, 10);
+  },
+  async playlists(): Promise<RunePlaylistSummary[]> { return wait(mockPlaylists.list().map(withPin), 160); },
   async playlist(id: string): Promise<RunePlaylistDetail> {
     const p = mockPlaylists.get(id);
     if (!p) throw new Error('not found');
-    return wait(p, 220);
+    return wait(withPin(p), 220);
   },
   async albumSaved(id: string): Promise<boolean> { return wait(isSaved(id), 40); },
   async setAlbumSaved(id: string, on: boolean): Promise<void> { setSaved(id, on); return wait(undefined, 120); },

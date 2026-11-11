@@ -1,6 +1,6 @@
 import type { PlaylistTrack } from '@liner/shared';
 import { describe, expect, it } from 'vitest';
-import { canAddTo, hasOverlay, isOverlayRow, isSpotifyEditable, removalPositions, rowEditable, rowRemovable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, moved, orderByRecent, orderPlaylist, selectRow, type RunePlaylistDetail } from './playlists';
+import { canAddTo, hasOverlay, isOverlayRow, isSpotifyEditable, removalPositions, rowEditable, rowRemovable, splitForTarget, applyEdit, applyEditToSummary, coverAlbums, isEditable, isMixed, isRunePlaylist, missingWriteScope, moved, orderByRecent, orderPlaylist, pinnedFirst, selectRow, type RunePlaylistDetail } from './playlists';
 
 const tr = (id: string, album = 'a1', source: 'local' | 'spotify' = 'local'): PlaylistTrack => ({
   id, albumId: album, source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000, album: { id: album, title: album },
@@ -166,5 +166,28 @@ describe('orderPlaylist', () => {
     expect(orderPlaylist(pl('pl:sp:x', [100, 300]), 'playlist').sorted).toBe(false);
     expect(orderPlaylist(pl('pl:rune:1', [100, 300], 'smart'), 'added').sorted).toBe(false);
     expect(orderPlaylist(pl('pl:sp:x', [undefined, undefined]), 'added').sorted).toBe(false);
+  });
+});
+
+describe('missingWriteScope', () => {
+  const full = ['user-library-read', 'user-library-modify', 'playlist-modify-private'];
+  it('needs user-library-modify for Liked Songs and either playlist-modify scope for a playlist', () => {
+    expect(missingWriteScope(full, 'pl:sp:liked')).toBeNull();
+    expect(missingWriteScope(full, 'pl:sp:abc')).toBeNull();
+    expect(missingWriteScope(['user-library-read', 'playlist-modify-public'], 'pl:sp:liked')).toBe('user-library-modify');
+    expect(missingWriteScope(['user-library-modify'], 'pl:sp:abc')).toBe('playlist-modify-private');
+  });
+  it('assumes nothing is missing when the server did not say, and never for rune playlists', () => {
+    expect(missingWriteScope(null, 'pl:sp:liked')).toBeNull();
+    expect(missingWriteScope(undefined, 'pl:sp:abc')).toBeNull();
+    expect(missingWriteScope([], 'pl:rune:1')).toBeNull();
+  });
+});
+
+describe('pinnedFirst', () => {
+  it('moves pinned items to the front and keeps the order otherwise', () => {
+    const list = [{ id: 'a' }, { id: 'b', pinned: true }, { id: 'c' }, { id: 'd', pinned: true }];
+    expect(pinnedFirst(list).map((x) => x.id)).toEqual(['b', 'd', 'a', 'c']);
+    expect(pinnedFirst([]).length).toBe(0);
   });
 });

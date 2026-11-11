@@ -2,7 +2,7 @@ import type { Album, AlbumDetails, Artist } from '@liner/shared';
 import { genKindFor } from '../lib/waveCover';
 import { AsciiWaves } from '../components/AsciiWaves';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { Copy, ListEnd, MoreHorizontal, Play, Plus, Radio, Shuffle, Star, Wrench } from 'lucide-react';
+import { Copy, ListEnd, MoreHorizontal, Pin, Play, Plus, Radio, Shuffle, Star, Wrench } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { api } from '../api';
@@ -19,6 +19,7 @@ import { MobileBack } from '../components/MobileBack';
 import { SaveButton } from '../components/SaveButton';
 import { Cover } from '../components/Cover';
 import { AddToPlaylistItem } from '../components/AddToPlaylist';
+import { PinMenuItem } from '../components/Pin';
 import { MenuItem, Popover } from '../components/Popover';
 import { Empty, HScroll, QuietNote, SectionHead, SourceLink } from '../components/Rows';
 import { discoverApi } from '../discoverApi';
@@ -164,6 +165,7 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
             </p>
             <div className="ahero__tags">
               <FormatBadge format={album.format} source={album.source} />
+              {album.pinned && <span className="badge badge--pinned" title="Pinned to the top of Albums"><Pin size={11} fill="currentColor" /> Pinned</span>}
               {album.genres.map((g) => <Link key={g} to={`/genres/${encodeURIComponent(g)}`} className="chip">{g}</Link>)}
             </div>
             <div className="ahero__actions">
@@ -178,6 +180,7 @@ function AlbumView({ album, details, editions, artist, hash }: { album: Album; d
                 {(close) => (
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueAlbum(album.id, true); }}>Play next</MenuItem>
+                    <PinMenuItem id={album.id} pinned={album.pinned} close={close} />
                     <AddToPlaylistItem close={close} target={{ what: `${album.title} · ${plural(album.tracks.length, 'track')}`, newName: album.title, resolve: () => albumItems(album) }} />
                     {album.source === 'local' && <MenuItem icon={<Radio size={16} />} onClick={() => { close(); void startRadio('album', album.id); }}>Start radio</MenuItem>}
                     {album.source === 'local' && <MenuItem icon={<Wrench size={16} />} onClick={() => { close(); setFixing(true); }}>Fix match</MenuItem>}

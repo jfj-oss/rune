@@ -1340,6 +1340,8 @@ export interface SpotifyZoneInfo {
   isActive?: boolean;
   /** Private session / otherwise not controllable through the Web API. */
   isRestricted?: boolean;
+  /** False when Spotify says the device's volume cannot be set remotely (iPhones): the page hides the slider. */
+  supportsVolume?: boolean;
 }
 
 /** A Connect device: its state is read from, and its commands go through, the Spotify Web API. */
@@ -1404,6 +1406,7 @@ export class SpotifyZones {
         ...(device.type ? { deviceType: device.type } : {}),
         isActive: device.is_active,
         isRestricted: device.is_restricted,
+        ...(typeof device.supports_volume === 'boolean' ? { supportsVolume: device.supports_volume } : {}),
       });
     }
     return out;

@@ -42,6 +42,7 @@ import {
 } from './rules.js';
 import { ensureMyPlaylistSchema } from './schema.js';
 import { spotifyPlaylistEditable } from '../spotify/library.js';
+import { isPinned } from '../api/pins.js';
 
 export const RUNE_PLAYLIST_PREFIX = 'pl:rune:';
 /** Rune playlists sort before Spotify's (whose positions start at 0). */
@@ -278,6 +279,7 @@ function summaryFor(
     ...(chosen ?? row.image_url ? { imageUrl: (chosen ?? row.image_url) as string } : {}),
     trackCount: rune ? (trackIds?.length ?? 0) : row.track_count + overlayCount(db, row.id),
     source: rune ? 'local' : 'spotify',
+    ...(isPinned(db, row.id) ? { pinned: true } : {}),
   };
   if (rune) {
     summary.kind = isSmart(row) ? 'smart' : 'static';

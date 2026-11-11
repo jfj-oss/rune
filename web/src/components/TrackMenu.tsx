@@ -17,7 +17,7 @@ import { MenuItem } from './Popover';
  * Discover) renders these items, so "Song radio" is always in the same place.
  * `extra` appends row-specific actions such as "Remove from playlist".
  */
-export function TrackMenuItems({ item, close, extra }: { item: PlayItem; close(): void; extra?: ReactNode }) {
+export function TrackMenuItems({ item, close, extra, hideLiked }: { item: PlayItem; close(): void; extra?: ReactNode; /** The row's own list already offers the like/unlike action (the Liked Songs page). */ hideLiked?: boolean }) {
   const nav = useNavigate();
   const enqueueItems = usePlayer((s) => s.enqueueItems);
   const openRadio = useDiscoverUi((s) => s.openRadio);
@@ -29,7 +29,7 @@ export function TrackMenuItems({ item, close, extra }: { item: PlayItem; close()
       <MenuItem icon={<ListStart size={16} />} onClick={() => { close(); void enqueueItems([item], true); }}>Play next</MenuItem>
       <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void enqueueItems([item]); }}>Add to queue</MenuItem>
       <AddToPlaylistItem close={close} target={{ what: item.track.title, resolve: () => [item] }} />
-      <LikedMenuItem track={item.track} close={close} />
+      {!hideLiked && <LikedMenuItem track={item.track} close={close} />}
       <MenuItem icon={<Disc3 size={16} />} onClick={() => { close(); nav(`/album/${encId(item.album.id)}`); }}>Go to album</MenuItem>
       {item.track.artists[0] && (
         <MenuItem icon={<User size={16} />} onClick={() => { close(); nav(`/artist/${encId(item.track.artists[0]!.id)}`); }}>Go to artist</MenuItem>

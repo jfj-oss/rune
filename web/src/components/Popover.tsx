@@ -40,7 +40,9 @@ export function Popover({ trigger, children, placement = 'bottom-end', className
       const r = host.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight;
       const p = flip ? placement.replace('bottom', 'top') : placement;
       const y: CSSProperties = p.startsWith('bottom') ? { top: r.bottom + 8 } : { bottom: vh - r.top + 12 };
-      const x: CSSProperties = p.endsWith('end') ? { right: Math.max(8, vw - r.right) } : { left: Math.max(8, r.left) };
+      // a start-aligned panel near the right edge (the phone's "…" at the end of a row) hangs from the right instead
+      const w = panel.current?.offsetWidth ?? 0;
+      const x: CSSProperties = p.endsWith('end') || r.left + w > vw - 8 ? { right: Math.max(8, vw - r.right) } : { left: Math.max(8, r.left) };
       setPos({ position: 'fixed', ...y, ...x });
     };
     place();

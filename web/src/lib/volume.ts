@@ -48,3 +48,13 @@ export function detectIOS(ua: string, maxTouchPoints = 0): 'iPhone' | 'iPad' | n
   if (/iPad/.test(ua) || (/Macintosh/.test(ua) && maxTouchPoints > 1)) return 'iPad';
   return null;
 }
+
+/**
+ * What to say instead of a volume slider for a Spotify Connect device whose volume the Web API cannot set
+ * (Spotify reports supports_volume = false for phones): the slider would do nothing.
+ */
+export function remoteVolumeHint(z: { name: string; deviceType?: string }): string {
+  const handheld = z.deviceType === 'Smartphone' || z.deviceType === 'Tablet' || /iphone|ipad|android|phone/i.test(z.name);
+  const name = z.name.replace(/\s+[—–-]\s+Spotify$/i, '');
+  return handheld ? `Use the volume buttons on ${name}` : `Set the volume on ${name} itself`;
+}

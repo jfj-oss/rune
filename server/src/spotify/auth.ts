@@ -431,7 +431,7 @@ export function registerSpotifyRoutes(
     }
   });
 
-  app.get('/api/spotify/status', async () => ({ ...auth.status(), restingUntil: opts.restingUntil?.() ?? null }));
+  app.get('/api/spotify/status', async () => ({ ...auth.status(), restingUntil: opts.restingUntil?.() ?? null, scopes: auth.grantedScopes() }));
 
   app.post('/api/spotify/logout', async () => {
     auth.logout();

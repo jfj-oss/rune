@@ -31,6 +31,9 @@ textarea.inlinetext__input { padding: 8px 10px; font-size: 14.5px; line-height: 
 .ahero__note { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--text-3); max-width: 560px; margin-top: 2px; text-wrap: pretty; }
 .ahero__note svg { flex: none; margin-top: 2px; }
 @media (max-width: 899px) { .ahero__note { text-align: left; } }
+.ahero__note--warn { color: #f2dcaa; }
+.ahero__note--warn svg { color: var(--warn); }
+.dialog__note { font-size: 13px; color: var(--text-3); margin-top: -8px; margin-bottom: 8px; }
 .badge--rune { color: var(--accent-2); }
 .badge__dot--rune { background: var(--accent); }
 .badge svg { flex: none; color: var(--text-2); }

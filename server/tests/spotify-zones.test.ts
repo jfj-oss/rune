@@ -114,11 +114,12 @@ describe('Spotify Connect zones', () => {
 
   it('reports Spotify’s device type and state, and lets the picker force a fresh list', async () => {
     const api = new FakeZoneApi();
-    api.devicesData = [{ ...SIM_DEVICE, id: 'phone1', name: 'iPhone', is_active: false, is_restricted: true }];
+    api.devicesData = [{ ...SIM_DEVICE, id: 'phone1', name: 'iPhone', is_active: false, is_restricted: true, supports_volume: false }];
     let t = 1000;
     const zones = createSpotifyZones(api, { now: () => t });
+    // supports_volume = false (phones) reaches the page as supportsVolume, so it hides the dead slider
     expect(await zones.listZones()).toEqual([
-      { id: 'spotify:phone1', name: 'iPhone', kind: 'spotify', deviceType: 'Smartphone', isActive: false, isRestricted: true },
+      { id: 'spotify:phone1', name: 'iPhone', kind: 'spotify', deviceType: 'Smartphone', isActive: false, isRestricted: true, supportsVolume: false },
     ]);
     t += 2_000; // inside the 5 s cache, outside the 1.5 s "fresh" window
     await zones.listZones();

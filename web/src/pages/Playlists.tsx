@@ -5,12 +5,13 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api';
 import { LibraryTabs, LibSearch } from './Albums';
 import { MenuItem, Popover } from '../components/Popover';
+import { PinMark } from '../components/Pin';
 import { PlaylistCover } from '../components/PlaylistCover';
 import { Empty, SectionHead } from '../components/Rows';
 import { useIsDesktop } from '../hooks/useMedia';
 import { isLiked, usePlaylistPlay } from '../hooks/usePlaylistPlay';
 import { encId, plural } from '../lib/format';
-import { isRunePlaylist, type RunePlaylistSummary } from '../lib/playlists';
+import { isRunePlaylist, pinnedFirst, type RunePlaylistSummary } from '../lib/playlists';
 import { playlistApi } from '../playlistApi';
 import { usePlaylistUi } from '../store/playlistUi';
 import { useSpotify } from '../store/spotify';
@@ -28,6 +29,7 @@ function PlaylistCard({ p }: { p: RunePlaylistSummary }) {
         <Link to={href} className="card__artlink" aria-label={p.name} tabIndex={-1}><PlaylistCover id={p.id} name={p.name} imageUrl={p.imageUrl} albumIds={p.coverAlbumIds} smart={smart} /></Link>
         {!rune && <span className="card__badge"><span className="badge badge--spotify"><i className="badge__dot" />Spotify</span></span>}
         {smart && <span className="card__badge"><span className="badge"><Sparkles size={11} /> Smart</span></span>}
+        {p.pinned && <PinMark className="card__pin" />}
         <button className="card__play" aria-label={`Play ${p.name}`} onClick={() => void play(p.id)}><Play size={18} fill="currentColor" /></button>
       </div>
       <Link to={href} className="card__title" title={p.name}>{p.name}</Link>
@@ -51,8 +53,9 @@ export default function Playlists() {
   const every = q.data ?? [];
   const needle = fold(find);
   const all = needle ? every.filter((p) => fold(`${p.name} ${p.owner ?? ''}`).includes(needle)) : every;
-  const mine = all.filter((p) => isRunePlaylist(p.id));
-  const spotify = all.filter((p) => !isRunePlaylist(p.id)).sort((a, b) => Number(isLiked(b.id)) - Number(isLiked(a.id)));
+  // pinned first in each section; Liked Songs leads the unpinned Spotify ones
+  const mine = pinnedFirst(all.filter((p) => isRunePlaylist(p.id)));
+  const spotify = pinnedFirst(all.filter((p) => !isRunePlaylist(p.id)).sort((a, b) => Number(isLiked(b.id)) - Number(isLiked(a.id))));
 
   const importFile = async (f: File | undefined) => {
     if (!f) return;

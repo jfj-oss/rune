@@ -107,6 +107,8 @@ export interface SpotifyDevice {
   name: string;
   type: string;
   volume_percent: number | null;
+  /** False for devices whose volume the Web API cannot set (phones). Older answers lack it. */
+  supports_volume?: boolean;
 }
 
 export interface SpotifyPlaybackState {

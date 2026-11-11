@@ -19,6 +19,8 @@ export interface AlbumListQuery {
   artistId?: string;
   /** Default true: only albums in the user's library (Spotify in_library = 1). */
   inLibrary?: boolean;
+  /** Pinned albums before everything else (the Library grid). */
+  pinnedFirst?: boolean;
 }
 
 interface AlbumRow {
@@ -37,13 +39,14 @@ interface AlbumRow {
   mb_release_id: string | null;
   match_confidence: number | null;
   added_at: number;
+  pinned_at: number | null;
 }
 
 const ALBUM_SELECT = `
   SELECT a.id, a.source, a.title, a.artist_id, ar.name AS artist_name, a.year, a.release_date,
          a.label, a.genres, a.format, a.folder_path, a.cover_path, a.mb_release_id,
-         a.match_confidence, a.added_at
-  FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id`;
+         a.match_confidence, a.added_at, p.pinned_at
+  FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id LEFT JOIN pins p ON p.item_id = a.id`;
 
 // Kept here for existing callers; the helpers themselves live in cover.ts so the
 // play/rows and myplaylists layers can use them without importing this module.
@@ -60,6 +63,7 @@ function summary(r: AlbumRow): AlbumSummary {
     ...(cover ? { coverUrl: cover } : {}),
     ...(r.format ? { format: r.format } : {}),
     addedAt: r.added_at,
+    ...(r.pinned_at !== null && r.pinned_at !== undefined ? { pinned: true } : {}),
   };
 }
 
@@ -141,10 +145,12 @@ export function listAlbums(db: Db, q: AlbumListQuery): Page<AlbumSummary> {
           ? 'a.year DESC NULLS LAST, a.title COLLATE NOCASE'
           : 'a.added_at DESC, a.title COLLATE NOCASE';
   const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // Pinned albums first (newest pin on top), then the chosen sort.
+  const orderBy = q.pinnedFirst ? `p.pinned_at IS NULL, p.pinned_at DESC, ${order}` : order;
   const limit = Math.min(Math.max(whole(q.limit, 100), 1), 2000);
   const offset = Math.max(whole(q.offset, 0), 0);
   const total = (db.prepare(`SELECT count(*) n FROM albums a LEFT JOIN artists ar ON ar.id = a.artist_id ${w}`).get(...args) as { n: number }).n;
-  const rows = db.prepare(`${ALBUM_SELECT} ${w} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...args, limit, offset) as AlbumRow[];
+  const rows = db.prepare(`${ALBUM_SELECT} ${w} ORDER BY ${orderBy} LIMIT ? OFFSET ?`).all(...args, limit, offset) as AlbumRow[];
   return { items: rows.map(summary), total };
 }
 

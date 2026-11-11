@@ -12,6 +12,8 @@ import { X } from 'lucide-react';
 import { ALBUM_KEY_CHOICES, FIXED_KEYS } from '../lib/keys';
 import { encId } from '../lib/format';
 import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
+import { useSpotify } from '../store/spotify';
+import { LIKED_PLAYLIST_ID, missingWriteScope } from '../lib/playlists';
 
 interface SpotifyUsage {
   blockedUntil: number | null;
@@ -24,6 +26,15 @@ const BUDGET_NOTE: Record<string, string> = {
   low: ' · background syncs paused',
   out: ' · budget used up, background paused',
 };
+
+/** The login predates a permission rune now needs (liking songs, editing Spotify playlists): offer the reconnect. */
+function ScopeNote() {
+  const scopes = useSpotify((s) => s.scopes);
+  if (!scopes) return null;
+  const missing = [missingWriteScope(scopes, LIKED_PLAYLIST_ID) && 'like songs', missingWriteScope(scopes, 'pl:sp:any') && 'edit your Spotify playlists'].filter(Boolean);
+  if (!missing.length) return null;
+  return <> · this login cannot {missing.join(' or ')} yet · <a className="link" href="/api/spotify/login">Reconnect Spotify</a></>;
+}
 
 /** Requests sent to Spotify in the last 24 h against rune's own daily budget, and any Spotify lockout. */
 function SpotifyUsageRow() {
@@ -252,7 +263,7 @@ export default function Settings() {
               <div className="statusrow">
                 <span className="statusrow__k">Spotify</span>
                 <span className={`statusrow__v ${h.spotify.connected ? 'status--ok' : 'status--warn'}`}>
-                  {h.spotify.connected ? 'Connected' : <>Not connected · <a className="link" href="/api/spotify/login">Connect Spotify</a></>}
+                  {h.spotify.connected ? <>Connected<ScopeNote /></> : <>Not connected · <a className="link" href="/api/spotify/login">Connect Spotify</a></>}
                 </span>
               </div>
               {h.spotify.connected ? <SpotifyUsageRow /> : null}
