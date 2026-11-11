@@ -40,10 +40,27 @@ button.ahero__stars:hover span:not(.hscores__tally) { color: var(--text); }
   .ahero__txt { align-items: center; gap: 10px; }
   .ahero__title { font-size: 31px; line-height: 35px; }
   .ahero__meta { justify-content: center; font-size: 14px; }
-  .ahero__tags, .ahero__actions, .ahero__scores, .ahero__stars { justify-content: center; }
-  .ahero__actions { gap: 8px; flex-wrap: nowrap; }
+  .ahero__tags, .ahero__scores, .ahero__stars { justify-content: center; }
+  /* the text column is as wide as the screen, never as wide as its longest row (that pushed the whole header off both edges) */
+  .ahero__txt { width: 100%; max-width: 100%; justify-self: stretch; }
+  .ahero__txt > * { max-width: 100%; }
+  /* the action row scrolls sideways inside the page gutters; the gutters fade what runs under them, and the row is
+     centred while it fits (the auto-margin spacers) and starts at the left gutter once it does not */
+  .ahero__actions {
+    gap: 8px; flex-wrap: nowrap; justify-content: flex-start;
+    width: calc(100% + 2 * var(--pad)); margin-inline: calc(-1 * var(--pad)); padding-inline: var(--pad);
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad), #000 calc(100% - var(--pad)), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad), #000 calc(100% - var(--pad)), transparent 100%);
+  }
+  .ahero__actions::-webkit-scrollbar { display: none; }
+  .ahero__actions::before, .ahero__actions::after { content: ''; flex: none; margin: auto; }
+  .ahero__actions > * { flex: none; }
+  .ahero__actions .btn { white-space: nowrap; }
   .ahero__actions .btn:not(.btn--icon) { padding: 0 14px; height: 38px; }
   .ahero__actions .btn--icon { width: 38px; height: 38px; padding: 0; flex: none; }
+  /* the long half of a label ("Duplicate as rune playlist") is dropped on the phone */
+  .phone-hide { display: none; }
 }
 
 .atabs__sentinel { height: 1px; margin-bottom: -1px; pointer-events: none; }
