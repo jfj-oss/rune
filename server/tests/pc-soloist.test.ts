@@ -316,6 +316,39 @@ describe('the server-owned pc queue with Soloist', () => {
     await t.close();
   });
 
+  it('autoplay after the run\'s last Spotify song: the queue goes on with its local song and Soloist is silenced, not followed', { timeout: 20000 }, async () => {
+    const t = await boot({ serverQueue: true });
+    t.fake.autoplay = ['spotify:track:x1'];
+    await t.send('pc', { type: 'play', trackIds: ['sp:a', 'l:1'], startIndex: 0 });
+    await until(() => t.fake.item === 'spotify:track:a');
+    await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify', index: 0 }));
+    // Spotify's autoplay takes Soloist on to x1: for the server-owned queue that is the end of its song.
+    t.fake.finishTrack();
+    await until(() => t.fake.item === 'spotify:track:x1');
+    await vi.waitFor(async () => expect(t.loads()).toEqual(['/tmp/music/1.flac']));
+    await vi.waitFor(async () => expect((await t.state()).output).toBe('mpv'));
+    expect((await t.state()).index).toBe(1);
+    // The queue never sounds a song it did not choose: Soloist was cleared (paused) for the local song.
+    await until(() => t.fake.status !== 'playing');
+    expect((await t.state('soloist')).queue.map((q) => q.track.id)).toEqual([]);
+    await t.close();
+  });
+
+  it('a song a Spotify app starts mid-run parks the queue (takeover), and the Soloist zone shows that song', { timeout: 20000 }, async () => {
+    const t = await boot({ serverQueue: true });
+    await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => t.fake.item === 'spotify:track:a');
+    await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify' }));
+    await until(() => t.fake.queue.includes('spotify:track:b'));
+    t.fake.takeOver('spotify:track:zzz');
+    await vi.waitFor(async () => expect((await t.state()).hold?.reason).toBe('takeover'));
+    expect(t.fake.item).toBe('spotify:track:zzz'); // the user's song keeps playing
+    const sz = await t.state('soloist');
+    expect(sz.status).toBe('playing');
+    expect(sz.queue[sz.index]).toMatchObject({ track: { id: 'sp:zzz', title: 'Song zzz' } });
+    await t.close();
+  });
+
   it('a Spotify song while Soloist streams to the phone: the sound comes back to the PC speakers', { timeout: 20000 }, async () => {
     const t = await boot({ serverQueue: true });
     await app(t).inject({ method: 'POST', url: '/api/soloist/output', payload: { output: 'phone' } });

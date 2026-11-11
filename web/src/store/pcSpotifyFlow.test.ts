@@ -43,11 +43,13 @@ const queueItem = (id: string): QueueItem => ({
 interface DeviceModes { shuffle: boolean; repeat: PlayerState['repeat'] }
 
 class FakeWebSocket {
+  /** The socket the store opened last: a test pushes server events through it. */
+  static last: FakeWebSocket | null = null;
   onopen: (() => void) | null = null;
   onmessage: ((m: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  constructor(readonly url: string) {}
+  constructor(readonly url: string) { FakeWebSocket.last = this; }
   close(): void {
     this.onclose?.();
   }
@@ -69,6 +71,8 @@ interface Harness {
   playerPosts: () => PlayerPost[];
   /** POST /api/soloist/output bodies, in order. */
   soloistOutputs: () => string[];
+  /** A `player` event from the server over the websocket (what the server broadcasts on every zone change). */
+  pushPlayer: (state: PlayerState) => void;
 }
 
 interface SetupExtra {
@@ -163,6 +167,7 @@ async function setup(
     zoneReads: () => zoneReads,
     playerPosts: () => playerPosts,
     soloistOutputs: () => soloistOutputs,
+    pushPlayer: (state) => FakeWebSocket.last?.onmessage?.({ data: JSON.stringify({ type: 'player', state, queueRev: `rev-${state.updatedAt}` }) }),
   };
 }
 
@@ -294,6 +299,23 @@ describe('Spotify on the PC speakers through Soloist', () => {
     expect(h.usePlayer.getState().state.status).toBe('playing');
     // The Soloist zone is the pc zone's player on a desktop: one entry in the list.
     expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc', 'browser']);
+  });
+
+  it('what Soloist plays on after the list (autoplay, named by Soloist) is the pc zone\'s now playing within one server event', async () => {
+    const h = await setup(null, undefined, undefined, { pc: SOLOIST_PC, zones: [SOLOIST_ZONE] });
+    await h.usePlayer.getState().playItems([item('sp:1')], 0);
+    expect(h.usePlayer.getState().state.queue.map((q) => q.track.id)).toEqual(['sp:1']);
+    // The song ended; Spotify's autoplay went on and the server's Soloist zone adopted the new song (soloist/zone.ts).
+    const adopted: QueueItem = { ...queueItem('sp:x1'), queueId: 'soloist:1:x1', track: { ...queueItem('sp:x1').track, title: "Givin' It All", artists: [{ id: 'sp:ar', name: 'Someone' }] } };
+    h.pushPlayer({ ...baseState('soloist'), status: 'playing', queue: [queueItem('sp:1'), adopted], index: 1, positionMs: 1200, updatedAt: Date.now() });
+    const s = h.usePlayer.getState().state;
+    expect(h.usePlayer.getState().zone).toBe('pc');
+    expect(s.status).toBe('playing');
+    expect(s.queue[s.index]?.track.title).toBe("Givin' It All");
+    expect(s.queue[s.index]?.track.artists[0]?.name).toBe('Someone');
+    // Soloist stopping for good (nothing left to autoplay) shows as stopped, as before.
+    h.pushPlayer({ ...baseState('soloist'), status: 'stopped', queue: [queueItem('sp:1'), adopted], index: 1, updatedAt: Date.now() + 1 });
+    expect(h.usePlayer.getState().state.status).toBe('stopped');
   });
 
   it('a mixed queue keeps local songs on mpv and sends the Spotify song to Soloist when its turn comes', async () => {

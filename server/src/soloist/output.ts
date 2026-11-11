@@ -151,7 +151,23 @@ export class SoloistRunOutput implements Output {
       this.last = 'stopped';
       return;
     }
-    if (qid && qid !== this.cur) {
+    if (!qid) {
+      // The zone follows a song rune never queued (soloist/zone.ts adopts it). Autoplay after the run's last song: that
+      // song ended, and the driver decides what comes next (its next run stops Soloist; a queue that is over leaves it
+      // cleared, so the server-owned queue never sounds anything it did not choose). A song a Spotify app started in
+      // the middle of ours: a takeover, and the driver parks the queue.
+      if (this.starting) return;
+      const adopted = this.deps.zone.adopted();
+      if (!adopted) return;
+      const cur = this.cur;
+      this.active = false;
+      this.cur = null;
+      this.last = 'stopped';
+      if (adopted.reason === 'autoplay' && cur) this.fact({ type: 'ended', token, queueId: cur, at, last: true });
+      else this.fact({ type: 'takeover', at, trackId: `sp:${adopted.id}` });
+      return;
+    }
+    if (qid !== this.cur) {
       if (this.cur) this.fact({ type: 'ended', token, queueId: this.cur, at, last: false });
       this.cur = qid;
       this.last = s.status;
@@ -159,7 +175,7 @@ export class SoloistRunOutput implements Output {
       if (s.status === 'paused') this.fact({ type: 'paused', token, queueId: qid, positionMs: s.positionMs, at });
       return;
     }
-    if (qid && s.status !== this.last) {
+    if (s.status !== this.last) {
       if (s.status === 'paused' && this.last === 'playing') this.fact({ type: 'paused', token, queueId: qid, positionMs: s.positionMs, at });
       if (s.status === 'playing' && this.last === 'paused') this.fact({ type: 'resumed', token, queueId: qid, positionMs: s.positionMs, at });
     }

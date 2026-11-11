@@ -21,6 +21,8 @@ const item = (id: string): QueueItem => ({
 });
 const local = (id: string): QueueItem => ({ ...item(id), track: { ...item(id).track, id: `l:${id}`, source: 'local', spotifyUri: undefined } });
 const loadItems = (ids: string[]): QueueItem[] => ids.map((id) => (id.startsWith('l:') ? local(id.slice(2)) : item(id.replace(/^sp:/, ''))));
+/** rune's records cover a, b and c only: anything else Soloist plays is a placeholder until Soloist names it. */
+const loadKnown = (ids: string[]): QueueItem[] => loadItems(ids.filter((id) => ['sp:a', 'sp:b', 'sp:c'].includes(id)));
 
 let fake: FakeSoloist;
 beforeAll(async () => {
@@ -33,6 +35,9 @@ afterAll(async () => {
 afterEach(() => {
   fake.commands = [];
   fake.queue = [];
+  fake.autoplay = [];
+  fake.previous = [];
+  fake.dropQueue = false;
   fake.item = null;
   fake.status = 'idle';
   fake.shuffle = false;
@@ -175,14 +180,130 @@ describe('SoloistZone', () => {
     client.close();
   });
 
-  it('plays its own queue on when a song outside the queue takes Soloist mid-list', async () => {
+  it('follows a takeover: a song a Spotify app starts mid-list becomes the current item, and Next goes on with rune\'s list', async () => {
     const client = await connected();
-    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
     await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
     await until(() => fake.queue.length === 1);
     fake.takeOver('spotify:track:zzz');
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:zzz');
+    // rune does not snatch Soloist back: the song the user picked plays, and rune shows it.
+    expect(fake.item).toBe('spotify:track:zzz');
+    expect(zone.state().status).toBe('playing');
+    expect(zone.adopted()).toMatchObject({ id: 'zzz', reason: 'takeover' });
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:zzz', 'sp:b']);
+    expect(zone.state().queue[1]!.track.title).toBe('Song zzz');
+    // Next: rune's own list goes on.
+    await zone.command({ type: 'next' });
+    expect(fake.item).toBe('spotify:track:b');
+    expect(zone.state().index).toBe(2);
+    expect(zone.adopted()).toBeNull();
+    await zone.close();
+    client.close();
+  });
+
+  it('autoplay after rune\'s list is followed: the song is shown with Soloist\'s title and cover, never as stopped, and the controls act on it', async () => {
+    const client = await connected();
+    const programs: number[] = [];
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'phone', newProgram: () => programs.push(1) });
+    const seen: string[] = [];
+    zone.onChange((s) => seen.push(`${s.status}:${s.queue[s.index]?.track.id ?? '-'}`));
+    await zone.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await until(() => fake.commands.some((c) => c.command === 'play'));
+    fake.setAutoplay(['spotify:track:x1', 'spotify:track:x2']);
+    // The list is over; Spotify's autoplay goes on with x1. rune follows within the same program (gapless on the phone).
+    fake.finishTrack();
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:x1');
+    const s = zone.state();
+    expect(s.status).toBe('playing');
+    expect(s.index).toBe(1);
+    expect(s.queue[1]).toMatchObject({ track: { title: 'Song x1', durationMs: 180_000, artists: [{ name: 'An Artist' }] }, album: { title: 'An Album', coverUrl: 'https://i.scdn.co/image/x1' } });
+    expect(zone.adopted()).toMatchObject({ id: 'x1', reason: 'autoplay' });
+    expect(seen.filter((e) => e.startsWith('stopped'))).toEqual([]);
+    expect(programs.length).toBe(1);
+    // Pause, seek and resume act on the adopted song.
+    await zone.command({ type: 'pause' });
+    expect(fake.status).toBe('paused');
+    expect(zone.state().status).toBe('paused');
+    await zone.command({ type: 'seek', positionMs: 30_000 });
+    expect(fake.positionMs).toBe(30_000);
+    await zone.command({ type: 'resume' });
+    await until(() => fake.status === 'playing');
+    expect(fake.item).toBe('spotify:track:x1');
+    // Next skips within autoplay: x2 replaces x1 (the queue does not grow with every autoplay song).
+    await zone.command({ type: 'next' });
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:x2');
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:x2']);
+    expect(zone.state().status).toBe('playing');
+    // A song queued from rune while autoplay plays comes next, and the cursor moves to it.
+    await zone.command({ type: 'enqueue', trackIds: ['sp:b'] });
+    await until(() => fake.queue.includes('spotify:track:b'));
+    fake.finishTrack();
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:b');
+    expect(zone.adopted()).toBeNull();
+    // Autoplay runs dry: Soloist goes idle, rune stops.
+    fake.finishTrack();
+    await until(() => zone.state().status === 'stopped');
+    await zone.close();
+    client.close();
+  });
+
+  it('rune\'s list continues at the end of a song even when the queued song was lost: the next song, not autoplay', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    fake.dropQueue = true;
+    fake.autoplay = ['spotify:track:x1'];
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.commands.some((c) => c.command === 'add_to_queue'));
+    expect(fake.queue).toEqual([]);
+    fake.finishTrack(); // Soloist moves to autoplay x1 by itself
     await until(() => fake.item === 'spotify:track:b');
     expect(zone.state().index).toBe(1);
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b']);
+    expect(zone.adopted()).toBeNull();
+    fake.dropQueue = false;
+    await zone.close();
+    client.close();
+  });
+
+  it('with the list intact autoplay never starts: the queued song plays, and only after the last one does autoplay follow', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    fake.autoplay = ['spotify:track:x1'];
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.queue.length === 1);
+    fake.finishTrack();
+    await until(() => zone.state().index === 1);
+    expect(fake.item).toBe('spotify:track:b');
+    fake.finishTrack();
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:x1');
+    expect(zone.state().status).toBe('playing');
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b', 'sp:x1']);
+    await zone.close();
+    client.close();
+  });
+
+  it('a song Soloist already plays when rune connects (rune restarted under it) is shown, and Play pressed in a Spotify app revives a stopped zone', async () => {
+    fake.playing('spotify:track:x1');
+    // As in createSoloist: the zone exists before the client connects, so it sees the snapshot Soloist sends on connect.
+    const client = new SoloistClient({ url: fake.url, reconnectMs: 50 });
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    client.connect();
+    // The playback_state snapshot that comes with the connection names the song: rune adopts it.
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:x1');
+    expect(zone.state().status).toBe('playing');
+    expect(zone.state().queue[0]!.track.title).toBe('Song x1');
+    // Next at the end of rune's queue (the adopted song is all there is): Soloist's own next; nothing there, so idle.
+    await zone.command({ type: 'next' });
+    await until(() => zone.state().status === 'stopped');
+    // rune plays a, then stops its list; Play in a Spotify app on this device: rune shows the song playing again.
+    await zone.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await zone.command({ type: 'pause' });
+    await zone.command({ type: 'clear' });
+    expect(zone.state().status).toBe('stopped');
+    fake.resumeFromApp();
+    await until(() => zone.state().status === 'playing');
+    expect(zone.state().queue[zone.state().index]?.track.id).toBe('sp:a');
     await zone.close();
     client.close();
   });

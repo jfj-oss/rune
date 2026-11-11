@@ -164,6 +164,24 @@ describe('PcBackend with Soloist as the Spotify player', () => {
     expect(pc.state.status).toBe('playing');
   });
 
+  it('mixed queue: Soloist going on to autoplay after the Spotify song is the song\'s end — the next local file plays', async () => {
+    const { pc, zones } = make();
+    live = pc;
+    const items = [S(1), L(2)];
+    await pc.send(play(items), items);
+    await flush();
+    expect(pc.currentMode).toBe('mixed');
+    expect(zones.soloist.log).toContain('play:sp:1@0');
+    // The Soloist zone does not go idle any more: it follows Spotify's autoplay (a new current item, playing from 0).
+    zones.soloist.progress(198_000);
+    zones.soloist.autoplay('sp:x1');
+    await flush();
+    expect(pc.state.index).toBe(1);
+    expect(pc.state.queue.map((q) => q.track.id)).toEqual(['sp:1', 'l:2']); // the tab's queue is rune's, autoplay is not in it
+    expect(zones.pc.log.filter((l) => l.startsWith('play'))).toEqual(['play:l:2@0']);
+    expect(pc.state.status).toBe('playing');
+  });
+
   it('queueing a Spotify song onto a local queue puts the sound on the PC speakers too', async () => {
     const { pc, toPc } = make();
     live = pc;

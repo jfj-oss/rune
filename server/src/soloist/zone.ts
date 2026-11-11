@@ -2,9 +2,12 @@
 //
 // rune keeps the queue (the same pure queue logic as the pc zone) and tells Soloist one song at a time: `play {uri}`
 // for the current song and `add_to_queue {uri}` for the one after it, so transitions are gapless. When Soloist reports
-// `track_changed` to the song rune queued next, the cursor moves on; when it reports anything else (autoplay, another
-// Spotify app), rune plays what its queue says or stops. Position comes from `position_sync` anchors: no polling, and
-// not one Web API request.
+// `track_changed` to the song rune queued next, the cursor moves on. When it reports a song rune never asked for, rune
+// FOLLOWS Soloist: Spotify's autoplay after the last song of the list (like Spotify's own radio), or a song picked in a
+// Spotify app on this device, is adopted as the current item (a placeholder named from Soloist's own metadata) and the
+// controls act on it. The one exception: Soloist moving on by itself while rune's queue still has a next song (an
+// add_to_queue that was lost) — then rune's song plays, not autoplay. Position comes from `position_sync` anchors: no
+// polling, and not one Web API request.
 //
 // `output` says where the sound goes: the PC speakers, or the rune-phone sink that the phone hears over HLS. The state's
 // `rev` is bumped whenever a new HLS program starts (play, skip, seek), which is the phone's cue to reload its player;
@@ -53,8 +56,28 @@ export interface SoloistZoneDeps {
 
 export const SOLOIST_ZONE = 'soloist';
 
+/** A song rune did not choose, shown as the current item because Soloist plays it. */
+export interface AdoptedSong {
+  queueId: string;
+  /** Spotify id. */
+  id: string;
+  /** `autoplay`: Soloist went on by itself after rune's song (autoplay, its own context). `takeover`: a Spotify app on
+   *  the account started it in the middle of rune's song. */
+  reason: 'autoplay' | 'takeover';
+}
+
+/** A song that ended this close to its length ended by itself: what plays next was Soloist's own next, not a takeover. */
+const END_SLACK_MS = 5000;
+
 const uriOf = (item: QueueItem): string | null => item.track.spotifyUri ?? (item.track.id.startsWith('sp:') ? `spotify:track:${item.track.id.slice(3)}` : null);
 const idOf = (item: QueueItem): string | null => idOfUri(uriOf(item));
+
+/** A Spotify song rune knows nothing about yet: `describe` fills it from Soloist's events. */
+const placeholder = (id: string, queueId: string): QueueItem => ({
+  queueId,
+  track: { id: `sp:${id}`, albumId: 'sp:unknown', source: 'spotify', title: '', artists: [], disc: 1, number: 1, durationMs: 0, spotifyUri: `spotify:track:${id}` },
+  album: { id: 'sp:unknown', title: '' },
+});
 
 export class SoloistZone implements PlaybackZone {
   readonly zone = SOLOIST_ZONE;
@@ -64,10 +87,17 @@ export class SoloistZone implements PlaybackZone {
   private rev = 0;
   private updatedAt: number;
   private positionMs = 0;
+  /** When `positionMs` was true (the anchor the live position counts from); `updatedAt` is bumped for any change. */
+  private anchorAt: number;
   /** The song rune queued in Soloist after the current one (its queue index), to tell a natural end from a takeover. */
   private queuedNext: { index: number; id: string } | null = null;
   /** The Spotify id Soloist should be playing now; a track_changed to anything else is looked at. */
   private expected: string | null = null;
+  /** The song Soloist plays that rune never queued (see `adopted()`); stays set while that item is the current one. */
+  private adoptedSong: AdoptedSong | null = null;
+  private adoptSeq = 0;
+  /** Where each song Soloist listed in its own queue (queue_changed: previous and upcoming) came from, by Spotify id. */
+  private soloistSources = new Map<string, string>();
   /** Soloist's own shuffle/repeat were switched off once (rune orders the queue). */
   private modesChecked = false;
   private modesSet = false;
@@ -79,6 +109,7 @@ export class SoloistZone implements PlaybackZone {
   constructor(private readonly deps: SoloistZoneDeps) {
     this.now = deps.now ?? Date.now;
     this.updatedAt = this.now();
+    this.anchorAt = this.updatedAt;
     this.volume = deps.link.view.volume;
     this.offs.push(deps.link.onEvent((ev) => this.onEvent(ev)));
   }
@@ -118,6 +149,12 @@ export class SoloistZone implements PlaybackZone {
   async close(): Promise<void> {
     for (const off of this.offs) off();
     this.subs.clear();
+  }
+
+  /** The current item is a song Soloist plays that rune never queued (autoplay, a Spotify app), or null. */
+  adopted(): AdoptedSong | null {
+    const cur = currentItem(this.q);
+    return cur && this.adoptedSong && cur.queueId === this.adoptedSong.queueId ? this.adoptedSong : null;
   }
 
   /**
@@ -171,7 +208,12 @@ export class SoloistZone implements PlaybackZone {
         return;
       case 'next': {
         const r = queueNext(this.q);
-        if (r.ended) { await this.stopAll(); return; }
+        if (r.ended) {
+          // Skipping a song rune only follows (autoplay): Soloist's own next, and that one is followed too.
+          if (this.adopted()) { await this.deps.link.send({ command: 'skip_next' }); this.newProgram(); return; }
+          await this.stopAll();
+          return;
+        }
         this.q = r.state;
         await this.startCurrent({ positionMs: 0, paused: this.status === 'paused' });
         return;
@@ -244,10 +286,11 @@ export class SoloistZone implements PlaybackZone {
     await this.ensureModes();
     this.expected = idOf(cur);
     this.queuedNext = null;
+    this.adoptedSong = null;
     await this.deps.link.send({ command: 'play', uri });
     if (opts.positionMs > 0) await this.deps.link.send({ command: 'seek', position_ms: Math.round(opts.positionMs) });
     if (opts.paused) await this.deps.link.send({ command: 'pause' });
-    this.positionMs = opts.positionMs;
+    this.setPos(opts.positionMs);
     this.status = opts.paused ? 'paused' : 'playing';
     this.newProgram();
     await this.syncNext();
@@ -292,7 +335,7 @@ export class SoloistZone implements PlaybackZone {
 
   private async seekTo(ms: number): Promise<void> {
     await this.deps.link.send({ command: 'seek', position_ms: ms });
-    this.positionMs = ms;
+    this.setPos(ms);
     this.updatedAt = this.now();
     this.newProgram();
     this.emit();
@@ -303,7 +346,7 @@ export class SoloistZone implements PlaybackZone {
     this.queuedNext = null;
     if (this.deps.link.view.connected && this.deps.link.view.status !== 'idle') await this.deps.link.send({ command: 'pause' }).catch(() => undefined);
     this.status = 'stopped';
-    this.positionMs = 0;
+    this.setPos(0);
     this.bump();
   }
 
@@ -315,26 +358,50 @@ export class SoloistZone implements PlaybackZone {
         this.describe(ev.item);
         this.onTrack(idOfUri(ev.item?.uri));
         return;
-      case 'playback_changed':
-        if (this.status === 'stopped' || !currentItem(this.q)) return;
-        if (ev.status === 'idle') { this.status = 'stopped'; this.bump(); return; }
-        this.setStatus(ev.status === 'paused' ? 'paused' : ev.status === 'buffering' ? 'loading' : 'playing');
-        return;
-      case 'playback_state':
+      case 'playback_changed': {
+        if (ev.status === 'idle') {
+          if (this.status !== 'stopped' && currentItem(this.q)) { this.status = 'stopped'; this.bump(); }
+          return;
+        }
+        const cur = currentItem(this.q);
+        if (ev.status === 'paused') {
+          // A pause while rune shows nothing playing is no sign of life (rune's own stop pauses Soloist).
+          if (!cur || this.status === 'stopped') return;
+          this.setStatus('paused');
+          return;
+        }
+        // Soloist sounds: rune shows what it plays, even when it thought nothing was playing (a Spotify app pressed
+        // Play on this device, or started a song of its own). While rune plays, track_changed says which song it is.
+        if (!cur || this.status === 'stopped') this.onTrack(idOfUri(this.deps.link.view.item?.uri));
         if (!currentItem(this.q)) return;
+        this.setStatus(ev.status === 'buffering' ? 'loading' : 'playing');
+        return;
+      }
+      case 'playback_state': {
+        const live = ev.status === 'playing' || ev.status === 'buffering';
         if (ev.item) {
           this.describe(ev.item);
-          this.onTrack(idOfUri(ev.item.uri), true);
+          this.onTrack(idOfUri(ev.item.uri), { snapshot: true, live });
         }
-        if (ev.position) this.positionMs = ev.position.position_ms;
+        if (!currentItem(this.q)) return;
+        if (ev.position) this.setPos(ev.position.position_ms, ev.position.timestamp_ms);
         if (typeof ev.volume === 'number') this.volume = ev.volume;
         if (ev.status === 'idle') this.status = 'stopped';
-        else if (this.status !== 'stopped') this.status = ev.status === 'paused' ? 'paused' : ev.status === 'buffering' ? 'loading' : 'playing';
+        else if (this.status !== 'stopped' || live) this.status = ev.status === 'paused' ? 'paused' : ev.status === 'buffering' ? 'loading' : 'playing';
         this.bump();
+        return;
+      }
+      case 'queue_changed':
+        // Soloist's own queue: a song it lists (its context, autoplay, add_to_queue) is its own next, never a takeover.
+        if (this.soloistSources.size > 2000) this.soloistSources.clear();
+        for (const e of [...(ev.previous ?? []), ...(ev.upcoming ?? [])]) {
+          const id = idOfUri(e.item?.uri);
+          if (id) this.soloistSources.set(id, e.source);
+        }
         return;
       case 'position_sync':
         if (!currentItem(this.q) || this.status === 'stopped') return;
-        this.positionMs = ev.position.position_ms + (ev.position.speed > 0 ? Math.max(0, this.now() - ev.position.timestamp_ms) : 0);
+        this.setPos(ev.position.position_ms + (ev.position.speed > 0 ? Math.max(0, this.now() - ev.position.timestamp_ms) : 0));
         this.updatedAt = this.now();
         this.emit();
         return;
@@ -353,10 +420,38 @@ export class SoloistZone implements PlaybackZone {
     }
   }
 
-  /** Soloist now plays `id`: our song, the one we queued next, another of ours, or something foreign. */
-  private onTrack(id: string | null, fromSnapshot = false): void {
-    if (!id || this.status === 'stopped') return;
-    if (id === this.expected) return;
+  /** Is Soloist sounding right now (by its last word)? */
+  private soloistLive(): boolean {
+    const s = this.deps.link.view.status;
+    return s === 'playing' || s === 'buffering';
+  }
+
+  /** rune thought nothing was playing, but Soloist sounds the current song: show it playing. */
+  private revive(live: boolean): void {
+    if (this.status !== 'stopped' || !live) return;
+    this.status = 'playing';
+    this.setPos(this.deps.link.positionMs(this.now()) ?? 0);
+    this.bump();
+  }
+
+  /** Was the song as good as over (by rune's clock) when Soloist moved on? Then what follows is Soloist's own next. */
+  private nearEnd(item: QueueItem): boolean {
+    const dur = item.track.durationMs;
+    if (dur <= 0 || this.status === 'stopped') return false;
+    // Soloist's last anchor still describes this song until its next position_sync; rune's own clock is the fallback.
+    const pos = Math.max(this.deps.link.positionMs(this.now()) ?? 0, this.livePosition());
+    return pos >= dur - END_SLACK_MS;
+  }
+
+  /**
+   * Soloist now plays `id`: our song, the one we queued next, another of ours, or a song rune never queued. `snapshot`:
+   * from a playback_state (sent on connect and for get_state), which may describe a moment before rune's own play
+   * landed, so it only ever changes the cursor while rune shows nothing playing.
+   */
+  private onTrack(id: string | null, opts: { snapshot?: boolean; live?: boolean } = {}): void {
+    if (!id) return;
+    const live = opts.live ?? this.soloistLive();
+    if (id === this.expected) { this.revive(live); return; }
     const cur = currentItem(this.q);
     if (this.queuedNext && id === this.queuedNext.id) {
       // The natural end of the current song: Soloist moved on to what rune queued (gapless, same HLS program). The
@@ -370,8 +465,9 @@ export class SoloistZone implements PlaybackZone {
       if (at >= 0) {
         this.q = at === r.state.index ? r.state : { ...this.q, index: at };
         this.expected = id;
-        this.positionMs = 0;
+        this.setPos(0);
         this.updatedAt = this.now();
+        if (this.status === 'stopped' && live) this.status = 'playing';
         void this.chain.then(() => this.syncNext());
         return;
       }
@@ -381,25 +477,62 @@ export class SoloistZone implements PlaybackZone {
       this.q = { ...this.q, index: at };
       this.expected = id;
       this.queuedNext = null;
-      this.positionMs = 0;
+      this.setPos(0);
+      if (this.status === 'stopped' && live) this.status = 'playing';
       this.bump();
       void this.chain.then(() => this.syncNext());
       return;
     }
-    if (at === this.q.index && cur) { this.expected = id; return; }
-    if (fromSnapshot) return;
-    // Something else took Soloist (autoplay after the list, a Spotify app on the account): the queue says what is next.
+    if (at === this.q.index && cur) { this.expected = id; this.revive(live); return; }
+    // A song rune never queued. Soloist's own next (autoplay after rune's song, its context, a song queued in a Spotify
+    // app) is one it listed in its queue, or one that began as rune's song ran out; anything else is a takeover.
+    const natural = this.soloistSources.has(id) || (!!cur && this.nearEnd(cur));
     const r = queueNext(this.q, { auto: true });
-    if (r.ended || r.state.index === this.q.index) {
-      this.deps.log?.({ id }, 'soloist: playback moved to a song outside the queue; stopping here');
-      this.status = 'stopped';
-      this.expected = null;
-      this.queuedNext = null;
-      this.bump();
+    if (natural && !r.ended && cur && this.status !== 'stopped') {
+      if (opts.snapshot) return;
+      // Soloist went on by itself although rune's queue has a next song (the add_to_queue was lost or came too late):
+      // rune's song plays, not autoplay.
+      this.deps.log?.({ id }, 'soloist: went on by itself while rune had a next song; playing it');
+      this.q = r.state;
+      this.chain = this.chain.then(() => this.startCurrent({ positionMs: 0, paused: false })).catch((err) => this.deps.log?.({ err: String(err) }, 'soloist: could not continue the queue'));
       return;
     }
-    this.q = r.state;
-    this.chain = this.chain.then(() => this.startCurrent({ positionMs: 0, paused: false })).catch((err) => this.deps.log?.({ err: String(err) }, 'soloist: could not continue the queue'));
+    // A snapshot may be older than rune's own play: it only ever adopts a song while rune shows nothing playing.
+    if (opts.snapshot && !(live && (this.status === 'stopped' || !cur))) return;
+    // Nothing sounds and nothing is about to: nothing to follow (a playing/buffering playback_changed comes back here).
+    if (!live && this.deps.link.view.status === 'idle') return;
+    this.adopt(id, natural ? 'autoplay' : 'takeover', live);
+  }
+
+  /**
+   * Follow a song Soloist plays that rune never queued: it becomes the current item (a placeholder until `describe`
+   * names it from Soloist's metadata, or rune's own record when it has one), right after rune's songs so far. A second
+   * adopted song replaces the first (the queue does not grow with every autoplay song), and rune's songs still queued
+   * stay after it (Next plays them; they are also queued into Soloist as usual). The HLS program is kept: the phone
+   * hears the change as the gapless transition it is.
+   */
+  private adopt(id: string, reason: AdoptedSong['reason'], live: boolean): void {
+    const queueId = `soloist:${++this.adoptSeq}:${id}`;
+    const known = this.deps.loadItems([`sp:${id}`]).find((i) => idOf(i) === id);
+    const item: QueueItem = known ? { ...known, queueId } : placeholder(id, queueId);
+    const cur = currentItem(this.q);
+    if (cur && this.adoptedSong && cur.queueId === this.adoptedSong.queueId) {
+      this.q = { ...this.q, items: this.q.items.map((it, i) => (i === this.q.index ? item : it)) };
+    } else if (!cur) {
+      this.q = queuePlay(this.q, [item], 0);
+    } else {
+      this.q = queueJump(queueEnqueue(this.q, [item], { next: true }), this.q.index + 1);
+    }
+    this.adoptedSong = { queueId, id, reason };
+    this.expected = id;
+    this.queuedNext = null;
+    const view = this.deps.link.view;
+    this.setPos((idOfUri(view.item?.uri) === id ? this.deps.link.positionMs(this.now()) : null) ?? 0);
+    this.status = live ? 'playing' : view.status === 'paused' ? 'paused' : view.status === 'buffering' ? 'loading' : 'stopped';
+    this.deps.log?.({ id, reason }, 'soloist: following a song rune did not queue');
+    this.bump();
+    if (idOfUri(view.item?.uri) === id) this.describe(view.item);
+    void this.chain.then(() => this.syncNext());
   }
 
   /**
@@ -439,12 +572,17 @@ export class SoloistZone implements PlaybackZone {
   private livePosition(): number {
     const p = this.deps.link.positionMs(this.now());
     if (p !== null && this.status !== 'stopped' && this.expected && idOfUri(this.deps.link.view.item?.uri) === this.expected) return p;
-    return this.status === 'playing' ? this.positionMs + Math.max(0, this.now() - this.updatedAt) : this.positionMs;
+    return this.status === 'playing' ? this.positionMs + Math.max(0, this.now() - this.anchorAt) : this.positionMs;
+  }
+
+  private setPos(ms: number, at = this.now()): void {
+    this.positionMs = ms;
+    this.anchorAt = at;
   }
 
   private setStatus(status: PlayerState['status']): void {
     if (status === this.status) return;
-    this.positionMs = this.livePosition();
+    this.setPos(this.livePosition());
     this.status = status;
     this.bump();
   }

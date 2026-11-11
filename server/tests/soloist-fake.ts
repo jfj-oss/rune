@@ -23,6 +23,13 @@ export class FakeSoloist {
   item: string | null = null;
   /** Soloist's own queue: track uris added with add_to_queue, next first. */
   queue: string[] = [];
+  /** Spotify's autoplay: when the queue runs out, these play on (source "autoplay"), one after another. */
+  autoplay: string[] = [];
+  /** add_to_queue is acknowledged but the song never lands in the queue (a lost request): autoplay then follows. */
+  dropQueue = false;
+  /** Songs played before the current one, with where each came from (the `previous` of queue_changed). */
+  previous: { uri: string; source: string }[] = [];
+  private currentSource = 'context';
   positionMs = 0;
   volume = 70;
   shuffle = false;
@@ -59,14 +66,18 @@ export class FakeSoloist {
 
   // ----- what a test can make Soloist do -----
 
-  /** The current song ended by itself: Soloist moves to its own queue, or goes idle. */
+  /** The current song ended by itself: Soloist moves to its own queue, then to autoplay, or goes idle. */
   finishTrack(): void {
-    const next = this.queue.shift();
+    const queued = this.queue.shift();
+    const next = queued ?? this.autoplay.shift();
     if (next) {
+      if (this.item) this.previous.push({ uri: this.item, source: this.currentSource });
+      this.currentSource = queued ? 'queue' : 'autoplay';
       this.item = next;
       this.positionMs = 0;
       this.broadcast({ type: 'track_changed', item: this.entity(next) });
       this.broadcast({ type: 'position_sync', position: this.position() });
+      this.broadcast(this.queueChanged());
     } else {
       this.status = 'idle';
       this.item = null;
@@ -74,14 +85,39 @@ export class FakeSoloist {
     }
   }
 
-  /** Another Spotify app on the account started a song on Soloist. */
+  /** Another Spotify app on the account started a song on Soloist (a context of its own: the queue is gone). */
   takeOver(uri: string): void {
     this.item = uri;
     this.queue = [];
+    this.previous = [];
+    this.currentSource = 'context';
     this.status = 'playing';
     this.positionMs = 0;
     this.broadcast({ type: 'track_changed', item: this.entity(uri) });
     this.broadcast({ type: 'playback_changed', status: 'playing' });
+    this.broadcast(this.queueChanged());
+  }
+
+  /** Spotify fills in the autoplay songs for after the queue (Soloist announces them in queue_changed, as the live one does). */
+  setAutoplay(uris: string[]): void {
+    this.autoplay = uris;
+    this.broadcast(this.queueChanged());
+  }
+
+  /** Play pressed in a Spotify app on this device (Soloist was paused). */
+  resumeFromApp(): void {
+    if (!this.item) return;
+    this.status = 'playing';
+    this.broadcast({ type: 'playback_changed', status: 'playing' });
+    this.broadcast({ type: 'position_sync', position: this.position() });
+  }
+
+  /** Soloist is already playing `uri` when a client connects (rune restarted under it). */
+  playing(uri: string): void {
+    this.item = uri;
+    this.status = 'playing';
+    this.isActive = true;
+    this.positionMs = 0;
   }
 
   setLoggedIn(on: boolean): void {
@@ -116,11 +152,14 @@ export class FakeSoloist {
           this.item = uri;
           this.positionMs = 0;
           this.queue = [];
+          this.previous = [];
+          this.currentSource = 'context';
           this.status = 'playing';
           this.isActive = true;
           this.broadcast({ type: 'track_changed', item: this.entity(uri) });
           this.broadcast({ type: 'playback_changed', status: 'playing' });
           this.broadcast({ type: 'position_sync', position: this.position() });
+          this.broadcast(this.queueChanged());
         } else if (this.item) {
           this.status = 'playing';
           this.broadcast({ type: 'playback_changed', status: 'playing' });
@@ -175,6 +214,7 @@ export class FakeSoloist {
       case 'add_to_queue':
         if (typeof msg.uri !== 'string' || !msg.uri.startsWith('spotify:track:')) return this.sendTo(socket, { type: 'error', message: 'add_to_queue takes a track uri' });
         this.ok(socket, command);
+        if (this.dropQueue) return;
         this.queue.push(msg.uri);
         this.broadcast(this.queueChanged());
         return;
@@ -231,7 +271,12 @@ export class FakeSoloist {
     };
   }
   private queueChanged() {
-    return { type: 'queue_changed', previous: [], upcoming: this.queue.map((uri) => ({ uid: uri, source: 'queue', item: this.entity(uri) })) };
+    const entry = (uri: string, source: string) => ({ uid: `${source}:${uri}`, source, item: this.entity(uri) });
+    return {
+      type: 'queue_changed',
+      previous: this.previous.map((p) => entry(p.uri, p.source)),
+      upcoming: [...this.queue.map((uri) => entry(uri, 'queue')), ...this.autoplay.map((uri) => entry(uri, 'autoplay'))],
+    };
   }
 
   private sendTo(socket: Socket, ev: unknown): void {

@@ -54,5 +54,11 @@ export class FakeZone implements ZoneTransport {
   finishPaused() { this.bump({ status: 'paused', positionMs: 0 }); }
   progress(positionMs: number) { this.bump({ positionMs, status: 'playing' }); }
   externalPause() { this.bump({ status: 'paused' }); }
+  /** Soloist went on with a song of its own when ours ended (autoplay): the server zone follows it as a new current item. */
+  autoplay(id: string) {
+    const item: QueueItem = { queueId: `${this.id}:auto:${id}`, track: mkTrack(id, 'spotify'), album: { id: 'sp:alb', title: 'Alb' } };
+    const at = this.state.index + 1;
+    this.bump({ queue: [...this.state.queue.slice(0, at), item, ...this.state.queue.slice(at)], index: at, status: 'playing', positionMs: 0 });
+  }
   setUnknown() { this.bump({ queue: [], index: -1, status: 'stopped' }); }
 }
