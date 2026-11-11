@@ -41,14 +41,47 @@ export interface SoloistAudioOptions {
 export const DEFAULT_SINK = 'rune-phone';
 const SEGMENT_S = 1;
 
-/** The sink-input ids of Soloist's streams, from `pactl list sink-inputs`. */
-export function soloistSinkInputs(listing: string): string[] {
-  const ids: string[] = [];
+export interface SinkInput { id: string; sink: string | null; block: string }
+
+/** Every sink input in a `pactl list sink-inputs` listing, with the index of the sink it plays into. */
+export function sinkInputs(listing: string): SinkInput[] {
+  const out: SinkInput[] = [];
   for (const block of listing.split(/\n(?=Sink Input #)/)) {
     const id = /^Sink Input #(\d+)/m.exec(block)?.[1];
-    if (id && /application\.(name|process\.binary) = "[^"]*soloist[^"]*"/i.test(block)) ids.push(id);
+    if (id) out.push({ id, sink: /^\s*Sink:\s*(\d+)/m.exec(block)?.[1] ?? null, block });
+  }
+  return out;
+}
+
+export interface SoloistMatch {
+  /** The soloist child's process id: its streams carry it as application.process.id. */
+  pid?: number | null;
+  /** Index of the phone (null) sink. Soloist is started with it as its device and nothing else plays there. */
+  phoneSink?: string | null;
+}
+
+/**
+ * The sink-input ids of Soloist's streams. Its stream names itself "Spotify" (like the desktop app), so the name alone
+ * is not enough: it is Soloist's if it carries Soloist's process id, plays into the phone sink, or says "soloist".
+ */
+export function soloistSinkInputs(listing: string, match: SoloistMatch = {}): string[] {
+  const ids: string[] = [];
+  for (const s of sinkInputs(listing)) {
+    const named = /application\.(name|process\.binary) = "[^"]*soloist[^"]*"/i.test(s.block);
+    const byPid = match.pid != null && new RegExp(`application\\.process\\.id = "${match.pid}"`).test(s.block);
+    const onPhone = match.phoneSink != null && s.sink === match.phoneSink;
+    if (named || byPid || onPhone) ids.push(s.id);
   }
   return ids;
+}
+
+/** The index of the sink called `name` in `pactl list short sinks`, or null. */
+export function sinkIndex(shortSinks: string, name: string): string | null {
+  for (const line of shortSinks.split('\n')) {
+    const [index, sinkName] = line.split('\t');
+    if (sinkName === name && index) return index.trim();
+  }
+  return null;
 }
 
 /** ffmpeg arguments for one HLS program read from the sink's monitor. */
@@ -106,13 +139,28 @@ export class SoloistAudio {
     await this.applyOutput();
   }
 
+  /** Soloist's process id (set by createSoloist once the supervisor exists). */
+  pidOf: () => number | null = () => null;
+
+  /** Move Soloist's streams that are not where the output says; returns how many were moved. */
   async applyOutput(): Promise<number> {
-    const list = await this.runner.run('pactl', ['list', 'sink-inputs']);
+    const [list, sinks, def] = await Promise.all([
+      this.runner.run('pactl', ['list', 'sink-inputs']),
+      this.runner.run('pactl', ['list', 'short', 'sinks']),
+      this.runner.run('pactl', ['get-default-sink']),
+    ]);
     if (!list.ok) return 0;
-    const target = this.output === 'phone' ? this.sink : '@DEFAULT_SINK@';
-    const ids = soloistSinkInputs(list.stdout);
-    for (const id of ids) await this.runner.run('pactl', ['move-sink-input', id, target]);
-    return ids.length;
+    const phoneSink = sinks.ok ? sinkIndex(sinks.stdout, this.sink) : null;
+    const defaultName = def.ok ? def.stdout.trim() : '';
+    // The default sink is never the phone sink here: if someone made it the default, the PC has no speakers to move to.
+    const defaultSink = sinks.ok && defaultName && defaultName !== this.sink ? sinkIndex(sinks.stdout, defaultName) : null;
+    const target = this.output === 'phone' ? this.sink : defaultName && defaultName !== this.sink ? defaultName : '@DEFAULT_SINK@';
+    const targetIndex = this.output === 'phone' ? phoneSink : defaultSink;
+    const mine = new Set(soloistSinkInputs(list.stdout, { pid: this.pidOf(), phoneSink }));
+    const moving = sinkInputs(list.stdout).filter((s) => mine.has(s.id) && (targetIndex === null || s.sink !== targetIndex));
+    for (const s of moving) await this.runner.run('pactl', ['move-sink-input', s.id, target]);
+    if (moving.length) this.opts.log?.({ ids: moving.map((s) => s.id), to: target }, 'soloist: moved its sound');
+    return moving.length;
   }
 
   /** The current program's directory, starting the encoder if a phone is listening and none runs. */

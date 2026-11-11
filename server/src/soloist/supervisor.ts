@@ -59,6 +59,11 @@ export class SoloistSupervisor {
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(opts.ws)) throw new Error('the Soloist WebSocket must bind the loopback interface');
   }
 
+  /** The running child's process id (its PipeWire streams carry it), or null. */
+  get pid(): number | null {
+    return this.child?.pid ?? null;
+  }
+
   /** The one line for the page when Soloist cannot play, or null. */
   problem(): string | null {
     switch (this.run) {

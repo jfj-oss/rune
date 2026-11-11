@@ -131,12 +131,25 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
     now: opts.now,
     log: opts.log,
   });
-  // Soloist's PipeWire stream appears when it starts to sound: put it where the user wants it each time.
+  audio.pidOf = () => supervisor?.pid ?? null;
+  // Soloist's PipeWire stream appears when it starts to sound, sometimes a moment after it says "playing": put it where
+  // the user wants it then, again shortly after, and keep checking while it plays (a new stream starts in the phone
+  // sink, which is silent on the PC).
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const apply = () => void audio.applyOutput().catch(() => undefined);
   let lastStatus = link.view.status;
   link.onView((v) => {
-    if (v.status === 'playing' && lastStatus !== 'playing') void audio.applyOutput().catch(() => undefined);
+    if (v.status === 'playing' && lastStatus !== 'playing') {
+      for (const ms of [0, 400, 1500, 4000]) {
+        const t = setTimeout(() => { timers.delete(t); apply(); }, ms);
+        (t as { unref?: () => void }).unref?.();
+        timers.add(t);
+      }
+    }
     lastStatus = v.status;
   });
+  const keep = setInterval(() => { if (link.view.status === 'playing') apply(); }, 5000);
+  (keep as { unref?: () => void }).unref?.();
   void audio.ensureSink().then((ok) => {
     if (!ok) opts.log?.({}, 'soloist: no phone sink; PC playback still works, the phone stream does not');
     supervisor?.start();
@@ -211,6 +224,9 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
       });
     },
     async close() {
+      clearInterval(keep);
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
       supervisor?.stop();
       client?.close();
       await zone.close();

@@ -241,6 +241,58 @@ describe('SoloistSupervisor', () => {
   });
 });
 
+describe('SoloistAudio: finding the real stream', () => {
+  // What PipeWire really lists: Soloist's stream calls itself "Spotify", exactly like the desktop app's.
+  const sinks = '58\talsa_output.usb-Topping\tPipeWire\ts32le 2ch 48000Hz\tSUSPENDED\n199\talsa_output.analog-stereo\tPipeWire\ts32le 2ch 48000Hz\tRUNNING\n66443\trune-phone\tPipeWire\tfloat32le 2ch 44100Hz\tRUNNING\n';
+  const stream = (id: number, sink: number, pid: number, extra = '') =>
+    `Sink Input #${id}\n\tDriver: PipeWire\n\tSink: ${sink}\n\tCorked: no\n\tProperties:\n\t\tmedia.name = "Spotify"\n\t\tapplication.name = "Spotify"\n\t\tapplication.process.id = "${pid}"\n${extra}`;
+  const appStream = stream(70, 199, 4242, '\t\tapplication.process.binary = "spotify"\n');
+
+  function router(listing: () => string, output: 'pc' | 'phone', pid: number | null) {
+    const moves: [string, string][] = [];
+    const runner: AudioRunner = {
+      run: async (cmd, args) => {
+        if (cmd !== 'pactl') return { ok: true, stdout: '' };
+        if (args[0] === 'list' && args[1] === 'sink-inputs') return { ok: true, stdout: listing() };
+        if (args[0] === 'list' && args[1] === 'short') return { ok: true, stdout: sinks };
+        if (args[0] === 'get-default-sink') return { ok: true, stdout: 'alsa_output.analog-stereo\n' };
+        if (args[0] === 'move-sink-input') moves.push([String(args[1]), String(args[2])]);
+        return { ok: true, stdout: '' };
+      },
+      spawn: () => ({ kill: () => true, on: () => undefined }),
+    };
+    const audio = new SoloistAudio({ runner, hlsDir: '/nonexistent-rune-hls-test' });
+    audio.output = output;
+    audio.pidOf = () => pid;
+    return { audio, moves };
+  }
+
+  it('a "Spotify"-named stream in the phone sink is Soloist\'s; the desktop app\'s "Spotify" is not', () => {
+    const listing = stream(60903, 66443, 777) + '\n' + appStream;
+    expect(soloistSinkInputs(listing, { phoneSink: '66443' })).toEqual(['60903']);
+    expect(soloistSinkInputs(listing, { pid: 777 })).toEqual(['60903']);
+    expect(soloistSinkInputs(listing)).toEqual([]);
+  });
+
+  it('PC output moves Soloist\'s new stream out of the silent sink to the default speakers, and leaves the app alone', async () => {
+    const { audio, moves } = router(() => stream(60903, 66443, 777) + '\n' + appStream, 'pc', 777);
+    expect(await audio.applyOutput()).toBe(1);
+    expect(moves).toEqual([['60903', 'alsa_output.analog-stereo']]);
+  });
+
+  it('a stream already on the speakers is not moved again (the 5-second check stays quiet)', async () => {
+    const { audio, moves } = router(() => stream(60903, 199, 777) + '\n' + appStream, 'pc', 777);
+    expect(await audio.applyOutput()).toBe(0);
+    expect(moves).toEqual([]);
+  });
+
+  it('phone output brings Soloist\'s stream back from the speakers by its process id, never the app\'s', async () => {
+    const { audio, moves } = router(() => stream(60903, 199, 777) + '\n' + appStream, 'phone', 777);
+    expect(await audio.applyOutput()).toBe(1);
+    expect(moves).toEqual([['60903', 'rune-phone']]);
+  });
+});
+
 describe('SoloistAudio', () => {
   it('finds soloist among the sink inputs and builds the HLS command for the sink monitor', () => {
     const listing = `Sink Input #12\n\tDriver: PipeWire\n\tProperties:\n\t\tapplication.name = "Firefox"\n\nSink Input #31\n\tProperties:\n\t\tapplication.name = "soloist"\n\t\tapplication.process.binary = "soloist"\n`;
