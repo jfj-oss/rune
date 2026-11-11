@@ -1,7 +1,7 @@
 import type { PlayerState, QueueItem, Zone } from '@liner/shared';
 import { create } from 'zustand';
 import { ApiError, api, isMock } from '../api';
-import { deviceName } from '../lib/device';
+import { deviceName, isHandheld } from '../lib/device';
 import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
 import { AudioEngine, MockEngine } from '../player/engine';
@@ -195,6 +195,10 @@ export const usePlayer = create<PlayerStore>((set, get) => {
       if (get().ready) return;
       if (!isMock) {
         const playing = new Map<string, boolean>();
+        // A desktop tab follows the PC speakers when something else starts them (the voice assistant, another tab), so the
+        // music can be controlled from it. A phone never does: it is a personal player, and a page that silently switches
+        // to the PC makes the next tap on Play sound in another room.
+        const follows = !isHandheld();
         socket.on((e) => {
           if (e.type === 'hello') {
             const pcBackend = backends.get('pc');
@@ -212,7 +216,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (e.type !== 'player') return;
           const was = noteSounding(playing, e.state);
           const { zone, state, zones, setZone } = get();
-          if (followPcSpeakers(e.state, was, { zone, status: state.status }, zones.find((z) => z.kind === 'pc'))) void setZone('pc', { handoff: false });
+          if (follows && followPcSpeakers(e.state, was, { zone, status: state.status }, zones.find((z) => z.kind === 'pc'))) void setZone('pc', { handoff: false });
         });
       }
       const [zonesRes] = await Promise.all([api.zones().catch(() => FALLBACK_ZONES), useSpotify.getState().init().catch(() => undefined)]);
