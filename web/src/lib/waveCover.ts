@@ -2,7 +2,7 @@
    backdrop's. Pure helpers (DOM-free) for components/WaveCover.tsx. */
 import type { DitherPalette, Rgb } from './dither';
 
-/** Playlists that wear the wave instead of their Spotify image (the user's "MUDs" and "HORSE"). */
+/** Playlists that wear the wave instead of their Spotify image (the author's two favourites). */
 export const WAVE_COVER_IDS = new Set(['pl:sp:0gE0wwKJ6rGKGFUF7YfZPu', 'pl:sp:44JPFAQyJioNkmIdEoWdzK']);
 
 const TAU = Math.PI * 2;
@@ -94,7 +94,7 @@ export function genKindFor(id: string): { kind: GenKind; seed: number } {
   return { kind: KINDS[k % KINDS.length]!, seed: (k >>> 8) % 7 };
 }
 
-/** Generative cover + header for the wave playlists (MUDs, HORSE); other playlists keep their own art. */
+/** Generative cover + header for the wave playlists (two fixed playlist ids); other playlists keep their own art. */
 export function genArtFor(id: string): { kind: GenKind; seed: number } | null {
   return WAVE_COVER_IDS.has(id) ? { kind: 'wave', seed: hash(id) % 7 } : null;
 }

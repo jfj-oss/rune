@@ -34,7 +34,7 @@ import { createMatcher } from '../src/match/index.js';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const REAL_FETCH = globalThis.fetch.bind(globalThis);
 const USER_AGENT = 'Liner/0.1 ( personal music player, self-hosted )';
-const LIBRARY_ROOT = '/mnt/BIG data/Music';
+const LIBRARY_ROOT = '/path/to/Music';
 const SANITIZED_ROOT = '/music';
 
 const argv = process.argv.slice(2);

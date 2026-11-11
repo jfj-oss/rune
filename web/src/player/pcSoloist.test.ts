@@ -49,8 +49,8 @@ const item = (id: string, source: 'local' | 'spotify'): PlayItem => ({
   track: { id, albumId: 'alb', source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
   album: { id: 'alb', title: 'Album' },
 });
-const PC_SOLOIST: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyEngine: 'soloist', spotifyZone: 'soloist', spotifyDeviceId: 'horse1', spotifyDeviceName: 'HORSE' };
-const PC_APP: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyEngine: 'app', spotifyZone: 'spotify:horse1', spotifyDeviceId: 'horse1', spotifyDeviceName: 'HORSE', spotifyNotice: 'Soloist needs updating (its build expired) — using the Spotify app' };
+const PC_SOLOIST: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyEngine: 'soloist', spotifyZone: 'soloist', spotifyDeviceId: 'mypc1', spotifyDeviceName: 'MYPC' };
+const PC_APP: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyEngine: 'app', spotifyZone: 'spotify:mypc1', spotifyDeviceId: 'mypc1', spotifyDeviceName: 'MYPC', spotifyNotice: 'Soloist needs updating (its build expired) — using the Spotify app' };
 const PC_NONE: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyEngine: 'app', spotifyNotice: 'Soloist is not signed in to Spotify (pair it once with soloist --pair) — using the Spotify app' };
 const SOLOIST: ZoneInfo = { id: 'soloist', name: 'Spotify (Soloist)', kind: 'spotify', soloist: true, output: 'pc' };
 
@@ -62,7 +62,7 @@ describe('which player takes the pc zone’s Spotify songs', () => {
     expect(pcSpotifyFallbackNotice(PC_SOLOIST, [item('sp:1', 'spotify')])).toBeNull();
   });
   it('the app, with the reason, when Soloist cannot play; the app still has to be started when it is not running', () => {
-    expect(pcSpotifyZone(PC_APP)).toBe('spotify:horse1');
+    expect(pcSpotifyZone(PC_APP)).toBe('spotify:mypc1');
     expect(needsPcSpotify(PC_APP, [item('sp:1', 'spotify')])).toBe(false);
     expect(pcSpotifyFallbackNotice(PC_APP, [item('sp:1', 'spotify')])).toMatch(/needs updating/);
     expect(pcSpotifyZone(PC_NONE)).toBeNull();
@@ -87,7 +87,7 @@ describe('which player takes the pc zone’s Spotify songs', () => {
 });
 
 describe('one zone in the list for one set of speakers', () => {
-  const list = [PC_SOLOIST, { id: 'spotify:horse1', name: 'HORSE', kind: 'spotify' } as ZoneInfo, SOLOIST, { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' } as ZoneInfo];
+  const list = [PC_SOLOIST, { id: 'spotify:mypc1', name: 'MYPC', kind: 'spotify' } as ZoneInfo, SOLOIST, { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' } as ZoneInfo];
   it('on a desktop the Soloist zone is folded into the pc zone (as the app’s device always was)', () => {
     expect(withoutPcDevice(list).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
   });
@@ -95,7 +95,7 @@ describe('one zone in the list for one set of speakers', () => {
     expect(withoutPcDevice(list).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
   });
   it('with the app as the engine the Soloist zone is listed (it is not what the pc zone plays with)', () => {
-    expect(withoutPcDevice([PC_APP, SOLOIST, { id: 'spotify:horse1', name: 'HORSE', kind: 'spotify' }]).map((z) => z.id)).toEqual(['pc', 'soloist']);
+    expect(withoutPcDevice([PC_APP, SOLOIST, { id: 'spotify:mypc1', name: 'MYPC', kind: 'spotify' }]).map((z) => z.id)).toEqual(['pc', 'soloist']);
   });
   it('a desktop page follows the PC speakers when Soloist starts for the pc zone, but a phone on the Soloist zone stays', () => {
     const idle = { zone: 'browser', status: 'stopped' };

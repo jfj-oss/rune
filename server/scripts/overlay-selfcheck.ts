@@ -2,7 +2,7 @@
 // database — never the live one. Usage:
 //   npx tsx scripts/overlay-selfcheck.ts /tmp/dir/liner.db
 //
-// Adds three local tracks to the Spotify playlist named HORSE (top, position 10,
+// Adds three local tracks to the Spotify playlist named by PLAYLIST (default Favourites) (top, position 10,
 // end), prints the merged first 15 + last 3 entries, then simulates a Spotify
 // resync that removes the song anchoring the middle entry and prints again.
 import { resolve } from 'node:path';
@@ -26,10 +26,10 @@ const db = openDb(path);
 ensureOverlaySchema(db);
 
 const playlist = db
-  .prepare("SELECT id, name, track_count FROM playlists WHERE name = 'HORSE' AND source = 'spotify'")
+  .prepare("SELECT id, name, track_count FROM playlists WHERE name = ? AND source = 'spotify'")
   .get() as { id: string; name: string; track_count: number } | undefined;
 if (!playlist) {
-  console.error('playlist HORSE not found in this database');
+  console.error('playlist not found in this database');
   process.exit(1);
 }
 const locals = db

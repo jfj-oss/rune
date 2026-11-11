@@ -26,14 +26,14 @@ vi.mock('../src/play/index.js', async (importOriginal) => ({
   }),
 }));
 
-const HORSE = { ...SIM_DEVICE, id: 'horse1', name: 'HORSE' };
+const MYPC = { ...SIM_DEVICE, id: 'mypc1', name: 'MYPC' };
 
 let root: string;
 let db: Db;
 let app: FastifyInstance;
 let closeApp: () => Promise<void>;
 let clock = 1_000_000;
-let devices: () => ReturnType<typeof jsonResponse> = () => jsonResponse(200, { devices: [HORSE] });
+let devices: () => ReturnType<typeof jsonResponse> = () => jsonResponse(200, { devices: [MYPC] });
 
 /** With no page open the device list is reused for an hour: step past that before each read. */
 const zones = async () => {
@@ -70,10 +70,10 @@ afterAll(async () => {
 
 describe('GET /api/zones and the Spotify app on the PC', () => {
   it('names the device, keeps it when the list fails, and drops it once a good list lacks it', async () => {
-    expect(await zones()).toMatchObject({ spotifyDeviceId: 'horse1', spotifyDeviceName: 'HORSE' });
+    expect(await zones()).toMatchObject({ spotifyDeviceId: 'mypc1', spotifyDeviceName: 'MYPC' });
 
     devices = () => jsonResponse(500, { error: 'boom' });
-    expect(await zones()).toMatchObject({ spotifyDeviceId: 'horse1', spotifyDeviceName: 'HORSE' });
+    expect(await zones()).toMatchObject({ spotifyDeviceId: 'mypc1', spotifyDeviceName: 'MYPC' });
 
     devices = () => jsonResponse(200, { devices: [SIM_DEVICE] });
     const gone = await zones();
@@ -107,7 +107,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
 
   it('a probe every minute with no page open costs one device read an hour (it was one every two minutes)', async () => {
     let calls = 0;
-    devices = () => { calls++; return jsonResponse(200, { devices: [HORSE] }); };
+    devices = () => { calls++; return jsonResponse(200, { devices: [MYPC] }); };
     clock += 3_601_000;
     for (let minute = 0; minute < 60; minute++) {
       clock += 60_000;
@@ -118,7 +118,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
   });
 
   it('during a Spotify lockout the Connect devices stay listed, their zones answer, and /status says until when', async () => {
-    devices = () => jsonResponse(200, { devices: [HORSE, { ...SIM_DEVICE, id: 'phone1', name: 'iPhone', type: 'Smartphone', is_active: false, is_restricted: false }] });
+    devices = () => jsonResponse(200, { devices: [MYPC, { ...SIM_DEVICE, id: 'phone1', name: 'iPhone', type: 'Smartphone', is_active: false, is_restricted: false }] });
     clock += 3_601_000;
     await app.inject({ method: 'GET', url: '/api/zones?refresh=1' });
 
@@ -126,7 +126,7 @@ describe('GET /api/zones and the Spotify app on the PC', () => {
     devices = () => jsonResponse(429, '', { 'retry-after': '7200' });
     clock += 3_601_000;
     const list = (await app.inject({ method: 'GET', url: '/api/zones?refresh=1' })).json() as { id: string }[];
-    expect(list.map((z) => z.id)).toEqual(expect.arrayContaining(['spotify:horse1', 'spotify:phone1']));
+    expect(list.map((z) => z.id)).toEqual(expect.arrayContaining(['spotify:mypc1', 'spotify:phone1']));
 
     const status = (await app.inject({ method: 'GET', url: '/api/spotify/status' })).json() as { connected: boolean; restingUntil: number | null };
     expect(status.connected).toBe(true);

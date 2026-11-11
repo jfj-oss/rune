@@ -133,18 +133,18 @@ function countingApi() {
     play: async () => {}, pause: async () => {}, next: async () => {}, previous: async () => {}, seek: async () => {},
     setVolume: async () => {}, setShuffle: async () => {}, setRepeat: async () => {}, enqueue: async () => {},
   };
-  if (api.answer?.device) api.answer.device = { ...api.answer.device, id: 'horse' };
+  if (api.answer?.device) api.answer.device = { ...api.answer.device, id: 'mypc' };
   return api;
 }
 
 function setup(opts: { known?: (ids: string[]) => QueueItem[]; level?: () => 'normal' | 'out' } = {}) {
   const bus = new FakeBus();
   const api = countingApi();
-  const source = new MprisPlaybackSource(bus, { deviceId: () => 'horse', knownTracks: opts.known, budgetLevel: opts.level });
+  const source = new MprisPlaybackSource(bus, { deviceId: () => 'mypc', knownTracks: opts.known, budgetLevel: opts.level });
   const wake = vi.fn();
   source.setWake(wake);
   const reads = sharedPlaybackReads(api as unknown as SpotifyZoneApi, Date.now, undefined, source);
-  const read = () => reads.currentPlayback('horse');
+  const read = () => reads.currentPlayback('mypc');
   return { bus, api, source, reads, read, wake };
 }
 
@@ -161,9 +161,9 @@ describe('the MPRIS read source', () => {
     await vi.advanceTimersByTimeAsync(2000);
     await read();
     expect(api.reads).toBe(1);
-    expect(a).toMatchObject({ source: 'mpris', is_playing: true, progress_ms: 5000, device: { id: 'horse' } });
+    expect(a).toMatchObject({ source: 'mpris', is_playing: true, progress_ms: 5000, device: { id: 'mypc' } });
     expect(a?.item?.id).toBe('t1');
-    expect(source.readsFree('horse')).toBe(true);
+    expect(source.readsFree('mypc')).toBe(true);
     expect(source.readsFree('phone')).toBe(false);
   });
 
@@ -185,7 +185,7 @@ describe('the MPRIS read source', () => {
     await vi.advanceTimersByTimeAsync(2000);
     const a = await read();
     expect(api.reads).toBe(1);
-    const state = mapPlaybackState('spotify:horse', a, undefined);
+    const state = mapPlaybackState('spotify:mypc', a, undefined);
     expect(state.queue[state.index]).toMatchObject({ track: { title: 'From the DB', artists: [{ id: 'ar:9' }], durationMs: 201_000 }, album: { id: 'sp:alb9', coverUrl: '/api/cover/sp:alb9' } });
   });
 
@@ -207,7 +207,7 @@ describe('the MPRIS read source', () => {
     await vi.advanceTimersByTimeAsync(2000);
     const named = await read();
     expect(api.reads).toBe(2);
-    expect(mapPlaybackState('spotify:horse', named, undefined).queue[0]).toMatchObject({ track: { title: 'MPRIS title', artists: [{ name: 'MPRIS artist' }] }, album: { title: 'MPRIS album', coverUrl: 'https://i.scdn.co/image/x' } });
+    expect(mapPlaybackState('spotify:mypc', named, undefined).queue[0]).toMatchObject({ track: { title: 'MPRIS title', artists: [{ name: 'MPRIS artist' }] }, album: { title: 'MPRIS album', coverUrl: 'https://i.scdn.co/image/x' } });
   });
 
   it('while the app plays Spotify is read every ten minutes (another device may have taken over); while paused, never', async () => {
@@ -224,7 +224,7 @@ describe('the MPRIS read source', () => {
     const { bus, api, reads, read } = setup();
     await read();
     await vi.advanceTimersByTimeAsync(2000);
-    await reads.pause('horse');
+    await reads.pause('mypc');
     bus.props = { ...bus.props!, status: 'Paused' };
     setTimeout(() => bus.emit({ ev: 'signal', status: 'Paused' }), 400);
     const p = read();
@@ -232,13 +232,13 @@ describe('the MPRIS read source', () => {
     expect((await p)?.is_playing).toBe(false);
     expect(api.reads).toBe(1);
     await vi.advanceTimersByTimeAsync(2000);
-    await reads.setShuffle(true, 'horse');                  // whether the app signals shuffle is not known
+    await reads.setShuffle(true, 'mypc');                  // whether the app signals shuffle is not known
     const q = read();
     await vi.advanceTimersByTimeAsync(2100);
     await q;
     expect(api.reads).toBe(2);
     await vi.advanceTimersByTimeAsync(2000);
-    await reads.setVolume(30, 'horse');                     // a volume change waits for nothing
+    await reads.setVolume(30, 'mypc');                     // a volume change waits for nothing
     await read();
     expect(api.reads).toBe(2);
   });
@@ -255,12 +255,12 @@ describe('the MPRIS read source', () => {
     await vi.advanceTimersByTimeAsync(2000);
     await read();
     expect(api.reads).toBe(3);
-    expect(source.readsFree('horse')).toBe(false);
+    expect(source.readsFree('mypc')).toBe(false);
     bus.sound = true;                                       // the user pressed play in the app
     await vi.advanceTimersByTimeAsync(2000);
     const a = await read();
     expect(api.reads).toBe(3);
-    expect(a?.device?.id).toBe('horse');
+    expect(a?.device?.id).toBe('mypc');
   });
 
   it('a signal while another device plays wakes the zone only once the app sounds here', async () => {
@@ -299,7 +299,7 @@ describe('the MPRIS read source', () => {
     bus.emit({ ev: 'owner', owned: false });
     await vi.advanceTimersByTimeAsync(1000);
     expect(wake).toHaveBeenCalledTimes(1);
-    expect(source.readsFree('horse')).toBe(false);
+    expect(source.readsFree('mypc')).toBe(false);
     await read();
     await vi.advanceTimersByTimeAsync(2000);
     await read();
@@ -347,7 +347,7 @@ describe('the Connect zone', () => {
     for (const shown of [false, true]) {
       const api = countingApi();
       const queue = vi.spyOn(api, 'queue');
-      const zone = new SpotifyConnectZone(api as unknown as SpotifyZoneApi, 'horse', 'HORSE', { shown: () => shown });
+      const zone = new SpotifyConnectZone(api as unknown as SpotifyZoneApi, 'mypc', 'MYPC', { shown: () => shown });
       zone.onChange(() => undefined);
       await vi.advanceTimersByTimeAsync(100);
       expect(zone.state().status).toBe('playing');

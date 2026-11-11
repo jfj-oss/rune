@@ -17,6 +17,7 @@ export const TEST_CONFIG: Config = {
   audioDevice: 'none',
   userAgent: 'liner-tests',
   spotifyClientId: 'client-abc',
+  pcSpotifyDevice: 'MYPC',
 };
 
 export function jsonResponse(

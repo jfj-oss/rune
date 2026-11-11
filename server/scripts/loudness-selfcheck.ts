@@ -174,7 +174,7 @@ async function main(): Promise<void> {
 
   const db = openDb(tempDbPath);
   const cfg: Config = {
-    libraryRoots: ['/mnt/BIG data/Music'],
+    libraryRoots: ['/path/to/Music'],
     dataDir: tempRoot,
     port: 0,
     audioDevice: 'null',

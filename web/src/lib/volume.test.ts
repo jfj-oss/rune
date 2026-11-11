@@ -98,7 +98,7 @@ describe('detectIOS', () => {
 describe('remoteVolumeHint', () => {
   it('tells the user to use the device’s own buttons when Spotify cannot set its volume', () => {
     expect(remoteVolumeHint({ name: 'iPhone — Spotify', deviceType: 'Smartphone' })).toBe('Use the volume buttons on iPhone');
-    expect(remoteVolumeHint({ name: 'Justin’s iPad' })).toBe('Use the volume buttons on Justin’s iPad');
+    expect(remoteVolumeHint({ name: 'Sam’s iPad' })).toBe('Use the volume buttons on Sam’s iPad');
     expect(remoteVolumeHint({ name: 'Kitchen', deviceType: 'Speaker' })).toBe('Set the volume on Kitchen itself');
   });
 });

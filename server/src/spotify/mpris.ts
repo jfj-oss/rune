@@ -1,5 +1,5 @@
 // Phase 2 of the server-queue plan: the Spotify desktop app on this PC describes itself over MPRIS, for free. While
-// it owns its MPRIS name and reports a track, its Connect zone (HORSE) is read from there instead of GET /me/player:
+// it owns its MPRIS name and reports a track, its Connect zone (this PC) is read from there instead of GET /me/player:
 // the answer is shaped like /me/player, as LocalPlaybackSource does for the browser SDK, so the zone logic is the
 // same. Commands still go through the Web API, and nothing here sends an MPRIS method: it reads properties only.
 //
@@ -219,7 +219,7 @@ export interface MprisPlaybackState extends SpotifyPlaybackState {
 }
 
 export interface MprisSourceOptions {
-  /** The Connect device id of this PC's Spotify app (HORSE), once the device list named it. */
+  /** The Connect device id of this PC's Spotify app, once the device list named it. */
   deviceId: () => string | null;
   /** Songs rune already has, by 'sp:' id: titles and covers without asking Spotify. */
   knownTracks?: (ids: string[]) => QueueItem[];

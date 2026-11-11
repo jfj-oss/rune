@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => ({ spawn: vi.fn(), execFile: vi.fn() }));
 vi.mock('node:child_process', async (orig) => ({ ...(await orig<typeof import('node:child_process')>()), spawn: (...a: unknown[]) => mocks.spawn(...a), execFile: (...a: unknown[]) => mocks.execFile(...a) }));
 
 const child = () => { const c = new EventEmitter() as EventEmitter & Record<string, unknown>; Object.assign(c, { pid: 1, stderr: new EventEmitter(), exitCode: null, signalCode: null, kill: () => true }); return c; };
-const HORSE = { ...SIM_DEVICE, id: 'horse1', name: 'HORSE' };
+const MYPC = { ...SIM_DEVICE, id: 'mypc1', name: 'MYPC' };
 
 function seedLibrary(file: string): Db {
   const db = openDb(file);
@@ -57,7 +57,7 @@ const makeChild = (): FakeChild => {
 
 interface BootOptions {
   serverQueue?: boolean;
-  /** A Spotify account with the HORSE app as a device, over a fake Web API. */
+  /** A Spotify account with the MYPC app as a device, over a fake Web API. */
   spotify?: boolean;
   /** A supervised fake process (for the expired / not-installed states) instead of a bare connection to the fake. */
   supervised?: { exists: boolean };
@@ -88,7 +88,7 @@ async function boot(o: BootOptions = {}) {
   const audio = fakeAudio();
   const spawned: FakeChild[] = [];
   const cfg: Config = {
-    libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album',
+    libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album', pcSpotifyDevice: 'MYPC',
     spotify: { serverQueue: o.serverQueue === true },
     ...(o.spotify ? { spotifyClientId: 'client-abc' } : {}),
   };
@@ -98,7 +98,7 @@ async function boot(o: BootOptions = {}) {
     db.prepare("INSERT INTO spotify_auth (id, access_token, refresh_token, token_type, scope, expires_at, user_name, user_product, updated_at) VALUES (1, 'access', 'refresh', 'Bearer', '', ?, NULL, NULL, 0)").run(Date.now() + 3_600_000);
   }
   const { fetch } = fakeFetch((url) => {
-    if (url.pathname === '/v1/me/player/devices') { devicesCalls++; return jsonResponse(200, { devices: [HORSE] }); }
+    if (url.pathname === '/v1/me/player/devices') { devicesCalls++; return jsonResponse(200, { devices: [MYPC] }); }
     return jsonResponse(204, '');
   });
   const { app, shutdown } = await buildApp(db, cfg, {
@@ -129,11 +129,11 @@ describe('pcSpotifyRoute: Soloist first, the app when it cannot play, with the r
   const ok = { run: 'running', connected: true, loggedIn: true } as const;
   it('sends Spotify songs to Soloist whenever it is running, connected and signed in', () => {
     expect(pcSpotifyRoute(ok, null, false)).toEqual({ engine: 'soloist', zone: 'soloist', notice: null });
-    expect(pcSpotifyRoute(ok, 'spotify:horse1', true)).toEqual({ engine: 'soloist', zone: 'soloist', notice: null });
+    expect(pcSpotifyRoute(ok, 'spotify:mypc1', true)).toEqual({ engine: 'soloist', zone: 'soloist', notice: null });
     expect(soloistFallbackNotice(ok)).toBeNull();
   });
   it('without Soloist the app route is what it was', () => {
-    expect(pcSpotifyRoute(undefined, 'spotify:horse1', true)).toEqual({ engine: 'app', zone: 'spotify:horse1', notice: null });
+    expect(pcSpotifyRoute(undefined, 'spotify:mypc1', true)).toEqual({ engine: 'app', zone: 'spotify:mypc1', notice: null });
     expect(pcSpotifyRoute(undefined, null, true)).toEqual({ engine: 'app', zone: null, notice: null });
     expect(pcSpotifyRoute(undefined, null, false)).toEqual({ engine: null, zone: null, notice: null });
   });
@@ -149,7 +149,7 @@ describe('pcSpotifyRoute: Soloist first, the app when it cannot play, with the r
     ];
     for (const [s, re] of cases) {
       expect(soloistFallbackNotice(s)).toMatch(re);
-      expect(pcSpotifyRoute(s, 'spotify:horse1', true)).toMatchObject({ engine: 'app', zone: 'spotify:horse1' });
+      expect(pcSpotifyRoute(s, 'spotify:mypc1', true)).toMatchObject({ engine: 'app', zone: 'spotify:mypc1' });
       expect(pcSpotifyRoute(s, null, true)).toMatchObject({ engine: 'app', zone: null });
       // No Spotify account for the app either: nothing can play, but the reason still travels.
       expect(pcSpotifyRoute(s, null, false).engine).toBeNull();
@@ -226,11 +226,11 @@ const app = (t: { app: Awaited<ReturnType<typeof boot>>['app'] }) => t.app;
 describe('falling back to the Spotify app, with the reason', () => {
   it('Soloist not signed in: the app route, and the notice says so', { timeout: 20000 }, async () => {
     const t = await boot({ spotify: true });
-    expect(await t.pcEntry()).toMatchObject({ spotifyEngine: 'soloist', spotifyZone: 'soloist', spotifyDeviceId: 'horse1' });
+    expect(await t.pcEntry()).toMatchObject({ spotifyEngine: 'soloist', spotifyZone: 'soloist', spotifyDeviceId: 'mypc1' });
     t.fake.setLoggedIn(false);
     await vi.waitFor(async () => expect((await t.status()).loggedIn).toBe(false));
     const pc = await t.pcEntry();
-    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:horse1', spotifyDeviceId: 'horse1' });
+    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:mypc1', spotifyDeviceId: 'mypc1' });
     expect(pc.spotifyNotice).toMatch(/not signed in.*using the Spotify app/);
     await t.close();
   });
@@ -240,7 +240,7 @@ describe('falling back to the Spotify app, with the reason', () => {
     await t.fake.stop();
     await vi.waitFor(async () => expect((await t.status()).connected).toBe(false));
     const pc = await t.pcEntry();
-    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:horse1' });
+    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:mypc1' });
     expect(pc.spotifyNotice).toMatch(/not running yet/);
     await t.close();
   });
@@ -253,7 +253,7 @@ describe('falling back to the Spotify app, with the reason', () => {
     t.spawned[0]!.exit(10);
     await vi.waitFor(async () => expect((await t.status()).run).toBe('expired'));
     const pc = await t.pcEntry();
-    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:horse1' });
+    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:mypc1' });
     expect(pc.spotifyNotice).toMatch(/needs updating/);
     expect(t.spawned).toHaveLength(1); // no restart loop on an expired build
     await t.close();
@@ -263,7 +263,7 @@ describe('falling back to the Spotify app, with the reason', () => {
     const t = await boot({ spotify: true, supervised: { exists: false } });
     await vi.waitFor(async () => expect((await t.status()).run).toBe('no-binary'));
     const pc = await t.pcEntry();
-    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:horse1' });
+    expect(pc).toMatchObject({ spotifyEngine: 'app', spotifyZone: 'spotify:mypc1' });
     expect(pc.spotifyNotice).toMatch(/not installed/);
     await t.close();
   });

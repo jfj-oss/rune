@@ -120,7 +120,7 @@ describe('sdkSupportedFor', () => {
 });
 
 describe('pc zone with the PC’s Spotify app', () => {
-  const PC: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'abc123', spotifyDeviceName: 'HORSE' };
+  const PC: ZoneInfo = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'abc123', spotifyDeviceName: 'MYPC' };
   it('plays Spotify with the app there, and rune starts it when it is missing', () => {
     expect(zoneCanPlay(PC, 'spotify', NO_SDK)).toBe(true);
     expect(zoneCanPlay(PC, 'local', NO_SDK)).toBe(true);
@@ -132,7 +132,7 @@ describe('pc zone with the PC’s Spotify app', () => {
     expect(r.ok && r.dropped).toBe(0);
   });
   it('lists the pc zone as a Spotify target and hides its duplicate Connect device', () => {
-    const zones: ZoneInfo[] = [PC, { id: 'spotify:abc123', name: 'HORSE', kind: 'spotify' }, { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' }];
+    const zones: ZoneInfo[] = [PC, { id: 'spotify:abc123', name: 'MYPC', kind: 'spotify' }, { id: 'spotify:phone', name: 'iPhone', kind: 'spotify' }];
     expect(withoutPcDevice(zones).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
     expect(playableZones(withoutPcDevice(zones), 'spotify', NO_SDK).map((o) => o.zone.id)).toEqual(['spotify:phone', 'pc']);
   });
@@ -147,7 +147,7 @@ describe('Connect device labels', () => {
     expect(spotifyDeviceHint({ name: 'iPhone', deviceType: 'Smartphone' })).toBe('Spotify app on a phone');
     expect(spotifyDeviceHint({ name: 'Pixel', deviceType: 'smartphone' })).toBe('Spotify app on a phone');
     expect(spotifyDeviceHint({ name: 'Living room', deviceType: 'Speaker' })).toBe('Spotify speaker');
-    expect(spotifyDeviceHint({ name: 'HORSE', deviceType: 'Computer' })).toBe('Spotify app on a computer');
+    expect(spotifyDeviceHint({ name: 'MYPC', deviceType: 'Computer' })).toBe('Spotify app on a computer');
   });
 
   it('falls back to the name when Spotify gives no type', () => {

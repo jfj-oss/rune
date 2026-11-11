@@ -18,7 +18,7 @@ const { app, shutdown } = await buildApp(db, cfg, {
   backups: background && process.env.RUNE_NO_BACKUPS !== '1',
   // Phase 0: MPRIS + PipeWire + Connect side by side in spotify-watch.jsonl (listens only).
   spotifyWatch: background && process.env.RUNE_NO_SPOTIFY_WATCH !== '1',
-  // Phase 2: HORSE is read over MPRIS, not GET /me/player (config spotify.mprisReads: false turns it off).
+  // Phase 2: the PC's own Spotify app is read over MPRIS, not GET /me/player (config spotify.mprisReads: false turns it off).
   mpris: background && process.env.RUNE_NO_MPRIS !== '1',
   // Spotify Soloist (when its binary and key are installed; config soloist.enabled: false turns it off).
   soloist: background && process.env.RUNE_NO_SOLOIST !== '1',

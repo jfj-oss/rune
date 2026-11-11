@@ -179,7 +179,7 @@ describe('server queue: X1 and P1-P4 on the pc zone', () => {
     const r = rig({ device: () => device });
     await r.play(r.items(spot('s1'), local(2), spot('s3')));
     await run(5000);
-    device = null;                    // one /zones answer without HORSE
+    device = null;                    // one /zones answer without MYPC
     await run(3000);
     device = DEV;
     await run(5000);
@@ -210,7 +210,7 @@ describe('server queue: X1 and P1-P4 on the pc zone', () => {
     const r = rig();
     await r.play(r.items(spot('s1'), local(2)));
     await run(30_000);
-    await r.w.play({ uris: ['spotify:track:other'] }, DEV);   // the phone picks a song on HORSE
+    await r.w.play({ uris: ['spotify:track:other'] }, DEV);   // the phone picks a song on MYPC
     await run(2000);
     const s = r.driver.state();
     expect(s.hold?.reason).toBe('takeover');

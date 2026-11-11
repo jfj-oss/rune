@@ -25,7 +25,7 @@ function stack(level: SpotifyBudgetLevel, watched = true, opts: { mpris?: boolea
   // With MPRIS the zone is built the way the server builds it: SpotifyZones wires the source to this device's zone.
   const source = w.mpris ? new MprisPlaybackSource(w.mpris, { deviceId: () => DEV, budgetLevel: () => lvl, knownTracks }) : undefined;
   const zones = source ? new SpotifyZones(w, { ...zoneOpts, mpris: source }) : undefined;
-  const zone: SpotifyConnectZone = zones ? zones.ensureZone(DEV, 'HORSE') : new SpotifyConnectZone(w, DEV, 'HORSE', zoneOpts);
+  const zone: SpotifyConnectZone = zones ? zones.ensureZone(DEV, 'MYPC') : new SpotifyConnectZone(w, DEV, 'MYPC', zoneOpts);
   const plays: RecordedPlay[] = [];
   const counter = new PlayCounter((p) => plays.push(p));
   let prev: PlayerState | null = null;
@@ -370,14 +370,14 @@ describe('world with MPRIS', () => {
   });
 });
 
-// Spotify requests over one simulated hour on this PC's Spotify app (HORSE), MPRIS reads off (before) and on (after).
+// Spotify requests over one simulated hour on this PC's Spotify app (MYPC), MPRIS reads off (before) and on (after).
 // The songs are in rune's database (as songs played from rune mostly are), so no title lookups on either side.
 describe('request rate', () => {
   type Story = { name: string; watched: boolean; shown: boolean; run: (s: ReturnType<typeof stack>) => Promise<void> };
   const HOUR = 3_600_000;
   const stories: Story[] = [
     {
-      name: 'A rune queue on HORSE, a tab showing it: 17 songs, a 3 min pause, a seek, two volume changes',
+      name: 'A rune queue on MYPC, a tab showing it: 17 songs, a 3 min pause, a seek, two volume changes',
       watched: true, shown: true,
       run: async ({ b, items }) => {
         await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items);
@@ -396,7 +396,7 @@ describe('request rate', () => {
       run: async ({ b, items }) => { await b.send({ type: 'play', trackIds: [], startIndex: 0 }, items); await run(HOUR); },
     },
     {
-      name: 'C an album started in the Spotify app, a tab showing HORSE',
+      name: 'C an album started in the Spotify app, a tab showing MYPC',
       watched: true, shown: true,
       run: async ({ w, zone }) => {
         zone.onChange(() => undefined);
@@ -406,7 +406,7 @@ describe('request rate', () => {
       },
     },
     {
-      name: 'D the app open and paused, a tab showing HORSE',
+      name: 'D the app open and paused, a tab showing MYPC',
       watched: true, shown: true,
       run: async ({ w, zone }) => {
         zone.onChange(() => undefined);
@@ -438,6 +438,6 @@ describe('request rate', () => {
       rows.push(`${story.name}\n  before: ${sum(counts.before!)} requests (${reads(counts.before!)} reads) ${JSON.stringify(counts.before)}\n  after:  ${sum(counts.after!)} requests (${reads(counts.after!)} reads) ${JSON.stringify(counts.after)}`);
       expect(counts.after!['GET /me/player'] ?? 0).toBeLessThan(counts.before!['GET /me/player'] ?? 0);
     }
-    console.log(`\n=== Spotify requests in one simulated hour on HORSE\n${rows.join('\n')}\n  all four hours: before ${totals.before}, after ${totals.after}`);
+    console.log(`\n=== Spotify requests in one simulated hour on MYPC\n${rows.join('\n')}\n  all four hours: before ${totals.before}, after ${totals.after}`);
   });
 });

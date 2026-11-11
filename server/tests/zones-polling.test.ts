@@ -27,7 +27,7 @@ vi.mock('../src/play/index.js', async (importOriginal) => ({
 }));
 
 const dev = (id: string, name: string, active = false) => ({ ...SIM_DEVICE, id, name, is_active: active });
-const DEVICES = [dev('horse1', 'HORSE'), dev('tv1', 'Living room TV', true), dev('phone1', 'iPhone'), dev('spk1', 'Kitchen speaker'), dev('spk2', 'Office speaker')];
+const DEVICES = [dev('mypc1', 'MYPC'), dev('tv1', 'Living room TV', true), dev('phone1', 'iPhone'), dev('spk1', 'Kitchen speaker'), dev('spk2', 'Office speaker')];
 
 let root: string;
 let db: Db;
@@ -80,7 +80,7 @@ describe('GET /api/zones and Spotify polling', () => {
     const ids = (res.json() as { id: string; isActive?: boolean }[]).map((z) => z.id);
     // The picker still gets every device, with Spotify's own description.
     for (const d of DEVICES) expect(ids).toContain(`spotify:${d.id}`);
-    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:horse1', 'spotify:tv1']));
+    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:mypc1', 'spotify:tv1']));
   });
 
   it('costs the same number of Spotify reads for five devices as for the two that matter', async () => {
@@ -89,7 +89,7 @@ describe('GET /api/zones and Spotify polling', () => {
     // A tab that shows only one speaker: that zone joins; the others stay unsubscribed.
     ws.send(JSON.stringify({ type: 'viewing', zones: ['pc', 'spotify:spk1'] }));
     await settle();
-    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:horse1', 'spotify:tv1', 'spotify:spk1']));
+    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:mypc1', 'spotify:tv1', 'spotify:spk1']));
 
     // Repeated device-list reads and wakes (tab coming back to the foreground) with the clock moving on.
     const before = playerReads();
@@ -104,7 +104,7 @@ describe('GET /api/zones and Spotify polling', () => {
     // Concurrent zone polls share one /me/player read, so each wake costs at most one read; before this change the
     // three unviewed devices (phone, other speakers) were subscribed too.
     expect(reads).toBeLessThanOrEqual(3);
-    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:horse1', 'spotify:tv1', 'spotify:spk1']));
+    expect(new Set(built.watchedSpotifyZones())).toEqual(new Set(['spotify:mypc1', 'spotify:tv1', 'spotify:spk1']));
     expect(built.watchedSpotifyZones()).not.toContain('spotify:phone1');
     expect(built.watchedSpotifyZones()).not.toContain('spotify:spk2');
     ws.terminate();

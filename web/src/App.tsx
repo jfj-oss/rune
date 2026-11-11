@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Ambient } from './components/Ambient';
 import { PageSkeleton } from './components/PageSkeleton';
+import { FirstRunGate } from './components/FirstRunGate';
 import { Shell } from './components/Shell';
 import { ReviewPreviewHost } from './components/ReviewPreview';
 import { startHistoryReporter } from './lib/historyReporter';
@@ -30,6 +31,7 @@ const RadioPage = lazy(() => import('./pages/Radio'));
 const Discover = lazy(() => import('./pages/Discover'));
 const Playlists = lazy(() => import('./pages/Playlists'));
 const PlaylistPage = lazy(() => import('./pages/Playlist'));
+const Setup = lazy(() => import('./pages/Setup'));
 const Placeholder = lazy(() => import('./pages/Placeholder'));
 
 const client = new QueryClient({
@@ -53,6 +55,7 @@ export default function App() {
     <QueryClientProvider client={client}>
       <Ambient />
       <BrowserRouter>
+        <FirstRunGate />
         <Shell>
           <Suspense fallback={<PageSkeleton />}>
             <Routes>
@@ -66,6 +69,7 @@ export default function App() {
               <Route path="/stats" element={<Stats />} />
               <Route path="/duplicates" element={<Duplicates />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/setup" element={<Setup />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/tracks" element={<Tracks />} />
               <Route path="/genres" element={<Genres />} />

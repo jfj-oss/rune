@@ -10,7 +10,7 @@ import type { Config } from '../src/config.js';
 import { openDb } from '../src/db/index.js';
 import { createScanner } from '../src/scan/index.js';
 
-const LIBRARY = process.env.LINER_LIBRARY ?? '/mnt/BIG data/Music';
+const LIBRARY = process.env.LINER_LIBRARY ?? '/path/to/Music';
 
 interface Row {
   [key: string]: unknown;

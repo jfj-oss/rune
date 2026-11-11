@@ -6,33 +6,37 @@ browser tab (and from your phone over your own network).
 
 Built for Linux. It may run elsewhere but is only tested there.
 
-## What you need
-
-- **Node.js 22** and **pnpm** (`npm install -g pnpm`)
-- **mpv** (plays local files on the PC): `sudo pacman -S mpv`, `sudo apt install mpv`, …
-- A folder of music files (FLAC, MP3, …)
-- Optional: a **Spotify Premium** account, for Spotify playback
-
 ## Install
+
+On Linux, one command (details, options and troubleshooting are in [INSTALL.md](INSTALL.md)):
+
+```sh
+git clone https://github.com/jfj-oss/rune.git ~/.local/share/rune && ~/.local/share/rune/scripts/install.sh
+```
+
+It checks for Node 22, pnpm, mpv, ffmpeg and PipeWire (printing the install command for your distro if any is missing),
+builds rune, and offers to run it as a systemd user service. Then open **http://127.0.0.1:4545**: a setup page asks for
+your music folder and, optionally, your own Spotify app, Soloist key and phone access. rune only ever reads your music
+folders; it never changes your files.
+
+### By hand
 
 ```sh
 git clone https://github.com/jfj-oss/rune.git
 cd rune
 pnpm install
 pnpm --filter @liner/web build
+cd server && npx tsx src/main.ts
 ```
 
-Create `server/config.json` (it stays on your computer; it is in `.gitignore`):
+Settings go in `server/config.json` (kept on your computer, in `.gitignore`), or use the setup page:
 
 ```json
 {
   "libraryRoots": ["/home/YOU/Music"],
-  "audioDevice": "pipewire",
-  "userAgent": "rune/0.1 (your-email-or-site)"
+  "audioDevice": "pipewire"
 }
 ```
-
-`libraryRoots` is one or more music folders. rune only reads them; it never changes your files.
 
 Megatron can play your local music into a voice call from its "Play into call" picker. Megatron's own browser
 (`http://127.0.0.1:7420`) and desktop app origins are allowed automatically. For a Megatron opened from another
@@ -45,17 +49,6 @@ device, add its address to `corsOrigins`:
 Only search, album/playlist details, cover art and the audio stream are exposed. Spotify audio is never streamed, and
 Megatron filters Spotify tracks out of everything it plays.
 
-Start it:
-
-```sh
-cd server && npx tsx src/main.ts
-```
-
-Open **http://127.0.0.1:4545** in your browser. The first scan of a big library takes a while.
-
-To start it with your PC, make a systemd user service whose `ExecStart` is
-`/path/to/rune/server/node_modules/.bin/tsx src/main.ts` with `WorkingDirectory` set to `/path/to/rune/server`.
-
 ## Spotify (optional)
 
 Each person uses **their own** Spotify app ID (free, two minutes):
@@ -64,7 +57,7 @@ Each person uses **their own** Spotify app ID (free, two minutes):
 2. Redirect URI: `http://127.0.0.1:4545/api/spotify/callback`. Tick **Web API** and **Web Playback SDK**.
 3. Copy the **Client ID** (there is no secret: rune uses PKCE) into `server/config.json`:
    `"spotifyClientId": "your-client-id"`
-4. Restart rune, then in a browser on the same PC open **Settings** and press **Connect Spotify** next to "Spotify:
+4. The setup page (Settings, Set up rune) does steps 2-4 for you. Otherwise restart rune, then in a browser on the same PC open **Settings** and press **Connect Spotify** next to "Spotify:
    Not connected" (or open `http://127.0.0.1:4545/api/spotify/login` directly) and approve the login.
 
 New Spotify apps are in "development mode": only accounts you add under **User Management** in the dashboard can log

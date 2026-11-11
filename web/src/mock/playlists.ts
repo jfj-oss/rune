@@ -217,11 +217,11 @@ function seed() {
     pick(full, 2), pick(spot[0], 0), pick(local[3], 1), pick(spot[1], 2), pick(full, 5), pick(local[5], 0), pick(spot[2], 1),
     pick(local[7], 2), pick(spot[3], 3), pick(local[1], 0), pick(spot[0], 4), pick(full, 8),
   ];
-  // HORSE: local rips slotted into the synced Spotify playlist
-  const horse = SPOTIFY_PLAYLISTS.find((p) => p.name === 'HORSE');
-  if (horse) {
+  // MYPC: local rips slotted into the synced Spotify playlist
+  const mypc = SPOTIFY_PLAYLISTS.find((p) => p.name === 'MYPC');
+  if (mypc) {
     const localTracks = [pick(full, 3), pick(local[2], 0), pick(local[4], 1)].filter((t): t is PlaylistTrack => !!t);
-    overlays.set(horse.id, localTracks.map((track, i) => ({ entryId: `ov:${++en}`, pos: [2, 6, 11][i]!, track })));
+    overlays.set(mypc.id, localTracks.map((track, i) => ({ entryId: `ov:${++en}`, pos: [2, 6, 11][i]!, track })));
   }
   rows.push({ id: newId(), name: 'Coast road', description: 'Local rips and Spotify finds, one queue.', kind: 'static', tracks: mix.filter((t): t is PlaylistTrack => !!t) });
   rows.push({ id: newId(), name: 'Late night focus', kind: 'static', tracks: [full, local[2], local[4], local[6]].flatMap((a, i) => pick(a, i + 1) ?? []) });

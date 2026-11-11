@@ -122,7 +122,7 @@ function runFile(file: string, args: string[], opts: { cwd: string; timeoutMs: n
 }
 
 /** The connection comes from this machine (Tailscale serve proxies from 127.0.0.1; a LAN peer never does). */
-function fromLoopback(req: FastifyRequest): boolean {
+export function fromLoopback(req: FastifyRequest): boolean {
   const addr = req.socket?.remoteAddress ?? '';
   return addr === '::1' || addr === '127.0.0.1' || /^::ffff:127\./i.test(addr) || /^127\./.test(addr);
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server } from 'lucide-react';
+import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server, Wrench } from 'lucide-react';
 import { Empty } from '../components/Rows';
 import { UpdateCard } from '../components/UpdateCard';
 import { api, http, isMock } from '../api';
@@ -204,6 +204,11 @@ export default function Settings() {
         </div>
       </header>
 
+      <section className="statuscard setupcard">
+        <h2 className="statuscard__head"><Wrench size={17} /> Set up rune</h2>
+        <p className="muted">Music folders, Spotify, Soloist and phone access.</p>
+        <div className="updatecard__actions"><Link className="btn btn--sm" to="/setup">Open setup</Link></div>
+      </section>
       <AmbientPicker />
       <KeyboardCard />
       <UpdateCard />

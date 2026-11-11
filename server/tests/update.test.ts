@@ -561,3 +561,36 @@ describe('same-origin guard', () => {
     await app.close();
   });
 });
+
+describe('update for a friend install (plain clone of the public repo)', () => {
+  it('sees a newer commit on origin, with no local commits and a gitignored config.json', async () => {
+    const base = tempDir();
+    const originDir = join(base, 'public.git');
+    const seed = join(base, 'seed');
+    mkdirSync(originDir);
+    git(base, 'init', '--bare', '-b', 'master', originDir);
+    git(base, 'init', '-b', 'master', seed);
+    git(seed, 'remote', 'add', 'origin', originDir);
+    writeFileSync(join(seed, '.gitignore'), 'server/config.json\n');
+    git(seed, 'add', '.gitignore');
+    const first = commit(seed, 'first');
+    git(seed, 'push', 'origin', 'master');
+    // The friend's install: `git clone`, a config of their own, a built web/dist.
+    const clone = join(base, 'rune');
+    git(base, 'clone', originDir, clone);
+    mkdirSync(join(clone, 'server'), { recursive: true });
+    writeFileSync(join(clone, 'server/config.json'), '{"libraryRoots":["/music"]}');
+    mkdirSync(join(clone, 'web/dist'), { recursive: true });
+    writeFileSync(join(clone, 'web/dist/index.html'), 'built');
+    // The author publishes another commit.
+    writeFileSync(join(seed, 'new.txt'), 'x');
+    git(seed, 'add', 'new.txt');
+    const second = commit(seed, 'second');
+    git(seed, 'push', 'origin', 'master');
+
+    const s = await svc({ repoRoot: clone, webDist: join(clone, 'web/dist') }).status({ force: true });
+    expect(s).toMatchObject({ supported: true, ahead: 0, behind: 1, dirty: false, available: true });
+    expect(s.current).toBe(first.slice(0, 7));
+    expect(s.latest).toBe(second.slice(0, 7));
+  });
+});

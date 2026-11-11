@@ -104,8 +104,8 @@ async function setup(
   const zones = () => {
     const ready = startCalls > 0 && deviceAfterReads !== null && readsAfterStart >= deviceAfterReads;
     return [
-      { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(ready ? { spotifyDeviceId: 'dev', spotifyDeviceName: 'HORSE' } : {}), ...(extra.pc ?? {}) },
-      ...(deviceModes ? [{ id: 'spotify:dev', name: 'HORSE', kind: 'spotify' }] : []),
+      { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(ready ? { spotifyDeviceId: 'dev', spotifyDeviceName: 'MYPC' } : {}), ...(extra.pc ?? {}) },
+      ...(deviceModes ? [{ id: 'spotify:dev', name: 'MYPC', kind: 'spotify' }] : []),
       ...(extra.zones ?? []),
       { id: 'browser', name: 'This computer', kind: 'browser' },
     ];
