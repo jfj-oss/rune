@@ -1004,13 +1004,13 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     repoRoot: () => findUpdateRepoRoot(process.cwd()),
     webDist: dist,
     captureRunning: opts.updateCaptureRunning === true,
-    // Music playing (or paused mid-song) on the PC blocks an update, whatever
-    // zone owns the PC queue (mpv directly, or the server-owned driver).
+    // Music actually sounding blocks an update: the PC queue (mpv directly, or the server-owned driver) and Soloist,
+    // which is rune's child and stops with it, on the PC speakers or streaming to a phone. A paused song does not
+    // block: waiting for it would wait for ever, and nothing is heard while it restarts.
     isPlayingOnPc: () => {
+      const sounding = (status: string | undefined) => status === 'playing' || status === 'loading';
       const zone = driver ?? pc;
-      if (!zone) return false;
-      const s = zone.state();
-      return s.status === 'playing' || s.status === 'paused' || s.status === 'loading';
+      return sounding(zone?.state().status) || sounding(soloist?.zone.state().status);
     },
     logger: { warn: (obj, msg) => app.log.warn(obj, msg), info: (obj, msg) => app.log.info(obj, msg) },
   });
