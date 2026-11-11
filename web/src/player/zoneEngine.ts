@@ -21,6 +21,12 @@ export interface ZoneEngineOptions {
   startTimeoutMs?: number;
   /** How near the end the song must be, by the clock, for the zone's report to count as "finished". */
   endSlackMs?: number;
+  /**
+   * False: the zone keeps its own level. A load does not push the slider's level into it (a phone starting a song on
+   * Soloist must not turn the PC's Soloist up to the page's 100 %), the level the zone reports is adopted and told to
+   * `onVolume`, and only a slider move sends one. Default true (the pc zone's hybrid mode levels mpv and Soloist alike).
+   */
+  pushVolumeOnLoad?: boolean;
 }
 
 const sameTrack = (a: Track, b: Track) => a.id === b.id || (!!a.spotifyUri && a.spotifyUri === b.spotifyUri);
@@ -36,6 +42,10 @@ const REWOUND_MS = 2000;
  */
 export class ZoneEngine implements Engine {
   private track: Track | null = null;
+  /** The song and the ones handed to the zone with it (play order). */
+  private run: Track[] = [];
+  /** The zone moved on from our song to the next one of the run: the state that said so, for the next load() to adopt. */
+  private handoff: { s: PlayerState; at: number } | null = null;
   private gen = 0;
   private armed = false;
   /** A play is on its way to the zone: it will start even though `armed` is still false. */
@@ -63,11 +73,13 @@ export class ZoneEngine implements Engine {
   private endedFn: () => void = () => {};
   private errorFn: (m: string) => void = () => {};
   private syncFn: (pos: number, playing: boolean) => void = () => {};
+  private volumeFn: (volume: number) => void = () => {};
   private readonly now: () => number;
   private readonly pollMs: number;
   private readonly safetyPollMs: number;
   private readonly startTimeoutMs: number;
   private readonly endSlackMs: number;
+  private readonly pushVolume: boolean;
 
   constructor(private t: ZoneTransport, opts: ZoneEngineOptions = {}) {
     this.now = opts.now ?? Date.now;
@@ -75,14 +87,23 @@ export class ZoneEngine implements Engine {
     this.safetyPollMs = opts.safetyPollMs ?? 15_000;
     this.startTimeoutMs = opts.startTimeoutMs ?? 12_000;
     this.endSlackMs = opts.endSlackMs ?? 5000;
+    this.pushVolume = opts.pushVolumeOnLoad !== false;
   }
 
   // ----- Engine -----
 
-  load(track: Track, startMs: number, autoplay: boolean) {
+  /**
+   * `upcoming`: the songs this same zone plays after `track` (HybridEngine hands over the run of one engine). They go
+   * to the zone with the song, so it plays them gapless by itself (Soloist queues the next one; mpv too); when it moves
+   * on to one of them, that is the song's end here, and the queue's next load() adopts the song already sounding
+   * instead of restarting it (`adoptable`).
+   */
+  load(track: Track, startMs: number, autoplay: boolean, upcoming: Track[] = []) {
+    const adopt = autoplay && startMs === 0 ? this.adoptable(track) : null;
     this.detach();
     const gen = ++this.gen;
     this.track = track;
+    this.run = [track, ...upcoming];
     this.armed = false;
     this.inFlight = true;
     this.displaced = false;
@@ -94,13 +115,24 @@ export class ZoneEngine implements Engine {
     this.lastUpdated = 0;
     this.snap = null;
     this.attach(gen);
+    if (adopt) {
+      // The zone already sounds this song (it followed our run): nothing to send, just follow it from here.
+      this.inFlight = false;
+      this.armed = true;
+      this.lastUpdated = adopt.updatedAt;
+      this.serverVolume = adopt.volume;
+      const playing = adopt.status === 'playing';
+      this.snap = { pos: adopt.positionMs, at: this.now(), playing };
+      this.syncFn(adopt.positionMs, playing);
+      return;
+    }
     void (async () => {
       try {
         // the zone may have a different volume than the slider (mpv vs the Spotify app): bring it in line
-        if (this.serverVolume === null || Math.abs(this.serverVolume - this.volume) > 1) await this.t.send({ type: 'volume', volume: this.volume }).catch(() => undefined);
+        if (this.pushVolume && (this.serverVolume === null || Math.abs(this.serverVolume - this.volume) > 1)) await this.t.send({ type: 'volume', volume: this.volume }).catch(() => undefined);
         if (gen !== this.gen) return; // stopped or replaced meanwhile: its pause must not land before this play
         let paused = this.userPaused;
-        let s = await this.t.send({ type: 'play', trackIds: [track.id], startIndex: 0, positionMs: Math.max(0, Math.round(startMs)), paused });
+        let s = await this.t.send({ type: 'play', trackIds: this.run.map((x) => x.id), startIndex: 0, positionMs: Math.max(0, Math.round(startMs)), paused });
         // Pause or Play pressed while the start was on its way: only now can it land after that start, not ahead of it.
         while (gen === this.gen && this.userPaused !== paused) {
           paused = this.userPaused;
@@ -180,6 +212,8 @@ export class ZoneEngine implements Engine {
     this.detach();
     this.gen++;
     this.track = null;
+    this.run = [];
+    this.handoff = null;
     this.armed = false;
     this.inFlight = false;
     this.displaced = false;
@@ -192,6 +226,19 @@ export class ZoneEngine implements Engine {
   onEnded(fn: () => void) { this.endedFn = fn; }
   onError(fn: (m: string) => void) { this.errorFn = fn; }
   onSync(fn: (pos: number, playing: boolean) => void) { this.syncFn = fn; }
+  onVolume(fn: (volume: number) => void) { this.volumeFn = fn; }
+
+  /** The zone holds `track` from our run already, sounding or paused: how it is, if so (within a few seconds of saying so). */
+  private adoptable(track: Track): PlayerState | null {
+    const h = this.handoff;
+    this.handoff = null;
+    if (!h || this.now() - h.at > ZoneEngine.ADOPT_MS) return null;
+    const cur = h.s.queue[h.s.index];
+    if (!cur || !sameTrack(cur.track, track) || h.s.status === 'stopped') return null;
+    return h.s;
+  }
+  /** How long a zone's move to the next song of the run stays adoptable. */
+  static readonly ADOPT_MS = 8000;
 
   // ----- internals -----
 
@@ -244,6 +291,11 @@ export class ZoneEngine implements Engine {
     const repeat = s.updatedAt === this.lastUpdated;
     this.lastUpdated = s.updatedAt;
     this.serverVolume = s.volume;
+    // A zone that keeps its own level: the slider follows it (Soloist's level is the stream's level on the phone).
+    if (!this.pushVolume && Math.abs(s.volume - this.volume) > 0.5) {
+      this.volume = s.volume;
+      this.volumeFn(s.volume);
+    }
 
     const dur = track.durationMs;
     const playing = s.status === 'playing';
@@ -278,6 +330,8 @@ export class ZoneEngine implements Engine {
     if (finished) {
       this.armed = false;
       this.detach();
+      // The zone went on to the next song of the run by itself: the queue's next load() follows it instead of restarting it.
+      this.handoff = !match && cur && this.run.some((x) => sameTrack(x, cur.track)) ? { s, at: t } : null;
       // A tab that slept (a closed laptop, a background tab) finds out long after the song ended. It must not start
       // the next song on the PC out of nowhere minutes later, with nobody there: it stops instead.
       // The same goes for a song paused elsewhere that Spotify drops as stopped minutes later: nobody asked for the next one.

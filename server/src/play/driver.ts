@@ -24,8 +24,9 @@ export type OutputFact =
   | { type: 'paused'; token: number; queueId: string; positionMs: number; at: number }
   | { type: 'resumed'; token: number; queueId: string; positionMs: number; at: number }
   | { type: 'failed'; token: number; queueId: string | null; reason: PlayerHold['reason']; message: string; at: number }
-  /** Something rune did not start began to play in this output. `at` is when its signal arrived. */
-  | { type: 'takeover'; at: number; trackId: string | null };
+  /** Something rune did not start began to play in this output. `at` is when its signal arrived. `message`: the one
+   *  line for the page when the output knows what happened (the default names "another player"). */
+  | { type: 'takeover'; at: number; trackId: string | null; message?: string };
 
 export interface Output {
   readonly kind: OutputKind;
@@ -673,7 +674,7 @@ export class QueueDriver implements PlaybackZone {
       // mpv still sounding under the new song must stop; the app that took over keeps playing.
       if (mine && mine.kind !== kind) await mine.pause().catch(() => undefined);
       this.parked = true;
-      this.hold = { reason: 'takeover', message: 'Another player took over the PC speakers: rune\'s queue waits until you play from rune again.' };
+      this.hold = { reason: 'takeover', message: f.message ?? 'Another player took over the PC speakers: rune\'s queue waits until you play from rune again.' };
       if (this.status !== 'stopped') this.setStatus('paused', pos);
       this.emit(true);
     });

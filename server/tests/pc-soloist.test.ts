@@ -349,6 +349,46 @@ describe('the server-owned pc queue with Soloist', () => {
     await t.close();
   });
 
+  it('a phone starts a Spotify song through Soloist mid-run: the newest request wins, the queue parks and says the song moved to the phone', { timeout: 20000 }, async () => {
+    const t = await boot({ serverQueue: true });
+    await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => t.fake.item === 'spotify:track:a');
+    await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify' }));
+    // What the phone's page does (player/phoneSoloist.ts): the output to the phone, then its own song on the soloist zone.
+    await app(t).inject({ method: 'POST', url: '/api/soloist/output', payload: { output: 'phone' } });
+    const res = await t.send('soloist', { type: 'play', trackIds: ['sp:c'], startIndex: 0 });
+    expect(res.statusCode).toBe(200);
+    await until(() => t.fake.item === 'spotify:track:c');
+    await vi.waitFor(async () => expect((await t.state()).hold?.reason).toBe('takeover'));
+    const s = await t.state();
+    expect(s.hold?.message).toMatch(/moved to the phone/);
+    expect(s.status).toBe('paused');
+    expect(t.fake.item).toBe('spotify:track:c'); // the phone's song keeps playing
+    expect(t.fake.status).toBe('playing');
+    const sz = await t.state('soloist');
+    expect(sz.signalPath?.at(-1)).toMatch(/to the phone/);
+    expect(sz.queue.map((q) => q.track.id)).toEqual(['sp:c']);
+    // Play on the PC again: the sound comes back to the speakers and the pc queue goes on (the newest request wins again).
+    await t.send('pc', { type: 'resume' });
+    await until(() => t.fake.item === 'spotify:track:a' || t.fake.item === 'spotify:track:b');
+    expect((await t.status()).output).toBe('pc');
+    await t.close();
+  });
+
+  it('GET /zones: the Soloist entry says whether it can play, and why the app stands in when it cannot', { timeout: 20000 }, async () => {
+    const t = await boot();
+    let sz = (await t.zones()).find((z) => z.soloist) as Record<string, unknown>;
+    expect(sz).toMatchObject({ available: true, output: 'pc' });
+    expect(sz.notice).toBeUndefined();
+    t.fake.setLoggedIn(false);
+    await vi.waitFor(async () => expect((await t.status()).loggedIn).toBe(false));
+    sz = (await t.zones()).find((z) => z.soloist) as Record<string, unknown>;
+    expect(sz).toMatchObject({ available: false });
+    expect(sz.notice).toMatch(/not signed in.*using the Spotify app/);
+    expect(sz.problem).toMatch(/not signed in/);
+    await t.close();
+  });
+
   it('a Spotify song while Soloist streams to the phone: the sound comes back to the PC speakers', { timeout: 20000 }, async () => {
     const t = await boot({ serverQueue: true });
     await app(t).inject({ method: 'POST', url: '/api/soloist/output', payload: { output: 'phone' } });

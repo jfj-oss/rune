@@ -34,10 +34,13 @@ export interface ZoneInfo {
   isRestricted?: boolean;
   /** spotify zones: false when Spotify cannot set this device's volume remotely (iPhones); the page shows a hint instead of a slider. */
   supportsVolume?: boolean;
-  /** The Soloist zone (Spotify's headless client on the PC): where its sound goes, and why it cannot play right now. */
+  /** The Soloist zone (Spotify's headless client on the PC): where its sound goes, whether it can play a song right now,
+   *  why not (`problem`), and the one line to show when something else stands in (`notice`, "… — using the Spotify app"). */
   soloist?: boolean;
   output?: 'pc' | 'phone';
+  available?: boolean;
   problem?: string;
+  notice?: string;
 }
 
 /** A track plus just enough album context to put it in a queue. */

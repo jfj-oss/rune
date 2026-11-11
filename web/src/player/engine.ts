@@ -20,6 +20,8 @@ export interface Engine {
   onError(fn: (msg: string) => void): void;
   /** Engines that learn about playback from elsewhere (the Spotify SDK) report position/play state here. */
   onSync?(fn: (positionMs: number, playing: boolean) => void): void;
+  /** Engines whose player keeps a level of its own (Soloist heard on the phone) report it here; the queue shows it. */
+  onVolume?(fn: (volume: number) => void): void;
 }
 
 export class MockEngine implements Engine {
@@ -77,6 +79,32 @@ function streamSrc(track: Track, fmt: { fmt: string; kbps: number }, tMs?: numbe
   return streamUrl(track, fmt, { accept: ACCEPT, ios: ON_IOS }, tMs);
 }
 
+/**
+ * iOS lets an <audio> element start only from a tap, unless a tap already called play() on that element. Pressing Play
+ * waits for the server (own-copy lookup, album tracks) before an engine's play(), which iOS refused ("Tap play to start
+ * audio"). So the first tap anywhere in the app calls play() + pause() on the elements in the same task: silent, and
+ * they stay unlocked. `elements` is read at the tap, so elements made later are covered too.
+ */
+export function unlockOnFirstTap(elements: () => HTMLAudioElement[], doc: Document | undefined = typeof document === 'undefined' ? undefined : document): void {
+  if (!doc) return;
+  const unlock = () => {
+    doc.removeEventListener('touchend', unlock, true);
+    doc.removeEventListener('click', unlock, true);
+    for (const el of elements()) {
+      if (!el.paused) continue;
+      try {
+        const p = el.play();
+        el.pause();
+        void p?.catch(() => undefined);
+      } catch {
+        /* not allowed here: the next tap on Play still works as before */
+      }
+    }
+  };
+  doc.addEventListener('touchend', unlock, true);
+  doc.addEventListener('click', unlock, true);
+}
+
 type AudioContextCtor = typeof AudioContext;
 
 function audioContextCtor(): AudioContextCtor | null {
@@ -121,32 +149,7 @@ export class AudioEngine implements Engine {
   constructor() {
     this.armElement(this.el);
     this.armElement(this.spareEl);
-    if (ON_IOS && typeof document !== 'undefined') this.unlockOnFirstTap();
-  }
-
-  /**
-   * iOS lets an <audio> element start only from a tap, unless a tap already called play() on that
-   * element. Pressing Play now waits for the server (own-copy lookup, album tracks) before the
-   * engine's play(), which iOS refused ("Tap play to start audio"). So the first tap anywhere in the
-   * app calls play() + pause() on both elements in the same task: silent, and they stay unlocked.
-   */
-  private unlockOnFirstTap() {
-    const unlock = () => {
-      document.removeEventListener('touchend', unlock, true);
-      document.removeEventListener('click', unlock, true);
-      for (const el of [this.el, this.spareEl]) {
-        if (!el.paused) continue;
-        try {
-          const p = el.play();
-          el.pause();
-          void p?.catch(() => undefined);
-        } catch {
-          /* not allowed here: the next tap on Play still works as before */
-        }
-      }
-    };
-    document.addEventListener('touchend', unlock, true);
-    document.addEventListener('click', unlock, true);
+    if (ON_IOS) unlockOnFirstTap(() => [this.el, this.spareEl]);
   }
 
   private armElement(el: HTMLAudioElement) {

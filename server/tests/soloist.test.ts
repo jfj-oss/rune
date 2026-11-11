@@ -423,6 +423,7 @@ describe('SoloistAudio', () => {
     expect(args).toContain('-f');
     expect(args.join(' ')).toMatch(/-c:a aac -b:a 256k/);
     expect(args.join(' ')).toMatch(/hls_time 1/);
+    expect(args.join(' ')).toMatch(/hls_init_time 0\.3/); // short first segments: a skip is heard after ~0.5 s, not ~2.7 s
   });
 
   it('creates the silent sink once, moves soloist between the phone sink and the speakers, and runs the encoder only while a phone listens', async () => {

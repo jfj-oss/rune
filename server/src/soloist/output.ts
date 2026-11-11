@@ -14,6 +14,8 @@ export interface SoloistRunOutputDeps {
   zone: SoloistZone;
   /** Put Soloist's sound on the PC speakers (a phone that was listening loses the stream: one device, one place). */
   ensureOutput(): Promise<void>;
+  /** Does Soloist's sound go to the phone stream right now? Names the phone when it takes the run over. */
+  streamsToPhone?(): boolean;
   now?(): number;
   log?(obj: unknown, msg: string): void;
 }
@@ -158,8 +160,26 @@ export class SoloistRunOutput implements Output {
       // the middle of ours: a takeover, and the driver parks the queue.
       if (this.starting) return;
       const adopted = this.deps.zone.adopted();
-      if (!adopted) return;
       const cur = this.cur;
+      if (!adopted) {
+        // Not adopted, not ours: another rune client (the phone, hearing Soloist over the stream) gave Soloist its own
+        // songs. There is one Soloist, and the newest request has it: this run is over, and the page says where it went.
+        const theirs = s.queue[s.index];
+        if (!cur || !theirs) return; // (a stopped zone was handled above)
+        this.active = false;
+        this.cur = null;
+        this.last = 'stopped';
+        const phone = this.deps.streamsToPhone?.() ?? false;
+        this.fact({
+          type: 'takeover',
+          at,
+          trackId: theirs.track.id,
+          message: phone
+            ? 'Spotify moved to the phone: it plays there through Soloist now. Press Play here to bring it back to the PC speakers.'
+            : 'Another rune player took Soloist over: rune\'s queue waits until you play from here again.',
+        });
+        return;
+      }
       this.active = false;
       this.cur = null;
       this.last = 'stopped';

@@ -361,6 +361,13 @@ export class SpotifySdkEngine implements Engine {
     this.stateLogs = 0;
     // Safari/Chrome autoplay rules: this runs inside the user's click, before any await.
     void this.player?.activateElement?.().catch(() => undefined);
+    // A paused load (a handoff of a paused song to this tab) asks Spotify for nothing yet: the Web API play call makes
+    // this tab the account's active device and silences whatever else is playing on it (Soloist, a phone). play() loads
+    // the song for real when Play is pressed, from where the position stands then.
+    if (!autoplay) {
+      clientLog('info', 'spotify sdk: load deferred (paused)', { track: track.id, startMs });
+      return;
+    }
     void this.start(track, startMs, autoplay, seq, upcoming.filter((t) => t.source === 'spotify').slice(0, LOOKAHEAD));
   }
 

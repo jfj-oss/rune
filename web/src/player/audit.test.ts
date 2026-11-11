@@ -149,7 +149,7 @@ describe('Z: ZoneEngine', () => {
     expect(b.state).toMatchObject({ index: 0, status: 'paused' });
     await b.send({ type: 'resume' }); await flush();
     expect(b.state).toMatchObject({ index: 1, status: 'playing', positionMs: 0 });
-    expect(zone.log.at(-1)).toBe('play:sp:2@0');
+    expect(zone.log.at(-1)).toBe('play:sp:2,sp:3@0'); // the song and the run after it: the zone plays on by itself
     zone.progress(199_000);
     zone.finishPaused(); await flush();
     expect(b.state.index).toBe(2);

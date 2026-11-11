@@ -15,7 +15,7 @@ import { Slider } from './Slider';
 import { VolumeSlider } from './VolumeSlider';
 import { Waveform } from './Waveform';
 import { shownVolume, useVolumeHold } from '../../store/volumeHold';
-import { usePhoneStream } from '../../store/phoneStream';
+import { phoneSoloistRoute } from '../../player/phoneSoloist';
 import { isHandheld } from '../../lib/device';
 
 interface SeekBarProps {
@@ -133,6 +133,9 @@ export function VolumeControl({ className = '' }: { className?: string }) {
   const volume = usePlayer((s) => s.state.volume);
   const zoneInfo = usePlayer((s) => s.zones.find((z) => z.id === s.zone));
   const zoneKind = zoneInfo?.kind;
+  // On a phone, a Spotify song in the browser zone sounds through Soloist on the PC: the slider sets Soloist's level,
+  // which is the stream's level, so it works even on iOS.
+  const viaSoloist = usePlayer((s) => s.state.queue[s.state.index]?.track.source === 'spotify' && isHandheld() && phoneSoloistRoute(s.zones).available);
   const command = usePlayer((s) => s.command);
   const [local, setLocal] = useState<number | null>(null);
   // After a change (here or via the E/R keys), keep showing the chosen level for a few seconds:
@@ -147,8 +150,8 @@ export function VolumeControl({ className = '' }: { className?: string }) {
   }, [held.v, held.until]);
   if (v > 0) lastAudible = v;
   const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
-  // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone.
-  if (ios && zoneKind === 'browser') {
+  // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone (local files).
+  if (ios && zoneKind === 'browser' && !viaSoloist) {
     return <div className={`volume volume--hint ${className}`}>Use the {ios} volume buttons</div>;
   }
   // Spotify says this Connect device (a phone) takes no remote volume: a slider would do nothing.
@@ -236,9 +239,10 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
   );
 }
 
-/** What a zone can play, as a one-line hint under its name. */
-export function zoneHint(z: ZoneInfo, mixed: boolean): string | null {
+/** What a zone can play, as a one-line hint under its name. `phoneSoloist`: this phone hears Spotify through Soloist. */
+export function zoneHint(z: ZoneInfo, mixed: boolean, phoneSoloist = false): string | null {
   if (z.kind === 'spotify') return spotifyDeviceHint(z);
+  if (z.kind === 'browser') return phoneSoloist ? 'Local files · Spotify through Soloist on the PC, heard here' : null;
   if (z.kind !== 'pc') return null;
   // Why the Spotify app stands in for Soloist, without the "using the Spotify app" half the line itself says.
   const why = z.spotifyNotice ? ` · ${z.spotifyNotice.replace(/ — using the Spotify app$/, '')}` : '';
@@ -256,13 +260,8 @@ function ZoneList({ close }: { close(): void }) {
   const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
   const [hidden, setHidden] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
-  const listening = usePhoneStream((s) => s.listening);
-  const phone = isHandheld();
-  // Picking Soloist on a phone means "hear it here": the stream starts inside this tap (iOS wants the gesture).
-  const pick = (z: ZoneInfo) => {
-    if (z.soloist && phone && !listening) void usePhoneStream.getState().start();
-    void setZone(z.id);
-  };
+  const phoneSoloist = isHandheld() && phoneSoloistRoute(zones).available;
+  const pick = (z: ZoneInfo) => { void setZone(z.id); };
   // The Spotify app on the PC (and phones) come and go, and a sleeping phone only shows while its app is awake:
   // ask for a fresh list every time the picker opens (the server keeps it budget-aware).
   useEffect(() => { void refresh({ fresh: true }); void api.hiddenZones().then(setHidden, () => undefined); }, [refresh]);
@@ -274,7 +273,7 @@ function ZoneList({ close }: { close(): void }) {
       <div className="popover__title">Play on</div>
       {zones.map((z) => {
         const I = kindIcon[z.kind] ?? Monitor;
-        const hint = zoneHint(z, mixed && z.id === zone);
+        const hint = zoneHint(z, mixed && z.id === zone, phoneSoloist);
         return (
           <div key={z.id} className="zonerow">
             <button
@@ -287,14 +286,6 @@ function ZoneList({ close }: { close(): void }) {
               <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
-            {z.soloist && z.id === zone && phone && (
-              <button
-                className={`btn btn--sm${listening ? '' : ' btn--ghost'} zonerow__phone`}
-                onClick={() => void (listening ? usePhoneStream.getState().stop() : usePhoneStream.getState().start())}
-              >
-                {listening ? 'On this phone' : 'Hear here'}
-              </button>
-            )}
             {z.kind === 'spotify' && z.id !== zone && (
               <button className="btn-icon zonerow__hide" title={`Hide “${z.name}” from this list`} aria-label={`Hide ${z.name}`} onClick={() => void toggleHidden(z.name, true)}><EyeOff size={14} /></button>
             )}

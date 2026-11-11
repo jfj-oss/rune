@@ -102,13 +102,18 @@ sandbox (`server.txt` in its config directory) and never written to this reposit
   (metadata, play/pause, previous/next, seek).
 - **The rest of the web app** is the same as in a browser: library, albums, reviews, radio, playlists,
   Discover, stats, settings.
-- **Spotify does not play inside the webview.** The Spotify Web Playback SDK is not available in iOS
-  webviews. Spotify tracks play through Spotify Connect (the Spotify app on the phone or another device) or
-  on the PC, exactly as they do elsewhere in rune. The shell gives the web app one capability flag,
+- **Spotify plays through Soloist on the PC.** The Spotify Web Playback SDK is not available in iOS
+  webviews, so with [Spotify Soloist](../README.md#spotify-soloist-optional-spotify-with-no-desktop-app-and-on-your-phone)
+  set up on the PC, a Spotify song on the phone's own zone is played by Soloist and heard here over rune's HLS
+  stream, in the same `<audio>` path as local files: it starts from your tap, keeps going on the lock screen
+  (the same background-audio mode), and the lock-screen card and keys work. Without Soloist (or while it is
+  down, which rune says in one line) Spotify tracks play through Spotify Connect (the Spotify app on the
+  phone or another device) or on the PC, as before. The shell gives the web app one capability flag,
   `window.__runeNative = { platform: 'ios' }`, set by the native side before the page's own scripts run, so
   the web app can choose the right Spotify path on iOS without user-agent sniffing.
 - **The volume buttons** control the iPhone's system volume. iOS does not let a page set `<audio>.volume`,
-  so an in-page volume slider cannot change the loudness of this device's own zone (the web app already
+  so an in-page volume slider cannot change the loudness of this device's own zone for local files (the slider
+  stays for a Spotify song through Soloist: it sets Soloist's own level, which is the stream's level). The web app already
   accounts for this).
 
 ## 6. Limits of a free Apple ID

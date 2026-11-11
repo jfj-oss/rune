@@ -436,7 +436,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           ...(soloist
             ? {
                 soloist: {
-                  output: new SoloistRunOutput({ zone: soloist.zone, ensureOutput: () => soloist.ensureOutput('pc'), log: (obj, msg) => app.log.warn(obj, msg) }),
+                  output: new SoloistRunOutput({ zone: soloist.zone, ensureOutput: () => soloist.ensureOutput('pc'), streamsToPhone: () => soloist.info().output === 'phone', log: (obj, msg) => app.log.warn(obj, msg) }),
                   available: () => soloist.available(),
                   notice: () => soloistFallbackNotice(soloist.info()),
                 },
@@ -1468,10 +1468,13 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           isActive?: boolean;
           isRestricted?: boolean;
           supportsVolume?: boolean;
-          /** The Soloist zone: where its sound goes ('pc' speakers or the 'phone' stream), and why it cannot play. */
+          /** The Soloist zone: where its sound goes ('pc' speakers or the 'phone' stream), whether it can play a song
+           *  right now, and why not (`problem`; `notice` is the one line in pcRoute's words, "… — using the Spotify app"). */
           soloist?: boolean;
           output?: 'pc' | 'phone';
+          available?: boolean;
           problem?: string;
+          notice?: string;
         }[] = [];
         // The picker opening asks for the list even if the 5 s cache is warm; the API keeps this budget-aware.
         const fresh = req.query.refresh === '1';
@@ -1519,7 +1522,12 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }
         if (soloist) {
           const info = soloist.info();
-          zones.push({ id: info.id, name: info.name, kind: 'spotify', soloist: true, output: info.output, isActive: info.connected && info.loggedIn, isRestricted: false, ...(info.problem ? { problem: info.problem } : {}) });
+          const notice = soloistFallbackNotice(info);
+          zones.push({
+            id: info.id, name: info.name, kind: 'spotify', soloist: true, output: info.output, available: info.available,
+            isActive: info.connected && info.loggedIn, isRestricted: false,
+            ...(info.problem ? { problem: info.problem } : {}), ...(notice ? { notice } : {}),
+          });
         }
         // Spotify devices the user hid ("does nothing" duplicates such as the Spotify app on the
         // same Mac as a rune tab). The pc zone's own Spotify app is matched above regardless.

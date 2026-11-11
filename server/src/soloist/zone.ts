@@ -56,6 +56,9 @@ export interface SoloistZoneDeps {
 
 export const SOLOIST_ZONE = 'soloist';
 
+/** The last signal-path step while the phone hears the stream. The web keys on "to the phone" (player/routing.ts). */
+export const PHONE_STREAM_STEP = 'AAC stream to the phone';
+
 /** A song rune did not choose, shown as the current item because Soloist plays it. */
 export interface AdoptedSong {
   queueId: string;
@@ -127,7 +130,7 @@ export class SoloistZone implements PlaybackZone {
       volume: this.volume,
       shuffle: this.q.shuffle,
       repeat: this.q.repeat,
-      signalPath: ['Spotify', 'Soloist on the PC', this.deps.output() === 'phone' ? 'AAC 256 to this phone' : 'PipeWire'],
+      signalPath: ['Spotify', 'Soloist on the PC', this.deps.output() === 'phone' ? PHONE_STREAM_STEP : 'PipeWire'],
       rev: this.rev,
       output: 'spotify',
       updatedAt: this.updatedAt,
