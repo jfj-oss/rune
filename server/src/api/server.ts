@@ -1560,7 +1560,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           const ua = String(req.headers['user-agent'] ?? '');
           const from = /iPhone|iPad/.test(ua) ? 'iPhone' : /Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux browser' : ua.slice(0, 24) || 'unknown';
           if (req.params.zone.startsWith('spotify:') || ['play', 'resume', 'next', 'jump'].includes(parsed.command.type)) {
-            app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, from }, 'player command');
+            // How many songs a play brought: one song or a whole list is the first question when a queue looks short.
+            const songs = parsed.command.type === 'play' ? { songs: parsed.command.trackIds.length, startIndex: parsed.command.startIndex ?? 0 } : {};
+            app.log.warn({ zone: req.params.zone, cmd: parsed.command.type, from, ...songs }, 'player command');
           }
           const state = await z.command(parsed.command);
           if (req.params.zone.startsWith('spotify:') && startsSound(parsed.command)) playbackLog.started({ zone: req.params.zone, state: () => z.state() });
