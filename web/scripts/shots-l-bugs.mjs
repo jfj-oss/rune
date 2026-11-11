@@ -98,7 +98,7 @@ try {
     await page.keyboard.press('Escape');
     // an owned Spotify playlist
     await page.goto(`${BASE}/playlists`);
-    await page.locator('.card__title', { hasText: /^HORSE$/ }).first().click();
+    await page.locator('.card__title', { hasText: /^MYPC$/ }).first().click();
     await page.waitForSelector('.ahero__actions');
     await shot(page, 'phone-spotify-playlist-hero', { wait: 800 });
     // an album page
@@ -146,7 +146,7 @@ try {
     sweep[`${width}:album`] = await overflowReport(page);
     await page.locator('.ahero__meta a').first().click(); await page.waitForTimeout(900);
     sweep[`${width}:artist`] = await overflowReport(page);
-    for (const name of ['HORSE', 'Sunday Folk', 'Focus: Deep Time']) {
+    for (const name of ['MYPC', 'Sunday Folk', 'Focus: Deep Time']) {
       await page.goto(`${BASE}/playlists`); await page.waitForSelector('.card__title');
       await page.locator('.card__title', { hasText: name }).first().click(); await page.waitForSelector('.ahero__actions'); await page.waitForTimeout(700);
       sweep[`${width}:playlist ${name}`] = await overflowReport(page);
@@ -176,7 +176,7 @@ try {
     } else await page.keyboard.press('Escape');
     // an owned Spotify playlist: hero chips + the menu
     await page.goto(`${BASE}/playlists`);
-    await page.locator('.card__title', { hasText: /^HORSE$/ }).first().click();
+    await page.locator('.card__title', { hasText: /^MYPC$/ }).first().click();
     await page.waitForSelector('.ahero__actions');
     await page.locator('button[aria-label^="More for"]').first().click();
     await shot(page, 'desktop-owned-playlist-trackmenu', { wait: 500 });

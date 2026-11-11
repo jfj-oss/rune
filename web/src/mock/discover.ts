@@ -643,7 +643,7 @@ function fabricated(
     title,
     artist,
     format,
-    folderPath: `/mnt/BIG data/Music/${artist}/${folderName}`,
+    folderPath: `/music/library/${artist}/${folderName}`,
     folderName,
     trackCount,
     discCount,
@@ -770,7 +770,7 @@ function health(): HealthResponse {
       sizeMB: 186.42,
     },
     library: {
-      roots: [{ path: '/mnt/BIG data/Music', mounted: true, readOnly: false, free: 1.42 * 1024 ** 4 }],
+      roots: [{ path: '/music/library', mounted: true, readOnly: false, free: 1.42 * 1024 ** 4 }],
       lastScanAt: NOW - 2 * 3_600_000,
     },
     mpv: { pid: 4242, alive: true },

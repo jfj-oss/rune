@@ -1,7 +1,7 @@
 // Starts the Spotify desktop app on this PC on demand, so rune can move Spotify
 // tracks to the "Linux PC speakers" zone. The app is a flatpak (com.spotify.Client)
 // and is usually closed; starting it is enough for it to appear as the Connect
-// device "HORSE". On KDE a temporary KWin script minimizes its window as it opens.
+// device named after this PC. On KDE a temporary KWin script minimizes its window as it opens.
 //
 // Everything that touches the machine goes through an injectable CommandRunner so
 // tests never run flatpak/qdbus and never launch the real app.

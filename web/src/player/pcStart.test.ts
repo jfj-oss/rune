@@ -19,7 +19,7 @@ const item = (id: string, source: 'local' | 'spotify'): PlayItem => ({
   track: { id, albumId: source === 'spotify' ? 'sp:alb' : 'la:alb', source, title: id, artists: [], disc: 1, number: 1, durationMs: 1000 } as Track,
   album: { id: source === 'spotify' ? 'sp:alb' : 'la:alb', title: 'Album' },
 });
-const PC = (id?: string): ZoneInfo => ({ id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(id ? { spotifyDeviceId: id, spotifyDeviceName: 'HORSE' } : {}) });
+const PC = (id?: string): ZoneInfo => ({ id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(id ? { spotifyDeviceId: id, spotifyDeviceName: 'MYPC' } : {}) });
 const BROWSER: ZoneInfo = { id: 'browser', name: 'This computer', kind: 'browser' };
 
 describe('needsPcSpotify', () => {

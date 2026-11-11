@@ -2,7 +2,7 @@
    backdrop's. Pure helpers (DOM-free) for components/WaveCover.tsx. */
 import type { DitherPalette, Rgb } from './dither';
 
-/** Playlists that wear the wave instead of their Spotify image (the user's "MUDs" and "HORSE"). */
+/** Playlists that wear the wave instead of their Spotify image (the author's two favourites). */
 export const WAVE_COVER_IDS = new Set(['pl:sp:0gE0wwKJ6rGKGFUF7YfZPu', 'pl:sp:44JPFAQyJioNkmIdEoWdzK']);
 
 const TAU = Math.PI * 2;

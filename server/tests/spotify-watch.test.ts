@@ -30,7 +30,7 @@ class FakeChild implements WatchChild {
 }
 
 const connectState = (over: Partial<PlayerState> = {}): PlayerState => ({
-  zone: 'spotify:horse', status: 'playing', index: 0, positionMs: 1234, volume: 70, shuffle: false, repeat: 'off', updatedAt: 1,
+  zone: 'spotify:mypc', status: 'playing', index: 0, positionMs: 1234, volume: 70, shuffle: false, repeat: 'off', updatedAt: 1,
   queue: [{ queueId: 'q', album: { id: 'a', title: 'SECRET ALBUM' }, track: { id: 'sp:abc', albumId: 'a', source: 'spotify', title: 'SECRET TITLE', artists: [], disc: 1, number: 1, durationMs: 1000 } }],
   ...over,
 });
@@ -105,7 +105,7 @@ describe('the spotify watch', () => {
     expect(got[0]).toMatchObject({ src: 'mpris', ev: 'position', status: 'Paused', positionMs: 5000 });
     expect(got[1]).toMatchObject({ src: 'stream', streams: [{ corked: true, sink: 'alsa_output.usb-Topping_E30' }] });
     expect(got.find((e) => e.ev === 'signal')).toMatchObject({ status: 'Playing', trackId: 'sp:3TDPmzKGcEY8JEMfJEeQYx', lengthMs: 231000, positionMs: 5000 });
-    expect(got.find((e) => e.src === 'connect')).toMatchObject({ zone: 'spotify:horse', status: 'playing', trackId: 'sp:abc', positionMs: 1234, volume: 70 });
+    expect(got.find((e) => e.src === 'connect')).toMatchObject({ zone: 'spotify:mypc', status: 'playing', trackId: 'sp:abc', positionMs: 1234, volume: 70 });
     // two events, one sample, and only because something changed
     expect(got.filter((e) => e.src === 'stream')).toHaveLength(2);
     expect(got.filter((e) => e.src === 'stream')[1]).toMatchObject({ streams: [{ corked: false }] });

@@ -277,7 +277,7 @@ function make(pre?: (z: { pc: FakeZone; sp: FakeZone }) => void) {
   const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
   pre?.({ pc: pcz, sp: spz });
   const zones = { pc: pcz, 'spotify:dev': spz };
-  const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], notice: vi.fn() }, { zone: 'spotify:dev', name: 'HORSE' });
+  const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], notice: vi.fn() }, { zone: 'spotify:dev', name: 'MYPC' });
   return { pc, pcz, spz };
 }
 const L = (n: number) => mkItem(mkTrack(`l:${n}`, 'local'));
@@ -293,7 +293,7 @@ describe('P: PcBackend', () => {
     spz.progress(5000);
     expect(pc.state.queue).toHaveLength(3);
     pc.setDevice(null); await flush();                    // one flap
-    pc.setDevice({ zone: 'spotify:dev', name: 'HORSE' }); await flush(); // back a moment later
+    pc.setDevice({ zone: 'spotify:dev', name: 'MYPC' }); await flush(); // back a moment later
     expect(spz.log).toContain('pause');
     expect(pc.currentMode).toBe('pc');
     expect(pc.state.queue.length).toBeLessThan(3);        // queue gone
@@ -359,7 +359,7 @@ describe('P: PcBackend', () => {
     let now = 1000;
     const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
     const zones = { pc: pcz, 'spotify:dev': spz };
-    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { zone: 'spotify:dev', name: 'HORSE' }); live = pc;
+    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { zone: 'spotify:dev', name: 'MYPC' }); live = pc;
     await pc.send(play([L(1)]), [L(1)]); await flush();
     await pcz.send({ type: 'volume', volume: 30 }); await flush();
     now += 21_000;
@@ -371,7 +371,7 @@ describe('P: PcBackend', () => {
     let now = 1000;
     const pcz = new FakeZone('pc'), spz = new FakeZone('spotify:dev');
     const zones = { pc: pcz, 'spotify:dev': spz };
-    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { zone: 'spotify:dev', name: 'HORSE' }); live = pc;
+    const pc = new PcBackend({ remote: (z) => new FakeRemote(z, zones[z as keyof typeof zones]), transport: (z) => zones[z as keyof typeof zones], now: () => now }, { zone: 'spotify:dev', name: 'MYPC' }); live = pc;
     await pc.send(play([L(1)]), [L(1)]); await flush();
     await pcz.send({ type: 'volume', volume: 20 }); await flush();
     now += 10_000;
@@ -389,7 +389,7 @@ describe('P: PcBackend', () => {
       constructor(zone: string, z: FakeZone) { super(zone, z); this.state = emptyState(zone); }
     }
     const zones = { pc: pcz, 'spotify:dev': spz };
-    const pc = new PcBackend({ remote: (z) => (z === 'pc' ? new Late(z, pcz) : new FakeRemote(z, spz)), transport: (z) => zones[z as keyof typeof zones] }, { zone: 'spotify:dev', name: 'HORSE' }); live = pc;
+    const pc = new PcBackend({ remote: (z) => (z === 'pc' ? new Late(z, pcz) : new FakeRemote(z, spz)), transport: (z) => zones[z as keyof typeof zones] }, { zone: 'spotify:dev', name: 'MYPC' }); live = pc;
     await pcz.send({ type: 'volume', volume: 40 }); await flush();   // the first answer
     expect(pc.userVolume()).toBe(40);
   });

@@ -100,14 +100,14 @@ describe('GET /health', () => {
     const health = await collectHealth({
       version: 'x',
       library: {
-        roots: [{ path: '/mnt/BIG data/Music', mounted: false, readOnly: false, free: 0 }],
+        roots: [{ path: '/music/library', mounted: false, readOnly: false, free: 0 }],
         lastScanAt: null,
       },
       jobs: { matching: false, details: true },
       mpv: { alive: false },
     });
     expect(health.library.roots[0]).toEqual({
-      path: '/mnt/BIG data/Music',
+      path: '/music/library',
       mounted: false,
       readOnly: false,
       free: 0,

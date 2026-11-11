@@ -1,5 +1,6 @@
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 
 /** ReplayGain-style loudness normalisation for local playback. */
@@ -14,7 +15,7 @@ export interface Config {
   userAgent: string; // MusicBrainz requires an identifying UA
   /** Loudness normalisation mode (default 'album'; the DB setting can override it). */
   normalize?: NormalizeMode;
-  /** HTTPS address other devices use (Tailscale serve), e.g. https://horse.example.ts.net:8445 */
+  /** HTTPS address other devices use (Tailscale serve), e.g. https://my-pc.example-tailnet.ts.net:8445 */
   publicUrl?: string;
   /** Spotify app client id (PKCE — there is no client secret). Never commit a real id. */
   spotifyClientId?: string;
@@ -53,8 +54,8 @@ export interface Config {
   };
   /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
   lastfmApiKey?: string;
-  /** Name of the Spotify Connect device that represents this PC (default 'HORSE',
-   *  the Spotify desktop app on the same machine). GET /api/zones matches it so the
+  /** Name of the Spotify Connect device that represents this PC (default: this machine's hostname, which is what
+   *  the Spotify desktop app calls itself). GET /api/zones matches it so the
    *  UI can route Spotify tracks to the PC's Spotify app. */
   pcSpotifyDevice?: string;
   /** Extra browser origins allowed to read the small CORS-enabled API that
@@ -65,17 +66,28 @@ export interface Config {
   corsOrigins?: string[];
 }
 
+/** Where the user's settings live: server/config.json (gitignored), or RUNE_CONFIG_FILE when set. */
+export function configFilePath(): string {
+  return process.env.RUNE_CONFIG_FILE || fileURLToPath(new URL('../config.json', import.meta.url));
+}
+
+/** Read the user's own settings file (an empty object when there is none). */
+export function readUserConfig(): Record<string, unknown> {
+  const file = configFilePath();
+  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+}
+
 export function loadConfig(): Config {
-  const file = new URL('../config.json', import.meta.url);
-  const user = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  const user = readUserConfig();
   const cfg: Config = {
-    libraryRoots: ['/mnt/BIG data/Music'],
+    // No music folder until the user picks one (first-run setup page, or libraryRoots in config.json).
+    libraryRoots: [],
     dataDir: join(homedir(), '.local/share/liner'),
     port: 4545,
     audioDevice: 'pipewire',
     userAgent: 'Liner/0.1 ( personal music player, self-hosted )',
     normalize: 'album',
-    pcSpotifyDevice: 'HORSE',
+    pcSpotifyDevice: hostname(),
     ...user,
   };
   // Overrides for running a second, silent instance (tests / smoke checks).

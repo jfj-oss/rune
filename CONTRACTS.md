@@ -17,7 +17,7 @@ from the PC browser and an iPhone (installable web app).
 
 ## Config
 `server/config.json` (gitignored values via env also allowed):
-- `libraryRoots`: `["/mnt/BIG data/Music"]`
+- `libraryRoots`: `["/music/library"]`
 - `dataDir`: `~/.local/share/liner` (db, cover cache)
 - `port`: 4545
 
@@ -50,7 +50,7 @@ from the PC browser and an iPhone (installable web app).
 ## Rules for all workers
 - Work only in your own git worktree/branch. Do not push. Never `git stash`.
 - Never `pkill -f` / `pgrep -f`; kill only processes you started, by PID.
-- The music library at `/mnt/BIG data/Music` is the user's real files: READ ONLY. Never write,
+- The music library at `/music/library` is the real files: READ ONLY. Never write,
   rename, retag or delete anything there. Tests use fixtures generated into a temp dir.
 - No network in unit tests (record fixtures as JSON).
 - Checks before you finish: `pnpm -C server typecheck` and `pnpm -C server test`.

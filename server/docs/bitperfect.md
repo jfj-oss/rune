@@ -20,7 +20,7 @@ stopping PipeWire from forcing the graph clock to 48 kHz.
   --audio-device=alsa/hw:CARD=E30,DEV=0 --audio-exclusive=yes`. This blocks all other
   audio while playing.
 
-## Hardware on this PC (HORSE)
+## Hardware on this PC (example)
 
 | device | ALSA | rates | notes |
 |---|---|---|---|

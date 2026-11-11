@@ -5,7 +5,7 @@ import type { SpotifyZoneApi } from '../../src/spotify/zones.js';
 import type { MprisBus, MprisEvent, MprisProps } from '../../src/spotify/mpris.js';
 import type { StreamSample } from '../../src/play/playbackLog.js';
 
-export const DEV = 'horse';
+export const DEV = 'mypc';
 const DROP_MS = 600_000;
 /** OpenUri → the app's PropertiesChanged took ~0.5 s in the phase 0 session. */
 const SIGNAL_LAG_MS = 400;

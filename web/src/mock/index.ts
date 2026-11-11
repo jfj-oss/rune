@@ -11,7 +11,7 @@ registerTitles(ALBUMS);
 const wait = <T>(v: T, ms = 140): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 
 export const MOCK_ZONES: ZoneInfo[] = [
-  { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'mock-pc-spotify', spotifyDeviceName: 'HORSE' },
+  { id: 'pc', name: 'Linux PC speakers', kind: 'pc', spotifyDeviceId: 'mock-pc-spotify', spotifyDeviceName: 'MYPC' },
   { id: 'browser', name: 'This browser', kind: 'browser' },
   { id: 'spotify:iphone', name: 'iPhone — Spotify', kind: 'spotify', deviceType: 'Smartphone', supportsVolume: false },
 ];

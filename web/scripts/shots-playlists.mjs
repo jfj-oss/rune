@@ -101,9 +101,9 @@ try {
     await page.waitForSelector('.prow:not(.prow--head)');
     await shot(page, 'detail-smart', 800);
 
-    // Spotify playlist with overlay rows (HORSE)
+    // Spotify playlist with overlay rows (MYPC)
     await page.goto(`${BASE}/playlists`);
-    await page.locator('.plcard .card__title', { hasText: 'HORSE' }).click();
+    await page.locator('.plcard .card__title', { hasText: 'MYPC' }).click();
     await page.waitForSelector('.prow:not(.prow--head)');
     await shot(page, 'detail-spotify-overlay', 800);
     // plain Spotify playlist (no overlay)

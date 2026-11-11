@@ -8,7 +8,7 @@ export const LIKED_ID = 'pl:sp:liked';
 const LIKED_COUNT = 4612;
 
 const SPECS: { name: string; owner: string; count: number; desc?: string }[] = [
-  { name: 'HORSE', owner: 'You', count: 48, desc: 'The big one. Local rips get slotted in alongside.' },
+  { name: 'MYPC', owner: 'You', count: 48, desc: 'The big one. Local rips get slotted in alongside.' },
   { name: 'MUDs', owner: 'You', count: 28 },
   { name: 'Morning Harbour', owner: 'You', count: 48, desc: 'Slow starts, strong coffee, a bit of salt in the air.' },
   { name: 'Late Night Static', owner: 'You', count: 120 },

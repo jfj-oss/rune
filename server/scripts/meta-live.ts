@@ -20,7 +20,7 @@ import { createMeta } from '../src/meta/index.js';
 import { namesMatch, normalizeTitle, titleSimilarity } from '../src/meta/text.js';
 import type { AlbumDetails } from '@liner/shared';
 
-const LIBRARY = process.env.LINER_LIBRARY ?? '/mnt/BIG data/Music';
+const LIBRARY = process.env.LINER_LIBRARY ?? '/path/to/Music';
 const USER_AGENT = 'Liner/0.1 ( personal music player, self-hosted )';
 
 interface Target {

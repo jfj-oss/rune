@@ -28,7 +28,7 @@ const SPOTIFY_ARTIST = ids.artistByName('Spotify Artist');
 
 // Fake library paths. Using the real library root prefix makes the "no path leak"
 // assertions meaningful: any track path in a response contains "/mnt/".
-const LIB = '/mnt/BIG data/Music';
+const LIB = '/music/library';
 const CUE_FILE = `${LIB}/Cue Album/album.flac`;
 const CUE_ALBUM = ids.localAlbum(`${LIB}/Cue Album`);
 const MATCHED_ALBUM = ids.localAlbum(`${LIB}/Matched Album`);

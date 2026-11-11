@@ -1,4 +1,5 @@
 // Wires every module into one Fastify app. Main-session code.
+import { hostname } from 'node:os';
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
@@ -78,6 +79,7 @@ import {
   type BackupService,
   type ShutdownResult,
 } from '../ops/index.js';
+import { registerSetupRoutes } from '../setup/index.js';
 import { createUpdateService, registerUpdateRoutes } from '../update.js';
 import {
   createSoloist,
@@ -350,7 +352,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         )
       : undefined;
   const notePcSpotify = (list: { id: Zone; name: string }[]): void => {
-    const wanted = (cfg.pcSpotifyDevice ?? 'HORSE').trim().toLowerCase();
+    const wanted = (cfg.pcSpotifyDevice ?? hostname()).trim().toLowerCase();
     const match = list.find((z) => z.name.toLowerCase() === wanted) ?? (wanted ? list.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
     pcSpotifyDevice = match ? { id: match.id, name: match.name } : null;
   };
@@ -414,16 +416,16 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   });
 
   // ---------- the server-owned pc queue (phase 3, flag spotify.serverQueue)
-  const horseDeviceId = (): string | null => (pcSpotifyDevice ? pcSpotifyDevice.id.slice('spotify:'.length) : null);
+  const pcDeviceId = (): string | null => (pcSpotifyDevice ? pcSpotifyDevice.id.slice('spotify:'.length) : null);
   const appOut =
     serverQueue && spotify && mprisBus
       ? new SpotifyAppOutput({
           bus: mprisBus,
           api: spotify.zones.controlApi,
-          deviceId: horseDeviceId,
+          deviceId: pcDeviceId,
           findDevice: async () => {
             notePcSpotify(await spotify.zones.listZones());
-            return horseDeviceId();
+            return pcDeviceId();
           },
           startApp: () => pcSpotify.start(),
           log: (obj, msg) => app.log.warn(obj, msg),
@@ -1259,6 +1261,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       // rune, so it is guarded by a same-origin check of its own.
       registerUpdateRoutes(r, updateService);
 
+      // First-run setup page: music folders, Spotify app id, Soloist key + pairing (loopback only for changes).
+      registerSetupRoutes(r, { cfg, soloistRun: () => soloist?.info().run ?? null });
+
       // Whether an empty PC queue continues with generated radio tracks.
       r.get('/settings/autoRadio', async () => ({ enabled: autoRadioEnabled() }));
       r.post<{ Body: { enabled?: unknown } }>('/settings/autoRadio', async (req, reply) => {
@@ -1497,7 +1502,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }
         if (pc) {
           const entry: (typeof zones)[number] = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(driver ? { serverQueue: true } : {}) };
-          // The device notePcSpotify matched (cfg.pcSpotifyDevice, default 'HORSE': the Spotify desktop app on this
+          // The device notePcSpotify matched (cfg.pcSpotifyDevice, default: this machine's hostname: the Spotify desktop app on this
           // machine). After a failed list it is still the last one known: an answer without it means "the app went
           // away" to the page, which then throws out a mixed queue.
           const match = spotifyConnected ? pcSpotifyDevice : null;

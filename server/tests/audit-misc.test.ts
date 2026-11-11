@@ -24,7 +24,7 @@ describe('misc', () => {
 
   it('KNOWN BUG (Connect zones; the server queue sends nothing for it, tests/driver.test.ts) X1 a paused start on Spotify really starts the song, then pauses: an audible blip (mpv had this fixed)', async () => {
     const { api, calls } = fakeApi();
-    const z = new SpotifyConnectZone(api, 'd', 'HORSE');
+    const z = new SpotifyConnectZone(api, 'd', 'MYPC');
     const p = z.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0, paused: true });
     await vi.advanceTimersByTimeAsync(5000); await p;
     expect(calls).toEqual(['play(1 uris)', 'pause']);
@@ -34,7 +34,7 @@ describe('misc', () => {
   it('X2 the server sends Spotify at most 100 URIs, from the starting song on, whichever zone kind asked', async () => {
     const sent: { uris?: string[]; offset?: { position: number } }[] = [];
     const { api, calls } = fakeApi({ play: async (b: { uris?: string[]; offset?: { position: number } }) => { sent.push(b); calls.push(`play(${b.uris?.length ?? 'resume'} uris)`); } } as never);
-    const z = new SpotifyConnectZone(api, 'd', 'HORSE');
+    const z = new SpotifyConnectZone(api, 'd', 'MYPC');
     const p = z.command({ type: 'play', trackIds: Array.from({ length: 700 }, (_, i) => `sp:t${i}`), startIndex: 250 });
     await vi.advanceTimersByTimeAsync(5000); await p;
     expect(calls[0]).toBe('play(100 uris)');
@@ -53,7 +53,7 @@ describe('misc', () => {
     const blocked = Date.now() + 9 * 3600_000;
     const { api } = fakeApi({ currentPlayback: async () => { reads++; return { device: { id: 'd', volume_percent: 50 }, repeat_state: 'off', shuffle_state: false, is_playing: true, progress_ms: 5000, item: { id: 'a', uri: 'spotify:track:a', name: 'a', duration_ms: 200000, artists: [], album: { id: 'b', name: 'b', images: [], artists: [] } } } as never; } });
     let on = false;
-    const z = new SpotifyConnectZone(api, 'd', 'HORSE', { blockedUntil: () => (on ? blocked : null) });
+    const z = new SpotifyConnectZone(api, 'd', 'MYPC', { blockedUntil: () => (on ? blocked : null) });
     z.onChange(() => undefined);
     await vi.advanceTimersByTimeAsync(100);
     expect(z.state().status).toBe('playing');
@@ -89,7 +89,7 @@ describe('misc', () => {
     w.songs.set('s1', sp('s1', 300_000));
     const source = new MprisPlaybackSource(w.mpris!, { deviceId: () => DEV });
     const zones = new SpotifyZones(w, { mpris: source });
-    const zone = zones.ensureZone(DEV, 'HORSE');
+    const zone = zones.ensureZone(DEV, 'MYPC');
     const pc = { status: 'stopped' as PlayerState['status'], state() { return { status: this.status, queue: [], index: -1 } as unknown as PlayerState; }, command: vi.fn(async () => { pc.status = 'paused'; }) };
     // No wake when mpv starts (budget out): only the app's own signal can date the resume.
     const g = createSpeakerGuard({ pc: () => pc as unknown as SpeakerZone, spotify: () => zone }, { canWake: () => false });
@@ -115,7 +115,7 @@ describe('misc', () => {
     w.songs.set('s1', sp('s1', 300_000));
     const source = new MprisPlaybackSource(w.mpris!, { deviceId: () => DEV });
     const zones = new SpotifyZones(w, { mpris: source });
-    const zone = zones.ensureZone(DEV, 'HORSE');
+    const zone = zones.ensureZone(DEV, 'MYPC');
     const pc = { status: 'stopped' as PlayerState['status'], state() { return { status: this.status, queue: [], index: -1 } as unknown as PlayerState; }, command: vi.fn(async () => undefined) };
     const g = createSpeakerGuard({ pc: () => pc as unknown as SpeakerZone, spotify: () => zone });
     zone.onChange((s) => g.changed('spotify', s));

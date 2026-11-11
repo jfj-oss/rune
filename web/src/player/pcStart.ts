@@ -3,7 +3,7 @@
 // The server says which player takes the pc zone's Spotify songs (ZoneInfo.spotifyZone): Spotify Soloist when it is
 // running and signed in — nothing to start, nothing to poll — or the Spotify desktop app. The app is usually closed,
 // so a Spotify track sent to the pc zone without any player first needs that app running (it then appears as the
-// Connect device "HORSE"). The server starts it; this waits (briefly) for the device to show up in GET /zones before
+// Connect device "MYPC"). The server starts it; this waits (briefly) for the device to show up in GET /zones before
 // the caller continues the switch exactly as if the app had been there all along.
 import type { PlayItem, ZoneInfo } from '../lib/types';
 

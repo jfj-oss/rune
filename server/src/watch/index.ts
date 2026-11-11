@@ -6,7 +6,7 @@
 // and .cue files. Events are debounced with a quiet period so a copy of an album
 // (thousands of events) triggers ONE onChange.
 //
-// The drive (/mnt/BIG data) is an NTFS disk that a watchdog can unmount or remount
+// A music drive is an NTFS disk that a watchdog can unmount or remount
 // read-only at any time, so:
 //   - a vanished root closes its watcher, discards pending events and does NOT call
 //     onChange (a rescan against an empty mount would delete the whole library);

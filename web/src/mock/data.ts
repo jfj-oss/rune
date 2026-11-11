@@ -178,7 +178,7 @@ const albumsFull: Album[] = SEEDS.map((s, idx) => {
     tracks, genres: s.genres, label: s.label,
     releaseDate: `${releaseYear}-${String(1 + (hashString(id) % 12)).padStart(2, '0')}`,
     credits, matchConfidence: source === 'spotify' ? undefined : s.special === 'lowconf' ? 0.42 : 0.82 + (hashString(id) % 18) / 100,
-    folderPath: source === 'local' ? `/mnt/BIG data/Music/${artist.name}/${s.title}` : undefined,
+    folderPath: source === 'local' ? `/music/library/${artist.name}/${s.title}` : undefined,
   };
   if (s.special === 'full') {
     const t = (n: number) => (tracks[n - 1] as Track).id;
