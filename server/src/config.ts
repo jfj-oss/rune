@@ -30,6 +30,27 @@ export interface Config {
      *  tab-driven mixed queue. */
     serverQueue?: boolean;
   };
+  /**
+   * Spotify Soloist (Spotify's headless Connect client): the zone that plays Spotify without the desktop app, and the
+   * stream a phone can listen to. On by default when the binary and the key file both exist.
+   */
+  soloist?: {
+    enabled?: boolean;
+    /** Default ~/.local/bin/soloist */
+    binary?: string;
+    /** File holding the Soloist API key, mode 600 (default ~/.config/rune/soloist-key). Never put the key in config.json. */
+    keyFile?: string;
+    /** Spotify Connect device name (default "rune"). */
+    deviceName?: string;
+    /** Soloist's own data directory (default: Soloist's default, where --pair stored the session). */
+    dataDir?: string;
+    /** Loopback port of its WebSocket API (default 4547). */
+    wsPort?: number;
+    /** PipeWire null sink the phone stream is captured from (default "rune-phone"). */
+    sink?: string;
+    /** AAC bitrate of the phone stream (default 256). */
+    hlsKbps?: number;
+  };
   /** Optional Last.fm API key for a similarity fallback (ListenBrainz is primary; unset by default). */
   lastfmApiKey?: string;
   /** Name of the Spotify Connect device that represents this PC (default 'HORSE',

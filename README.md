@@ -74,3 +74,22 @@ in, which is fine for your own use.
 
 - Data (database, covers, caches) lives in `~/.local/share/liner`. Delete that folder to start over.
 - Tests: `pnpm test` (they never call the real Spotify API).
+
+## Spotify Soloist (optional): Spotify with no desktop app, and on your phone
+
+[Spotify Soloist](https://developer.spotify.com/documentation/soloist) is Spotify's own headless Connect client. With it,
+rune gets a **Spotify (Soloist)** zone that plays Spotify on the PC without the desktop app and without a single Web API
+request, and a phone can listen to that zone through rune (the sound goes into a silent PipeWire sink, `rune-phone`, that
+rune encodes to HLS at `/api/soloist/stream/live.m3u8`).
+
+Once:
+
+1. Install the `soloist` binary at `~/.local/bin/soloist` (Spotify's builds expire after 90 days; rune says "Soloist build
+   expired: update it" when that happens).
+2. Create a Soloist API key in the developer dashboard (Premium) and put it in `~/.config/rune/soloist-key`
+   (`chmod 600`). rune never logs it.
+3. Pair it: `soloist -n rune -k "$(cat ~/.config/rune/soloist-key)" --pair` (the session is kept in Soloist's data dir).
+
+rune starts and supervises Soloist itself when both files exist (`soloist.enabled: false` in `config.json` turns it off;
+`soloist.deviceName`, `wsPort` (4547), `sink`, `hlsKbps` are the other keys). In the zone picker: **Spotify (Soloist)**
+plays on the PC speakers; on a phone, pick it (or tap **Hear here**) and the phone plays the stream, lock screen included.

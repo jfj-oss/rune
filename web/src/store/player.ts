@@ -438,7 +438,9 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
   const zones = usePlayer((s) => s.zones);
   const kind = zones.find((z) => z.id === zone)?.kind ?? 'pc';
   if (kind === 'spotify') {
-    return { steps: ['Spotify', 'Spotify Connect', zones.find((z) => z.id === zone)?.name ?? 'Device'], tone: 'off' };
+    const z = zones.find((x) => x.id === zone);
+    if (z?.soloist && signalPath?.length) return { steps: signalPath, tone: 'off' };
+    return { steps: ['Spotify', 'Spotify Connect', z?.name ?? 'Device'], tone: 'off' };
   }
   if (cur?.source === 'spotify') {
     return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === zone)?.name ?? 'This browser'], tone: 'off' };

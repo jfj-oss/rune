@@ -24,6 +24,10 @@ export interface ZoneInfo {
   isActive?: boolean;
   /** spotify zones: private session / not controllable through the Spotify Web API. */
   isRestricted?: boolean;
+  /** The Soloist zone (Spotify's headless client on the PC): where its sound goes, and why it cannot play right now. */
+  soloist?: boolean;
+  output?: 'pc' | 'phone';
+  problem?: string;
 }
 
 /** A track plus just enough album context to put it in a queue. */

@@ -6,6 +6,8 @@ import type { PlaySource, ZoneInfo } from '../lib/types';
 import { playableZones, spotifyDeepLink, spotifyDeviceHint } from '../player/routing';
 import { usePlayer } from '../store/player';
 import { capsFrom, restingNotice, useSpotify } from '../store/spotify';
+import { usePhoneStream } from '../store/phoneStream';
+import { isHandheld } from '../lib/device';
 import { Dialog } from './Dialog';
 
 const icons = { pc: Speaker, browser: Globe, spotify: Smartphone } as const;
@@ -72,10 +74,15 @@ export function PlayOnSheet() {
               role="menuitem"
               disabled={z.isRestricted === true}
               title={z.isRestricted ? 'This device is in a private session; Spotify does not let rune control it' : undefined}
-              onClick={() => { close(); void playOn(z.id, req); }}
+              onClick={() => {
+                close();
+                // Soloist picked from a phone: the phone hears it (the stream starts inside this tap).
+                if (z.soloist && isHandheld() && !usePhoneStream.getState().listening) void usePhoneStream.getState().start();
+                void playOn(z.id, req);
+              }}
             >
               <I size={20} />
-              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : hintFor(z, req.need)}</small></span>
+              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : z.soloist && isHandheld() ? 'Spotify on the PC, no app · you hear it on this phone' : hintFor(z, req.need)}</small></span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
           );

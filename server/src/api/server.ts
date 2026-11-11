@@ -78,6 +78,7 @@ import {
   type ShutdownResult,
 } from '../ops/index.js';
 import { createUpdateService, registerUpdateRoutes } from '../update.js';
+import { createSoloist, soloistEnabled, soloistSettings, SOLOIST_ZONE, type Soloist, type SoloistOptions } from '../soloist/index.js';
 
 export interface AppOptions {
   /** Start mpv for the PC zone (false in tests). */
@@ -105,6 +106,8 @@ export interface AppOptions {
   /** How long a linked local artist page waits for Spotify (default 2 s; tests shorten it). */
   artistWaitMs?: number;
   webDist?: string;
+  /** Spotify Soloist zone + phone stream (main.ts enables; tests pass a fake Soloist's url and fake runners). */
+  soloist?: boolean | Partial<SoloistOptions>;
   /** Server-owned queue tests: mpv's run player instead of a real mpv (config spotify.serverQueue picks the mode). */
   pcRunZone?: PcZone;
 }
@@ -464,6 +467,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // (≈900 requests in an hour) is what earned the account an 11-hour lockout.
   const linking = spotify ? createLinking(db, cfg, { api: spotify.api, rateLimitMs: 2500, maxAlbumsPerRun: 40 }) : undefined;
   let lastDevicesRateLimitLog = 0;
+  // Spotify Soloist: Spotify's own headless client as a zone of its own, driven over its local WebSocket only (no Web
+  // API calls), with a stream the phone can listen to. The flatpak "PC Spotify" path stays as it is beside it.
+  const soloist: Soloist | undefined =
+    opts.soloist && (typeof opts.soloist === 'object' || soloistEnabled(cfg, existsSync))
+      ? createSoloist(cfg, {
+          loadItems: (ids) => loadQueueItems(db, ids),
+          log: (obj, msg) => app.log.warn(obj, msg),
+          ...(typeof opts.soloist === 'object' ? opts.soloist : {}),
+        })
+      : undefined;
+  soloist?.zone.onChange((state) => {
+    recordHistory(state);
+    broadcast({ type: 'player', state: sanitize(state) });
+  });
   // New songs + song radio: ListenBrainz similarity → Spotify catalogue, through
   // a small persisted request budget shared by every discovery call.
   const discover = createDiscover(db, cfg, spotify, {
@@ -573,6 +590,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
 
   async function zoneFor(id: Zone): Promise<PlaybackZone | undefined> {
     if (id === 'pc') return driver ?? pc;
+    if (id === SOLOIST_ZONE) return soloist?.zone;
     if (id.startsWith('spotify:') && spotify) {
       // After a restart the Connect zones are unknown until the device list is read.
       if (!spotify.zones.get(id)) await spotify.zones.listZones().catch(() => undefined);
@@ -1392,6 +1410,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           deviceType?: string;
           isActive?: boolean;
           isRestricted?: boolean;
+          /** The Soloist zone: where its sound goes ('pc' speakers or the 'phone' stream), and why it cannot play. */
+          soloist?: boolean;
+          output?: 'pc' | 'phone';
+          problem?: string;
         }[] = [];
         // The picker opening asks for the list even if the 5 s cache is warm; the API keeps this budget-aware.
         const fresh = req.query.refresh === '1';
@@ -1401,7 +1423,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             const spotifyZones = await spotify.zones.listZones({ fresh });
             notePcSpotify(spotifyZones);
             for (const z of spotifyZones) if (worthWatching(z)) watchSpotifyZone(z.id);
-            zones.push(...spotifyZones);
+            // Soloist is a zone of its own below: its Connect device would be a second, quota-costing way to the same player.
+            const own = soloist ? soloistSettings(cfg).deviceName : null;
+            zones.push(...spotifyZones.filter((z) => z.name !== own));
           } catch (e) {
             // During a lockout every read fails the same way: one line a minute says so, not one per poll.
             if (e instanceof HttpError && e.status === 429) {
@@ -1427,6 +1451,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           // PC speakers first: the phone's default target.
           zones.unshift(entry);
         }
+        if (soloist) {
+          const info = soloist.info();
+          zones.push({ id: info.id, name: info.name, kind: 'spotify', soloist: true, output: info.output, isActive: info.connected && info.loggedIn, isRestricted: false, ...(info.problem ? { problem: info.problem } : {}) });
+        }
         // Spotify devices the user hid ("does nothing" duplicates such as the Spotify app on the
         // same Mac as a rune tab). The pc zone's own Spotify app is matched above regardless.
         const hidden = new Set(hiddenZoneNames());
@@ -1447,6 +1475,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       // On-demand Spotify app for the pc zone: the UI calls this only when the user
       // actually sends Spotify tracks to the PC speakers (never from GET /zones).
       registerPcSpotifyRoutes(r, pcSpotify);
+      soloist?.registerRoutes(r);
 
       r.get<{ Params: { zone: string } }>('/player/:zone', async (req, reply) => {
         const z = await zoneFor(req.params.zone);
@@ -1624,6 +1653,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     for (const watched of spotifyListeners.values()) watched.off();
     await spotify?.zones.close();
     spotify?.close();
+    await soloist?.close();
     await pc?.close();
     await app.close();
   };
@@ -1653,6 +1683,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       { name: 'mpris-bus-close', run: () => mprisBus?.close() },
       { name: 'spotify-zones-close', run: () => spotify?.zones.close() },
       { name: 'spotify-usage-flush', run: () => spotify?.close() },
+      { name: 'soloist-close', run: () => soloist?.close() },
       { name: 'http-close', run: () => app.close() },
     ],
     // Wrap the better-sqlite3 handle: its close() returns the Database, which

@@ -36,8 +36,12 @@ export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: P
 
 /** A one-line description of a Connect device for the pickers, saying plainly what a phone is and whether it is asleep. */
 export function spotifyDeviceHint(
-  z: Pick<ZoneInfo, 'name' | 'deviceType' | 'isActive' | 'isRestricted'>,
+  z: Pick<ZoneInfo, 'name' | 'deviceType' | 'isActive' | 'isRestricted' | 'soloist' | 'output' | 'problem'>,
 ): string {
+  if (z.soloist) {
+    if (z.problem) return `Spotify on the PC, no app · ${z.problem}`;
+    return z.output === 'phone' ? 'Spotify on the PC, no app · streaming to the phone' : 'Spotify on the PC, no app · PC speakers';
+  }
   const type = (z.deviceType ?? '').toLowerCase();
   const what =
     type === 'smartphone'
@@ -85,7 +89,8 @@ export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps)
     if (!zoneCanPlay(z, source, caps)) continue;
     out.push({ zone: z, label: z.kind === 'browser' && source === 'spotify' ? `${z.name} (Spotify)` : z.name });
   }
-  const rank = (z: ZoneInfo) => (z.kind === 'browser' ? 0 : z.kind === 'spotify' ? 1 : 2);
+  // Soloist first among the Spotify zones: it needs no app anywhere and a phone can hear it.
+  const rank = (z: ZoneInfo) => (z.kind === 'browser' ? 0 : z.soloist ? 1 : z.kind === 'spotify' ? 2 : 3);
   return out.sort((a, b) => rank(a.zone) - rank(b.zone));
 }
 
