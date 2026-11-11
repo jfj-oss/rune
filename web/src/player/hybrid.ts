@@ -12,6 +12,7 @@ export class HybridEngine implements Engine {
   private endedFn: () => void = () => {};
   private errorFn: (m: string) => void = () => {};
   private syncFn: (pos: number, playing: boolean) => void = () => {};
+  private volumeFn: (volume: number) => void = () => {};
 
   constructor(private local: Engine, private spotify: Engine) {
     // Only the engine that is currently active may speak.
@@ -21,6 +22,14 @@ export class HybridEngine implements Engine {
     spotify.onError((m) => { if (this.active === spotify) this.errorFn(m); });
     local.onSync?.((p, pl) => { if (this.active === local) this.syncFn(p, pl); });
     spotify.onSync?.((p, pl) => { if (this.active === spotify) this.syncFn(p, pl); });
+    // A player with a level of its own (Soloist on the phone): the slider shows it while that player sounds.
+    local.onVolume?.((v) => { if (this.active === local) this.adoptVolume(v); });
+    spotify.onVolume?.((v) => { if (this.active === spotify) this.adoptVolume(v); });
+  }
+
+  private adoptVolume(v: number) {
+    this.volume = v;
+    this.volumeFn(v);
   }
 
   /** Which engine a track belongs to. */
@@ -66,4 +75,5 @@ export class HybridEngine implements Engine {
   onEnded(fn: () => void) { this.endedFn = fn; }
   onError(fn: (m: string) => void) { this.errorFn = fn; }
   onSync(fn: (pos: number, playing: boolean) => void) { this.syncFn = fn; }
+  onVolume(fn: (volume: number) => void) { this.volumeFn = fn; }
 }

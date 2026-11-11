@@ -4,7 +4,15 @@ import type { PlayItem, PlaySource, ZoneInfo } from '../lib/types';
 export interface Caps {
   /** Spotify is connected AND the Web Playback SDK can run here (desktop browser, premium). */
   sdk: boolean;
+  /** A phone that hears Spotify through Soloist on the PC (player/phoneSoloist.ts): Soloist can play right now. */
+  soloist?: boolean;
 }
+
+/** Spotify plays inside this browser zone, by whichever way this device has. */
+const browserPlaysSpotify = (caps: Caps): boolean => caps.sdk || caps.soloist === true;
+
+/** Does this zone state say Soloist's sound goes to the phone stream (server soloist/zone.ts signal path)? */
+export const soloistStreamsToPhone = (s: { signalPath?: string[] }): boolean => !!s.signalPath?.some((step) => /to the phone/i.test(step));
 
 /** A zone, or just its kind (a pc zone then has no Spotify player). */
 export type ZoneLike = ZoneInfo['kind'] | Pick<ZoneInfo, 'kind' | 'spotifyDeviceId' | 'spotifyZone'>;
@@ -19,16 +27,18 @@ export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boo
   // The pc zone can host every source: local/radio through mpv, and Spotify through
   // the desktop app — which rune starts on demand (see player/pcStart.ts).
   if (kind === 'pc') return true;
-  if (kind === 'browser') return source === 'local' || source === 'radio' || caps.sdk;
+  if (kind === 'browser') return source === 'local' || source === 'radio' || browserPlaysSpotify(caps);
   return source === 'spotify'; // Spotify Connect device
 }
 
-/** The actionable text for "this zone can't play <source>". */
-export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource): string {
+/** The actionable text for "this zone can't play <source>". `notice`: why Soloist cannot take it on this phone. */
+export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource, notice?: string | null): string {
   if (zone.kind === 'pc' && source === 'spotify') return 'rune starts Spotify on the PC for this';
   if (source === 'radio') return `${zone.name} can’t play internet radio — use the PC or this browser`;
-  // iPhones/iPads (and any browser without the Web Playback SDK) cannot play Spotify inside the page.
+  // iPhones/iPads (and any browser without the Web Playback SDK) cannot play Spotify inside the page — unless Soloist on
+  // the PC plays it for the phone, and then only its being down is a reason.
   if (zone.kind === 'browser' && source === 'spotify') {
+    if (notice) return `Spotify can’t play on this phone right now: ${notice.replace(/ — using the Spotify app$/, '')}`;
     return 'Spotify can’t play in this browser — open the Spotify app on this device, then pick it as the zone';
   }
   return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
@@ -87,7 +97,7 @@ export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps)
   const out: ZoneOption[] = [];
   for (const z of zones) {
     if (!zoneCanPlay(z, source, caps)) continue;
-    out.push({ zone: z, label: z.kind === 'browser' && source === 'spotify' ? `${z.name} (Spotify)` : z.name });
+    out.push({ zone: z, label: z.kind === 'browser' && source === 'spotify' && caps.sdk ? `${z.name} (Spotify)` : z.name });
   }
   // Soloist first among the Spotify zones: it needs no app anywhere and a phone can hear it.
   const rank = (z: ZoneInfo) => (z.kind === 'browser' ? 0 : z.soloist ? 1 : z.kind === 'spotify' ? 2 : 3);
@@ -96,15 +106,15 @@ export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps)
 
 /**
  * The PC's Spotify players are folded into the pc zone (same speakers), so they must not show up a second time: the
- * Spotify app's Connect device never does, and Soloist does not either while it is the pc zone's engine — except on
- * a phone (`keepSoloist`), where the Soloist zone is how the phone hears Spotify from the PC over the stream.
+ * Spotify app's Connect device never does, and Soloist does not either while it is the pc zone's engine. A phone hears
+ * Spotify through Soloist on its own zone ("This iPhone", player/phoneSoloist.ts), so it needs no Soloist entry either.
  */
-export function withoutPcDevice(zones: ZoneInfo[], opts: { keepSoloist?: boolean } = {}): ZoneInfo[] {
+export function withoutPcDevice(zones: ZoneInfo[]): ZoneInfo[] {
   const hidden = new Set<string>();
   for (const z of zones) {
     if (z.kind !== 'pc') continue;
     if (z.spotifyDeviceId) hidden.add(`spotify:${z.spotifyDeviceId}`);
-    if (z.spotifyZone && !(opts.keepSoloist && z.spotifyZone === 'soloist')) hidden.add(z.spotifyZone);
+    if (z.spotifyZone) hidden.add(z.spotifyZone);
   }
   return hidden.size ? zones.filter((z) => !(z.kind === 'spotify' && hidden.has(z.id))) : zones;
 }

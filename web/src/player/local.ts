@@ -41,6 +41,8 @@ export class LocalBackend implements Backend {
       this.set({ status: 'paused', positionMs: livePosition(this.state), updatedAt: Date.now() });
     });
     this.engine.onSync?.((pos, playing) => this.onEngineSync(pos, playing));
+    // The player behind the engine kept its own level (Soloist heard on the phone): the slider shows that level.
+    this.engine.onVolume?.((volume) => { if (volume !== this.state.volume) this.set({ volume }); });
     this.engine.setVolume(this.state.volume);
     this.timer = setInterval(() => this.tick(), 400);
   }

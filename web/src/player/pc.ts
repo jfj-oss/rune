@@ -3,6 +3,7 @@ import type { ExtCommand, PlayItem } from '../lib/types';
 import { HybridEngine } from './hybrid';
 import { LocalBackend } from './local';
 import { matchBackendModes, PLAIN_MODES } from './modes';
+import { soloistStreamsToPhone } from './routing';
 import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 import { ZoneEngine, type ZoneTransport } from './zoneEngine';
 
@@ -68,6 +69,8 @@ export class PcBackend implements Backend {
   /** The level the user chose (null until a zone reported one) and since when the zone has sat below it. */
   private level: number | null = null;
   private lowSince: number | null = null;
+  /** Soloist's sound goes to the phone stream (by its last state), not to these speakers. */
+  private onPhone = false;
 
   constructor(private deps: PcDeps, device?: PcDevice | null) {
     this.pc = deps.remote('pc');
@@ -278,13 +281,29 @@ export class PcBackend implements Backend {
     }
   }
 
+  /** The one line shown when a phone takes Soloist (and the Spotify song this zone was sounding) over. */
+  static readonly MOVED_TO_PHONE = 'Spotify moved to the phone — it plays there through Soloist now. Press Play here to bring it back to the PC speakers.';
+
+  /**
+   * There is one Soloist: a phone starting a Spotify song takes it, and its sound, over (the newest request wins). The
+   * page keeps showing what Soloist plays, with the signal path ending "to the phone", and says so once.
+   */
+  private notePhone(s: PlayerState) {
+    const was = this.onPhone;
+    this.onPhone = soloistStreamsToPhone(s);
+    if (this.onPhone && !was && this.usesSoloist && this.mode !== 'pc' && (s.status === 'playing' || s.status === 'loading')) this.deps.notice?.(PcBackend.MOVED_TO_PHONE);
+  }
+
   private onChild(from: PcMode, s: PlayerState) {
+    if (from === 'spotify') this.notePhone(s);
     if (from === this.mode) this.noteVolume(s.volume);
     // The page shows whichever player is sounding: something can start the other one behind our back (the Spotify
     // app itself, another tab, the voice assistant), and the server then pauses the first (play/oneSpeaker.ts).
+    // Soloist streaming to a phone is not these speakers: the page does not move to it.
     if (this.mode !== 'mixed' && from !== 'mixed') {
       const other: PcMode = this.mode === 'pc' ? 'spotify' : 'pc';
-      if (this.child(other)?.state.status === 'playing' && this.child(this.mode)?.state.status !== 'playing') {
+      const sounding = this.child(other)?.state.status === 'playing' && !(other === 'spotify' && this.onPhone);
+      if (sounding && this.child(this.mode)?.state.status !== 'playing') {
         this.follow(other);
         this.emit();
         return;

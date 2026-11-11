@@ -3,16 +3,18 @@ import { create } from 'zustand';
 import { ApiError, api, isMock } from '../api';
 import { deviceName, isHandheld } from '../lib/device';
 import { isLiveTrack } from '../lib/listenTypes';
-import type { ExtCommand, PlayItem, ZoneInfo } from '../lib/types';
-import { AudioEngine, MockEngine } from '../player/engine';
+import type { ExtCommand, PlayItem, PlaySource, ZoneInfo } from '../lib/types';
+import { clientLog } from '../clientLog';
+import { AudioEngine, MockEngine, unlockOnFirstTap } from '../player/engine';
 import { HybridEngine } from '../player/hybrid';
 import { LocalBackend } from '../player/local';
 import { createTabChannel } from '../player/oneTab';
 import { PcBackend, type PcDevice } from '../player/pc';
 import { needsPcSpotify, pcSpotifyFallbackNotice, pcSpotifyZone, startPcSpotifyAndWait } from '../player/pcStart';
+import { PHONE_SOLOIST_PATH, PhoneSoloistEngine, phoneSoloistRoute, SOLOIST_ZONE } from '../player/phoneSoloist';
 import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
-import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay } from '../player/routing';
+import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay, type Caps } from '../player/routing';
 import { emptyState, livePosition, type Backend, type PlayModes } from '../player/types';
 import { helloAction, holdNotice, RELOAD_NOTICE, usesServerQueue } from '../player/serverQueue';
 import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
@@ -62,28 +64,69 @@ function syncPcDevice(zones: ZoneInfo[]) {
 
 /**
  * Server zone list -> what the UI lists. The PC's Spotify players are folded into the pc zone: the app's Connect device
- * always, and Soloist while it is the pc zone's engine — except on a phone, where the Soloist zone is the way to hear
- * Spotify from the PC on the phone itself.
+ * always, and Soloist while it is the pc zone's engine. A phone hears Spotify through Soloist on its own zone, so the
+ * Soloist entry is not needed there either.
  */
 function tidyZones(zones: ZoneInfo[]): ZoneInfo[] {
   let out = zones;
   if (!isMock && !out.some((z) => z.kind === 'browser')) out = [...out, BROWSER_ZONE]; // the browser zone lives in this tab
   if (!isMock) out = withoutOwnDevice(out, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
-  return withoutPcDevice(out, { keepSoloist: isHandheld() });
+  return withoutPcDevice(out);
 }
 
 /** How long the same fallback notice ("Soloist needs updating — using the Spotify app") stays quiet after it was shown. */
 const FALLBACK_NOTICE_QUIET_MS = 60_000;
 let lastFallbackNotice: { text: string; at: number } | null = null;
 
-/** Spotify songs head for the pc zone and the Spotify app stands in for Soloist: say why, once in a while. */
-function noteSpotifyFallback(z: ZoneInfo | undefined, items: PlayItem[]): void {
-  const text = pcSpotifyFallbackNotice(z, items);
+/** Show a fallback notice, but the same one only once in a while. */
+function noteFallback(text: string | null): void {
   if (!text) return;
   const now = Date.now();
   if (lastFallbackNotice && lastFallbackNotice.text === text && now - lastFallbackNotice.at < FALLBACK_NOTICE_QUIET_MS) return;
   lastFallbackNotice = { text, at: now };
   useUi.getState().toast(text);
+}
+
+/** Spotify songs head for the pc zone and the Spotify app stands in for Soloist: say why, once in a while. */
+function noteSpotifyFallback(z: ZoneInfo | undefined, items: PlayItem[]): void {
+  noteFallback(pcSpotifyFallbackNotice(z, items));
+}
+
+/**
+ * This phone hears Spotify through Soloist on the PC (player/phoneSoloist.ts) whenever Soloist can play: no Spotify app
+ * on the phone, no Connect. Otherwise the Spotify app route stands in, with the reason (the same one line the PC shows).
+ */
+const phoneSoloist = (zones: ZoneInfo[]): boolean => !isMock && isHandheld() && phoneSoloistRoute(zones).available;
+
+/** Spotify songs head for this phone's own zone but Soloist cannot take them right now: say why, once in a while. */
+function notePhoneFallback(z: ZoneInfo | undefined, need: PlaySource, zones: ZoneInfo[]): string | null {
+  if (!z || z.kind !== 'browser' || need !== 'spotify' || isMock || !isHandheld()) return null;
+  const route = phoneSoloistRoute(zones);
+  if (route.available) return null;
+  noteFallback(route.notice);
+  return route.notice;
+}
+
+/** The one stream element of the session (iOS unlocks an element on the first tap and keeps it unlocked). */
+let streamEl: HTMLAudioElement | null = null;
+function streamElement(): HTMLAudioElement {
+  if (streamEl) return streamEl;
+  streamEl = new Audio();
+  streamEl.preload = 'auto';
+  unlockOnFirstTap(() => (streamEl ? [streamEl] : []));
+  return streamEl;
+}
+
+let phoneEngine: PhoneSoloistEngine | null = null;
+/** The browser zone's Spotify half on a phone: Soloist on the PC, heard here over the stream. */
+function phoneSoloistEngine(): PhoneSoloistEngine {
+  phoneEngine ??= new PhoneSoloistEngine(zoneTransport(SOLOIST_ZONE), {
+    element: streamElement,
+    toPhone: () => api.soloistOutput('phone'),
+    notice: (m) => useUi.getState().toast(m),
+    log: (m, d) => clientLog('warn', m, d),
+  });
+  return phoneEngine;
 }
 
 function backendFor(z: ZoneInfo): Backend {
@@ -95,7 +138,8 @@ function backendFor(z: ZoneInfo): Backend {
   const onQueueEnd = () => { void import('../lib/radio').then((m) => m.continueRadio()).catch(() => undefined); };
   let b: Backend;
   if (isMock) b = new LocalBackend(z.id, new HybridEngine(new MockEngine(), new MockEngine()), undefined, notice, onQueueEnd);
-  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), getSdkEngine()), undefined, notice, onQueueEnd, createTabChannel());
+  // Spotify in the browser zone: the Web Playback SDK on a desktop; on a phone (no SDK there) Soloist on the PC, heard here.
+  else if (z.kind === 'browser') b = new LocalBackend(z.id, new HybridEngine(new AudioEngine(), isHandheld() ? phoneSoloistEngine() : getSdkEngine()), undefined, notice, onQueueEnd, createTabChannel());
   // A server-owned pc queue (server config spotify.serverQueue) needs no driving from here: a plain remote.
   else if (usesServerQueue(z)) b = new RemoteBackend(z.id);
   else if (z.kind === 'pc') b = new PcBackend({ remote: (id) => new RemoteBackend(id), transport: zoneTransport, soloistToPc: () => api.soloistOutput('pc'), notice }, pcDevice(z));
@@ -141,11 +185,18 @@ async function startOn(b: Backend, z: ZoneInfo, items: PlayItem[], startIndex: n
   await b.matchModes?.(want);
 }
 
+/** What this tab can play beyond local files: the Web Playback SDK (a desktop), or Soloist heard on this phone. */
+function caps(zones: ZoneInfo[] = usePlayer.getState().zones): Caps {
+  return { ...capsFrom(useSpotify.getState()), soloist: phoneSoloist(zones) };
+}
+
 /** The current zone can't play this: use the remembered choice, or ask ("Play on…" sheet). */
 function routeElsewhere(req: ChooserRequest): Promise<void> | void {
-  const { zones } = usePlayer.getState();
+  const { zones, zone } = usePlayer.getState();
   const sp = useSpotify.getState();
-  const options = playableZones(zones, req.need, capsFrom(sp));
+  // A phone whose Soloist is down: the one-line reason, before the sheet offers the Spotify app route.
+  notePhoneFallback(zones.find((z) => z.id === zone), req.need, zones);
+  const options = playableZones(zones, req.need, caps(zones));
   const remembered = options.find((o) => o.zone.id === sp.choices[req.need]);
   if (remembered) {
     useUi.getState().toast(`Playing on ${remembered.label}`);
@@ -186,8 +237,8 @@ export const usePlayer = create<PlayerStore>((set, get) => {
   /** Each song in the copy this zone can play (own file or Spotify), so as little as possible is skipped. */
   function ownCopies(z: ZoneInfo, items: PlayItem[], startIndex = 0, whole = true): Promise<PlayItem[]> {
     const sp = useSpotify.getState();
-    const caps = capsFrom(sp);
-    const can = { local: zoneCanPlay(z, 'local', caps), spotify: zoneCanPlay(z, 'spotify', caps), spotifyElsewhere: sp.connected };
+    const c = caps();
+    const can = { local: zoneCanPlay(z, 'local', c), spotify: zoneCanPlay(z, 'spotify', c), spotifyElsewhere: sp.connected };
     return fitForZone(items, startIndex, can, { toLocal: api.localTwins, toSpotify: api.spotifyTwins }, whole);
   }
 
@@ -318,12 +369,13 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           const target = z;
           const b = backendFor(target);
           if (prev !== b) {
-            const caps = capsFrom(useSpotify.getState());
-            const playable = items.filter((i) => zoneCanPlay(target, i.track.source, caps));
+            const c = caps();
+            const playable = items.filter((i) => zoneCanPlay(target, i.track.source, c));
             const current = items[s.index]!;
             const notice = (m: string) => useUi.getState().toast(m);
-            if (!zoneCanPlay(target, current.track.source, caps)) {
-              notice(`${cantPlayMessage(target, current.track.source)} — the music stays where it is`);
+            if (!zoneCanPlay(target, current.track.source, c)) {
+              const why = notePhoneFallback(target, current.track.source, get().zones);
+              notice(`${cantPlayMessage(target, current.track.source, why)} — the music stays where it is`);
             } else {
               const startIndex = playable.indexOf(current);
               const positionMs = livePosition(s);
@@ -377,7 +429,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (!pc) return; // timed out: nothing was paused or moved
           z = pc;
         }
-        const route = routeItems(z, list, start, capsFrom(useSpotify.getState()));
+        const route = routeItems(z, list, start, caps());
         if (!route.ok) {
           await routeElsewhere({ items: list, startIndex: start, shuffle: opts?.shuffle, need: route.need, context: opts?.context });
           return;
@@ -404,8 +456,7 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (!pc) return; // timed out: the music stays where it is
           z = pc;
         }
-        const caps = capsFrom(useSpotify.getState());
-        const route = routeItems(z, req.items, req.startIndex, { sdk: caps.sdk });
+        const route = routeItems(z, req.items, req.startIndex, caps());
         if (!route.ok) return;
         if (remember) useSpotify.getState().remember(req.need, zoneId);
         await get().setZone(zoneId, { handoff: false });
@@ -432,10 +483,12 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (!pc) return; // timed out: the queue and playback stay where they are
           z = pc;
         }
-        const caps = capsFrom(useSpotify.getState());
-        const ok = items.filter((i) => zoneCanPlay(z, i.track.source, caps));
+        const c = caps();
+        const ok = items.filter((i) => zoneCanPlay(z, i.track.source, c));
         if (!ok.length) {
-          useUi.getState().toast(z.kind === 'pc' ? cantPlayMessage(z, items[0]!.track.source) : `${cantPlayMessage(z, items[0]!.track.source)} — pick another zone first`);
+          const source = items[0]!.track.source;
+          const why = notePhoneFallback(z, source, get().zones);
+          useUi.getState().toast(z.kind === 'pc' ? cantPlayMessage(z, source) : `${cantPlayMessage(z, source, why)} — pick another zone first`);
           return;
         }
         await b.send({ type: 'enqueue', trackIds: ok.map((i) => i.track.id), next }, ok);
@@ -470,6 +523,7 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
     return { steps: ['Spotify', 'Spotify Connect', z?.name ?? 'Device'], tone: 'off' };
   }
   if (cur?.source === 'spotify') {
+    if (kind === 'browser' && phoneSoloist(zones)) return { steps: PHONE_SOLOIST_PATH, tone: 'off' };
     return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === zone)?.name ?? 'This browser'], tone: 'off' };
   }
   if (isLiveTrack(cur)) {

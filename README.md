@@ -95,9 +95,15 @@ rune starts and supervises Soloist itself when both files exist (`soloist.enable
 
 While Soloist is running and signed in, it is also how the **Linux PC speakers** zone plays Spotify songs: no desktop app
 is started, no Connect device is polled, and no Web API request is made (local files stay on mpv in the same queue, and
-only one of them sounds at a time). On a desktop the Soloist zone is therefore folded into the PC speakers zone; on a
-phone it stays in the picker as the way to hear Spotify from the PC on the phone itself (pick it, or tap **Hear here**,
-and the phone plays the stream, lock screen included). Playing a Spotify song on the PC speakers while a phone listens
-moves the sound back to the speakers. When Soloist cannot play (not installed, no key, not paired, crashed, or its build
-expired), the PC speakers zone goes back to the Spotify desktop app and says why in one line, e.g. "Soloist needs
-updating (its build expired) — using the Spotify app".
+only one of them sounds at a time). The Soloist zone is therefore folded into the PC speakers zone and never listed on
+its own while it can play.
+
+On a **phone** (iPhone, iPad, Android: no Web Playback SDK there), Spotify songs on the phone's own zone ("This iPhone")
+play through Soloist by default: rune switches Soloist's sound to the stream and the phone plays it in one `<audio>`
+element, lock screen included, with no Spotify app involved. Local files keep playing in the phone's own player, and a
+mixed queue hands over between the two the way the PC does between mpv and Soloist. There is one Soloist, and the newest
+request wins: a phone starting a Spotify song while the PC plays through Soloist takes the sound over (the PC's page says
+"Spotify moved to the phone" and its signal path ends "to the phone"); Play on the PC brings it back to the speakers. When
+Soloist cannot play (not installed, no key, not paired, crashed, or its build expired), both the PC speakers zone and the
+phone go back to the Spotify app route and say why in one line, e.g. "Soloist needs updating (its build expired) — using
+the Spotify app".

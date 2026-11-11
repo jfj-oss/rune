@@ -91,8 +91,8 @@ describe('one zone in the list for one set of speakers', () => {
   it('on a desktop the Soloist zone is folded into the pc zone (as the app’s device always was)', () => {
     expect(withoutPcDevice(list).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
   });
-  it('on a phone the Soloist zone stays: it is how the phone hears Spotify from the PC', () => {
-    expect(withoutPcDevice(list, { keepSoloist: true }).map((z) => z.id)).toEqual(['pc', 'soloist', 'spotify:phone']);
+  it('on a phone too: the phone hears Spotify through Soloist on its own zone (phoneSoloist.ts), not on a Soloist entry', () => {
+    expect(withoutPcDevice(list).map((z) => z.id)).toEqual(['pc', 'spotify:phone']);
   });
   it('with the app as the engine the Soloist zone is listed (it is not what the pc zone plays with)', () => {
     expect(withoutPcDevice([PC_APP, SOLOIST, { id: 'spotify:horse1', name: 'HORSE', kind: 'spotify' }]).map((z) => z.id)).toEqual(['pc', 'soloist']);
