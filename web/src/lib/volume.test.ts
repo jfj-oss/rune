@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectIOS, formatVolume, posToVolume, snapVolume, stepVolume, volumeToPos } from './volume';
+import { detectIOS, formatVolume, posToVolume, remoteVolumeHint, snapVolume, stepVolume, volumeToPos } from './volume';
 
 describe('volume mapping', () => {
   it('has the right endpoints and midpoint', () => {
@@ -92,5 +92,13 @@ describe('detectIOS', () => {
     expect(detectIOS('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 5)).toBe('iPad');
     expect(detectIOS('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', 0)).toBeNull();
     expect(detectIOS('Mozilla/5.0 (X11; Linux x86_64) Chrome/130')).toBeNull();
+  });
+});
+
+describe('remoteVolumeHint', () => {
+  it('tells the user to use the device’s own buttons when Spotify cannot set its volume', () => {
+    expect(remoteVolumeHint({ name: 'iPhone — Spotify', deviceType: 'Smartphone' })).toBe('Use the volume buttons on iPhone');
+    expect(remoteVolumeHint({ name: 'Justin’s iPad' })).toBe('Use the volume buttons on Justin’s iPad');
+    expect(remoteVolumeHint({ name: 'Kitchen', deviceType: 'Speaker' })).toBe('Set the volume on Kitchen itself');
   });
 });

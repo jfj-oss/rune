@@ -10,7 +10,7 @@ import { isMixedQueue } from '../../player/pc';
 import { usePlayer, useSignalPath } from '../../store/player';
 import { spotifyDeviceHint } from '../../player/routing';
 import { Popover } from '../Popover';
-import { detectIOS } from '../../lib/volume';
+import { detectIOS, remoteVolumeHint } from '../../lib/volume';
 import { Slider } from './Slider';
 import { VolumeSlider } from './VolumeSlider';
 import { Waveform } from './Waveform';
@@ -131,7 +131,8 @@ let lastAudible = 60;
 
 export function VolumeControl({ className = '' }: { className?: string }) {
   const volume = usePlayer((s) => s.state.volume);
-  const zoneKind = usePlayer((s) => s.zones.find((z) => z.id === s.zone)?.kind);
+  const zoneInfo = usePlayer((s) => s.zones.find((z) => z.id === s.zone));
+  const zoneKind = zoneInfo?.kind;
   const command = usePlayer((s) => s.command);
   const [local, setLocal] = useState<number | null>(null);
   // After a change (here or via the E/R keys), keep showing the chosen level for a few seconds:
@@ -149,6 +150,10 @@ export function VolumeControl({ className = '' }: { className?: string }) {
   // iOS ignores <audio>.volume, so a page slider cannot change loudness for this device's own zone.
   if (ios && zoneKind === 'browser') {
     return <div className={`volume volume--hint ${className}`}>Use the {ios} volume buttons</div>;
+  }
+  // Spotify says this Connect device (a phone) takes no remote volume: a slider would do nothing.
+  if (zoneKind === 'spotify' && zoneInfo?.supportsVolume === false) {
+    return <div className={`volume volume--hint ${className}`}>{remoteVolumeHint(zoneInfo)}</div>;
   }
   const Icon = v === 0 ? VolumeX : v < 40 ? Volume1 : Volume2;
   // While dragging, send at most ~6 volume commands a second (plus the final value).

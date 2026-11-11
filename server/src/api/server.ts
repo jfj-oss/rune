@@ -1467,6 +1467,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           deviceType?: string;
           isActive?: boolean;
           isRestricted?: boolean;
+          supportsVolume?: boolean;
           /** The Soloist zone: where its sound goes ('pc' speakers or the 'phone' stream), and why it cannot play. */
           soloist?: boolean;
           output?: 'pc' | 'phone';

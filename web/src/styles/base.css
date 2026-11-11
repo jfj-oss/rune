@@ -187,7 +187,9 @@ a.chip:hover, button.chip:hover { background: color-mix(in srgb, #fff 14%, trans
 @media (hover: none) {
   .slider--vol::-webkit-slider-thumb { width: var(--thumb); height: var(--thumb); margin-top: calc((6px - var(--thumb)) / 2); }
   .vslider { --thumb: 22px; }
-  .vslider__tick b { opacity: 1; }
+  .vslider__tick b { opacity: 1; margin-top: 7px; }
+  /* the bubble clears the bigger thumb and never leaves the slider's own box at either end */
+  .vslider__tip { bottom: calc(100% + 1px); transform: translate(-50%, 0); left: clamp(26px, calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--f)), calc(100% - 26px)); }
 }
 /* portal panels carry their own fixed coordinates (Popover sets them), so the placement offsets must not apply */
 .pop__panel--portal { top: auto; right: auto; bottom: auto; left: auto; z-index: 260; }   /* above dialogs (200), so menus inside a dialog work */

@@ -32,6 +32,8 @@ export interface ZoneInfo {
   isActive?: boolean;
   /** spotify zones: private session / not controllable through the Spotify Web API. */
   isRestricted?: boolean;
+  /** spotify zones: false when Spotify cannot set this device's volume remotely (iPhones); the page shows a hint instead of a slider. */
+  supportsVolume?: boolean;
   /** The Soloist zone (Spotify's headless client on the PC): where its sound goes, and why it cannot play right now. */
   soloist?: boolean;
   output?: 'pc' | 'phone';
