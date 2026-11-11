@@ -295,11 +295,29 @@ describe('createLinking — title/artist fallback', () => {
     expect(count(db, 'SELECT count(*) AS n FROM track_links')).toBe(2);
     expect(linking.getTrackLink('l:d1')?.spotifyTrackId).toBe('sp-t1');
 
-    // The deluxe candidate was fetched and rejected before the right one was tried.
+    // The deluxe candidate's track count already rules it out: its track list is never requested (each one is a
+    // request per 50 tracks, and these were half of a day's Spotify traffic before).
     const trackPaths = calls.filter((c) => c.url.pathname.endsWith('/tracks')).map((c) => c.url.pathname);
-    expect(trackPaths).toEqual(['/v1/albums/spot-deluxe/tracks', '/v1/albums/spot-discovery/tracks']);
+    expect(trackPaths).toEqual(['/v1/albums/spot-discovery/tracks']);
     // No UPC search: the MusicBrainz release had no barcode.
     expect(calls.some((c) => (c.url.searchParams.get('q') ?? '').startsWith('upc:'))).toBe(false);
+  });
+
+  it('works through at most maxAlbumsPerRun albums per run; the rest wait for the next one', async () => {
+    const db = openDb(':memory:');
+    for (const n of [1, 2, 3]) {
+      seedAlbum(db, { id: `la:a${n}`, title: `Album ${n}`, artist: 'Band', mbReleaseId: null, addedAt: n, tracks: [{ id: `l:a${n}t1`, title: 'One', number: 1, durationMs: 200_000 }] });
+    }
+    const { fetch, calls } = fakeFetch((url) => (url.pathname === '/v1/search' ? jsonResponse(200, { albums: paging([]) }) : jsonResponse(404, {})));
+    const linking = createLinking(db, cfg, { api: makeSpotifyApi(fetch), mb: null, rateLimitMs: 0, sleep: async () => {}, now: () => 5_000, maxAlbumsPerRun: 2 });
+
+    const first = await linking.linkPending();
+    expect(first).toMatchObject({ total: 3, attempted: 2, notFound: 2, rateLimited: false });
+    expect(calls.length).toBe(2);
+
+    const second = await linking.linkPending();
+    expect(second).toMatchObject({ total: 1, attempted: 1, notFound: 1 });
+    expect(calls.length).toBe(3);
   });
 
   it('remembered "not found" albums are not re-searched on the next run', async () => {

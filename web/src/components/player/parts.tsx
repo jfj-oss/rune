@@ -15,6 +15,8 @@ import { Slider } from './Slider';
 import { VolumeSlider } from './VolumeSlider';
 import { Waveform } from './Waveform';
 import { shownVolume, useVolumeHold } from '../../store/volumeHold';
+import { usePhoneStream } from '../../store/phoneStream';
+import { isHandheld } from '../../lib/device';
 
 interface SeekBarProps {
   showTimes?: boolean;
@@ -246,6 +248,13 @@ function ZoneList({ close }: { close(): void }) {
   const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
   const [hidden, setHidden] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
+  const listening = usePhoneStream((s) => s.listening);
+  const phone = isHandheld();
+  // Picking Soloist on a phone means "hear it here": the stream starts inside this tap (iOS wants the gesture).
+  const pick = (z: ZoneInfo) => {
+    if (z.soloist && phone && !listening) void usePhoneStream.getState().start();
+    void setZone(z.id);
+  };
   // The Spotify app on the PC (and phones) come and go, and a sleeping phone only shows while its app is awake:
   // ask for a fresh list every time the picker opens (the server keeps it budget-aware).
   useEffect(() => { void refresh({ fresh: true }); void api.hiddenZones().then(setHidden, () => undefined); }, [refresh]);
@@ -264,12 +273,20 @@ function ZoneList({ close }: { close(): void }) {
               className={`menu__item menu__item--zone${z.id === zone ? ' is-current' : ''}`}
               disabled={z.isRestricted === true}
               title={z.isRestricted ? 'This device is in a private session; Spotify does not let rune control it' : undefined}
-              onClick={() => { void setZone(z.id); close(); }}
+              onClick={() => { pick(z); close(); }}
             >
               <I size={16} />
               <span className="zoneitem"><span>{z.name}</span>{hint && <small>{hint}</small>}</span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
+            {z.soloist && z.id === zone && phone && (
+              <button
+                className={`btn btn--sm${listening ? '' : ' btn--ghost'} zonerow__phone`}
+                onClick={() => void (listening ? usePhoneStream.getState().stop() : usePhoneStream.getState().start())}
+              >
+                {listening ? 'On this phone' : 'Hear here'}
+              </button>
+            )}
             {z.kind === 'spotify' && z.id !== zone && (
               <button className="btn-icon zonerow__hide" title={`Hide “${z.name}” from this list`} aria-label={`Hide ${z.name}`} onClick={() => void toggleHidden(z.name, true)}><EyeOff size={14} /></button>
             )}

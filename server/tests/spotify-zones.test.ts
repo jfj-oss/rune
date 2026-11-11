@@ -845,7 +845,7 @@ describe('sharedPlaybackReads', () => {
     expect(api.currentPlaybackCalls).toBe(3);
   });
 
-  it('caches devices() for 2 minutes and invalidates it after a write', async () => {
+  it('caches devices() for 10 minutes and invalidates it after a write', async () => {
     const api = new FakeZoneApi();
     api.devicesData = [SIM_DEVICE];
     let t = 1000;
@@ -855,11 +855,11 @@ describe('sharedPlaybackReads', () => {
     await shared.devices();
     expect(api.deviceCalls).toBe(1);
 
-    t += 119_999;
+    t += 599_999;
     await shared.devices();
     expect(api.deviceCalls).toBe(1);
 
-    t += 2; // 2 minutes old
+    t += 2; // 10 minutes old
     await shared.devices();
     expect(api.deviceCalls).toBe(2);
 

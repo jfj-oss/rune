@@ -22,6 +22,15 @@ export function devicePlace(ua = typeof navigator === 'undefined' ? '' : navigat
 }
 
 /**
+ * A phone or tablet: a personal device whose page should never jump to the PC speakers by itself (a desktop tab in the
+ * same room may). iPadOS pretends to be a Mac, hence the touch-point test.
+ */
+export function isHandheld(ua = typeof navigator === 'undefined' ? '' : navigator.userAgent, touchPoints = typeof navigator === 'undefined' ? 0 : navigator.maxTouchPoints): boolean {
+  if (/iPhone|iPod|iPad|Android|Mobile/i.test(ua)) return true;
+  return /Macintosh/.test(ua) && touchPoints > 1;
+}
+
+/**
  * The Spotify Web Playback SDK does not run on phones/tablets (and needs EME + a secure context).
  * Pure so it can be unit-tested; `sdkSupported()` feeds it the real browser.
  */

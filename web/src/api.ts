@@ -130,6 +130,11 @@ export const api = {
     if (isMock) return { started: false, running: false };
     return http('/pc/spotify/start', { method: 'POST' });
   },
+  /** The Soloist zone's sound: the PC speakers, or the HLS stream this phone plays (/api/soloist/stream/live.m3u8). */
+  async soloistOutput(output: 'pc' | 'phone'): Promise<{ output: 'pc' | 'phone'; problem: string | null }> {
+    if (isMock) return { output, problem: null };
+    return http('/soloist/output', { method: 'POST', body: JSON.stringify({ output }) });
+  },
   /** Local copies of Spotify tracks the user owns: 'sp:<id>' → the local track + its album. */
   async localTwins(tracks: { id: string; title: string; artists: string[]; durationMs: number }[]): Promise<Record<string, PlayItem>> {
     if (isMock || !tracks.length) return {};
@@ -172,7 +177,8 @@ export const api = {
     return http(`/player/${encodeURIComponent(zone)}`, { method: 'POST', body: JSON.stringify(cmd) });
   },
   // ---------- Spotify ----------
-  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string } }> {
+  /** `restingUntil`: epoch ms until which Spotify refuses rune's requests (its daily limit), null when it answers. */
+  async spotifyStatus(): Promise<{ connected: boolean; configured?: boolean; user?: { name: string; product: string }; restingUntil?: number | null }> {
     if (isMock) return (await mock()).mockApi.spotifyStatus();
     try {
       return await http('/spotify/status');

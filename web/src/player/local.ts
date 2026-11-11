@@ -6,6 +6,9 @@ import type { TabChannel } from './oneTab';
 import { matchBackendModes } from './modes';
 import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 
+/** How far the shown position may drift from the element's before the page is corrected (buffering, a slow start). */
+const RESYNC_MS = 1500;
+
 let qn = 0;
 const newQueueId = () => `q${Date.now().toString(36)}${(qn++).toString(36)}`;
 const toQueueItems = (items: PlayItem[]): QueueItem[] => items.map((i) => ({ queueId: newQueueId(), track: i.track, album: i.album }));
@@ -71,6 +74,9 @@ export class LocalBackend implements Backend {
     const pos = real ?? livePosition(s);
     // duration 0 = live radio: there is no end to advance past
     if (real === null && cur.track.durationMs > 0 && !isLiveTrack(cur.track) && pos >= cur.track.durationMs - 5) this.advance();
+    // The page's clock runs from the moment Play was pressed; the sound starts when the stream has buffered (on a phone,
+    // seconds later for a file the server first has to transcode). Keep the shown position honest: follow the element.
+    if (real !== null && !isLiveTrack(cur.track) && Math.abs(real - livePosition(s)) > RESYNC_MS) this.set({ positionMs: real, updatedAt: Date.now() });
   }
 
   /** The engine saw the real position / play state (Spotify SDK: also changes made from other Spotify apps). */

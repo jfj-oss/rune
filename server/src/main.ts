@@ -20,6 +20,8 @@ const { app, shutdown } = await buildApp(db, cfg, {
   spotifyWatch: background && process.env.RUNE_NO_SPOTIFY_WATCH !== '1',
   // Phase 2: HORSE is read over MPRIS, not GET /me/player (config spotify.mprisReads: false turns it off).
   mpris: background && process.env.RUNE_NO_MPRIS !== '1',
+  // Spotify Soloist (when its binary and key are installed; config soloist.enabled: false turns it off).
+  soloist: background && process.env.RUNE_NO_SOLOIST !== '1',
 });
 const host = process.env.RUNE_HOST ?? '0.0.0.0';
 await app.listen({ port: cfg.port, host });

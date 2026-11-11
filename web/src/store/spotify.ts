@@ -23,9 +23,13 @@ interface SpotifyStore {
   supported: boolean;
   sdk: SdkStatus;
   chooser: ChooserRequest | null;
+  /** Epoch ms until which Spotify refuses rune's requests (its daily limit); null while it answers. */
+  restingUntil: number | null;
   /** Session memory: where the user last sent Spotify / local tracks that their zone couldn't play. */
   choices: Partial<Record<PlaySource, string>>;
   init(): Promise<void>;
+  /** Re-read /spotify/status (connected, resting): the "Play on…" sheet does this when it opens. */
+  refreshStatus(): Promise<void>;
   askWhere(req: ChooserRequest): void;
   closeChooser(): void;
   remember(need: PlaySource, zone: string | undefined): void;
@@ -43,6 +47,17 @@ export function getSdkEngine(): SpotifySdkEngine {
   return engine;
 }
 
+/** A resting time still ahead of us, else null (an old server sends none). */
+const restingFrom = (st: { restingUntil?: number | null }): number | null =>
+  typeof st.restingUntil === 'number' && st.restingUntil > Date.now() ? st.restingUntil : null;
+
+/** "Spotify is resting until 14:35": the one line every page shows while Spotify's daily limit is used up. */
+export function restingNotice(until: number | null, now = Date.now()): string | null {
+  if (until === null || until <= now) return null;
+  const at = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `Spotify is resting until ${at} — its daily limit is used up. Spotify songs play again then; local music works now.`;
+}
+
 function loadChoices(): SpotifyStore['choices'] {
   try { return JSON.parse(sessionStorage.getItem('rune.playOn') ?? '{}') as SpotifyStore['choices']; } catch { return {}; }
 }
@@ -53,15 +68,23 @@ export const useSpotify = create<SpotifyStore>((set, get) => ({
   supported: false,
   sdk: { phase: 'off', deviceId: null },
   chooser: null,
+  restingUntil: null,
   choices: loadChoices(),
 
   async init() {
     if (get().loaded) return;
     const st = await api.spotifyStatus();
     const supported = isMock ? true : sdkSupported();
-    set({ loaded: true, connected: st.connected, user: st.user, supported, ...(isMock ? { sdk: { phase: 'ready' as const, deviceId: 'mock-sdk' } } : {}) });
+    set({ loaded: true, connected: st.connected, user: st.user, supported, restingUntil: restingFrom(st), ...(isMock ? { sdk: { phase: 'ready' as const, deviceId: 'mock-sdk' } } : {}) });
     // Register this tab as a Spotify device as soon as we know the account is connected.
     if (!isMock && st.connected && supported) void getSdkEngine().activate().catch(() => undefined);
+  },
+  async refreshStatus() {
+    if (isMock) return;
+    try {
+      const st = await api.spotifyStatus();
+      set({ connected: st.connected, user: st.user, restingUntil: restingFrom(st) });
+    } catch { /* offline: keep what we have */ }
   },
   askWhere: (chooser) => set({ chooser }),
   closeChooser: () => set({ chooser: null }),

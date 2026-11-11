@@ -68,6 +68,11 @@ export interface ConnectZoneOptions {
   mpris?: MprisPlaybackSource;
   /** Gets one line per play: what the first poll after it found (track ids only). */
   logger?: SpotifyBudgetLogger;
+  /**
+   * The last device list Spotify gave, kept across restarts. While Spotify cannot be asked (its daily limit, a
+   * network failure) the Connect zones and the picker keep these devices instead of vanishing.
+   */
+  deviceStore?: { load(): SpotifyDevice[] | undefined; save(devices: SpotifyDevice[]): void };
 }
 
 // ---------- local playback reports ----------
@@ -1342,6 +1347,8 @@ export type SpotifyZone = SpotifyConnectZone;
 
 export class SpotifyZones {
   private readonly zones = new Map<string, SpotifyZone>();
+  /** The last device list Spotify gave (see ConnectZoneOptions.deviceStore). */
+  private lastDevices: SpotifyDevice[] | null = null;
 
   private readonly api: SpotifyZoneApi;
   private readonly now: () => number;
@@ -1352,7 +1359,7 @@ export class SpotifyZones {
   ) {
     // /me/player describes the whole account, so every zone polling it can share one answer.
     this.now = opts.now ?? Date.now;
-    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris, opts.budgetLevel);
+    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris, opts.budgetLevel, opts.hasClients);
     // A local report that changes what is playing wakes every zone: they update from the
     // synthetic (free) answer immediately.
     opts.localPlayback?.setWake(() => this.wake());
@@ -1372,7 +1379,20 @@ export class SpotifyZones {
    * if its short cache is still warm (the picker just opened); the API itself skips that when the budget is low.
    */
   async listZones(opts: { fresh?: boolean } = {}): Promise<SpotifyZoneInfo[]> {
-    const devices = await this.api.devices(opts.fresh === true);
+    let devices: SpotifyDevice[];
+    try {
+      devices = await this.api.devices(opts.fresh === true);
+      this.lastDevices = devices;
+      this.opts.deviceStore?.save(devices);
+    } catch (err) {
+      // Spotify could not be asked (its breaker is up after a lockout, or the call failed): the last list it gave
+      // stands in, so the Connect zones keep existing and the picker keeps its devices. A command sent to one then
+      // gets Spotify's own answer (the daily-limit message, "device not found"), not "unknown zone".
+      const known = this.lastDevices ?? this.opts.deviceStore?.load();
+      if (!known) throw err;
+      this.lastDevices = known;
+      devices = known;
+    }
     const out: SpotifyZoneInfo[] = [];
     for (const device of devices) {
       if (!device.id) continue;
@@ -1426,8 +1446,13 @@ export function createSpotifyZones(api: SpotifyZoneApi, opts: ConnectZoneOptions
 
 /** How long one /me/player (or /me/player/queue) answer is reused by all zones. */
 const SHARED_READ_MS = 800;
-/** The device list changes rarely; GET /zones can afford a 5 s cache. */
-const DEVICES_READ_MS = 120_000;
+/** The device list changes rarely, and the picker asks for a fresh one anyway: an ordinary GET /zones reuses it for
+ *  10 minutes (it used to be 2, and a probe every 2 minutes was a quarter of a day's Spotify requests). */
+const DEVICES_READ_MS = 600_000;
+/** With no visible page the list is reused for an hour: a probe from something that is not choosing a device. */
+const DEVICES_IDLE_MS = 3_600_000;
+/** A failed read (breaker up, network down) is retried after this long, not after the full TTL. */
+const FAILED_READ_MS = 5000;
 /** A fresh read (the picker opening) when the budget is tight: still current, but no more often than this. */
 const DEVICES_FRESH_LOW_MS = 5000;
 /** A picker opening asks for a fresh list, but not more than once in this window (a request each time is waste). */
@@ -1497,8 +1522,9 @@ export function sharedPlaybackReads(
   local?: LocalPlaybackSource,
   mpris?: MprisPlaybackSource,
   budgetLevel?: () => SpotifyBudgetLevel,
+  hasClients?: () => boolean,
 ): SpotifyZoneApi {
-  type Slot<T> = { at: number; value: Promise<T> } | null;
+  type Slot<T> = { at: number; value: Promise<T>; failed?: boolean } | null;
   let playback: Slot<SpotifyPlaybackState | null> = null;
   let queue: Slot<SpotifyQueue> = null;
   let devices: Slot<SpotifyDevice[]> = null;
@@ -1510,11 +1536,15 @@ export function sharedPlaybackReads(
     load: () => Promise<T>,
     ttlMs = SHARED_READ_MS,
   ): Promise<T> => {
-    if (slot && now() - slot.at < ttlMs) return slot.value;
+    // A failed read is not an answer worth a whole TTL: when the breaker drops or the network returns, the next caller
+    // asks again soon (the breaker itself answers a blocked call without touching the network).
+    if (slot && now() - slot.at < (slot.failed ? FAILED_READ_MS : ttlMs)) return slot.value;
     const value = load();
-    const mine = { at: now(), value };
+    const mine: NonNullable<Slot<T>> = { at: now(), value };
     set(mine);
-    value.catch(() => undefined);
+    value.catch(() => {
+      mine.failed = true;
+    });
     return value;
   };
   /** `signals`: the app shows this change over MPRIS (play, pause, skip, seek), so a read after it can wait for that. */
@@ -1546,9 +1576,11 @@ export function sharedPlaybackReads(
   return {
     devices: (fresh = false) => {
       // A fresh read is a user-facing action (the picker opened), but at a low or used-up budget the cached list is
-      // good enough: an extra request there costs more than a few seconds of staleness.
+      // good enough: an extra request there costs more than a few seconds of staleness. With no page open at all
+      // (the voice assistant's health probe, a dashboard) the list is kept for an hour: nobody is choosing a device.
       const level = budgetLevel?.() ?? 'normal';
-      const ttl = !fresh ? DEVICES_READ_MS : level === 'low' || level === 'out' ? DEVICES_FRESH_LOW_MS : DEVICES_FRESH_MS;
+      const idle = !fresh && hasClients !== undefined && !hasClients();
+      const ttl = idle ? DEVICES_IDLE_MS : !fresh ? DEVICES_READ_MS : level === 'low' || level === 'out' ? DEVICES_FRESH_LOW_MS : DEVICES_FRESH_MS;
       return read(
         devices,
         (s) => (devices = s),

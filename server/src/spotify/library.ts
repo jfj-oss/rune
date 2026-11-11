@@ -257,7 +257,9 @@ function ownerName(p: SpotifyPlaylist): string | null {
 const LIKED_STAMP_KEY = 'spotify.likedStamp';
 const LIKED_FULL_AT_KEY = 'spotify.likedFullAt';
 /** A full Liked Songs pass costs ~100 requests: only redo it daily (or when the probe changed). */
-export const LIKED_FULL_SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+// A full pass is ~100 requests; the one-track probe (count + newest added_at) catches every like and unlike in between,
+// so the safety-net full pass runs weekly, not daily.
+export const LIKED_FULL_SYNC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function ensureAppState(db: Db): void {
   db.exec('CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');

@@ -378,6 +378,8 @@ export interface SpotifyRouteOptions extends SpotifyAuthOptions {
   auth?: SpotifyAuth;
   /** Fired after a successful login callback; the server starts a library sync. */
   onLogin?: () => void;
+  /** Epoch ms until which Spotify refuses requests (the circuit breaker), or null: GET /status reports it. */
+  restingUntil?: () => number | null;
 }
 
 /**
@@ -429,7 +431,7 @@ export function registerSpotifyRoutes(
     }
   });
 
-  app.get('/api/spotify/status', async () => auth.status());
+  app.get('/api/spotify/status', async () => ({ ...auth.status(), restingUntil: opts.restingUntil?.() ?? null }));
 
   app.post('/api/spotify/logout', async () => {
     auth.logout();

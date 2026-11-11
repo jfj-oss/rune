@@ -53,7 +53,10 @@
   backdrop-filter: blur(32px) saturate(165%);
 }
 .side { --glass-tint: rgba(2, 2, 8, 0.52); }
-.npbar, .tabs, .mini { --glass-tint: rgba(2, 2, 8, 0.55); }
+.npbar { --glass-tint: rgba(2, 2, 8, 0.55); }
+/* the phone's tab bar and mini player sit over page text (an album's sticky tab strip, track rows): a deeper tint, or
+   the two layers of text read as one broken one */
+.tabs, .mini { --glass-tint: rgba(2, 2, 8, 0.66); }
 /* bars that content (bright covers) scrolls under also dim what is behind them, so they stay darker than the ambient */
 .npbar, .tabs, .mini { -webkit-backdrop-filter: blur(32px) saturate(165%) brightness(0.62); backdrop-filter: blur(32px) saturate(165%) brightness(0.62); }
 /* the album tab strip is clear until it sticks to the top (Album.tsx sets .is-stuck), so the hero fades into the page with no edge */

@@ -110,6 +110,8 @@ export interface LinkingOptions {
   relinkAfterMs?: number;
   /** Retry albums where no match was found after this long (default 7 days). */
   retryNotFoundAfterMs?: number;
+  /** Albums one linkPending() run works through at most (default 40); the rest wait for the next run. */
+  maxAlbumsPerRun?: number;
 }
 
 export interface Linking {
@@ -347,6 +349,8 @@ interface FoundAlbum {
 
 const DEFAULT_RELINK_AFTER_MS = 90 * 24 * 60 * 60 * 1000;
 const DEFAULT_RETRY_NOT_FOUND_MS = 7 * 24 * 60 * 60 * 1000;
+/** One run links this many albums at most: a whole library in one go is hundreds of requests in a few minutes. */
+const DEFAULT_MAX_ALBUMS_PER_RUN = 40;
 
 interface AlbumLinkRow {
   album_id: string;
@@ -373,6 +377,11 @@ export function createLinking(db: Db, cfg: Config, opts: LinkingOptions): Linkin
   };
   const relinkAfterMs = opts.relinkAfterMs ?? DEFAULT_RELINK_AFTER_MS;
   const retryNotFoundMs = opts.retryNotFoundAfterMs ?? DEFAULT_RETRY_NOT_FOUND_MS;
+  const maxAlbumsPerRun = Math.max(1, opts.maxAlbumsPerRun ?? DEFAULT_MAX_ALBUMS_PER_RUN);
+
+  /** A candidate with a different track count can never verify (matchAlbumTracks rejects it): skip its track list. */
+  const sameTrackCount = (candidate: SpotifyAlbum, album: LocalAlbumForLink): boolean =>
+    typeof candidate.total_tracks !== 'number' || candidate.total_tracks === album.tracks.length;
 
   const mb: MbBarcodeClient | null =
     opts.mb === null
@@ -429,12 +438,10 @@ export function createLinking(db: Db, cfg: Config, opts: LinkingOptions): Linkin
     const candidates = await searchAlbums(`upc:${barcode}`, 10);
     if (candidates.length === 0) return undefined;
 
-    // Prefer the candidate Spotify itself reports as having the local track count.
-    const ordered = [...candidates].sort((a, b) => {
-      const aExact = (a.total_tracks ?? -1) === album.tracks.length ? 1 : 0;
-      const bExact = (b.total_tracks ?? -1) === album.tracks.length ? 1 : 0;
-      return bExact - aExact;
-    });
+    // The barcode is authoritative, so a different-count edition is still kept as a last resort, but the track lists
+    // (one request per 50 tracks each) are read only for the candidates that can verify.
+    const exact = candidates.filter((c) => sameTrackCount(c, album));
+    const ordered = exact.length ? exact : candidates.slice(0, 1);
 
     for (const candidate of ordered.slice(0, 3)) {
       let tracks: SpotifyTrack[];
@@ -463,7 +470,8 @@ export function createLinking(db: Db, cfg: Config, opts: LinkingOptions): Linkin
     if (!query) return undefined;
     const candidates = await searchAlbums(query, 10);
 
-    for (const candidate of candidates.slice(0, maxCandidates)) {
+    // Deluxe editions, singles and compilations in the results are rejected by their track count without a request.
+    for (const candidate of candidates.filter((c) => sameTrackCount(c, album)).slice(0, maxCandidates)) {
       let tracks: SpotifyTrack[];
       try {
         tracks = await fetchAlbumTracks(candidate.id);
@@ -645,7 +653,8 @@ export function createLinking(db: Db, cfg: Config, opts: LinkingOptions): Linkin
     };
     onProgress?.(0, ids.length);
 
-    for (const albumId of ids) {
+    // The rest of the pending set waits for the next run (the next scan or library sync starts one).
+    for (const albumId of ids.slice(0, maxAlbumsPerRun)) {
       try {
         const link = await linkAlbum(albumId);
         if (link) result.linked++;

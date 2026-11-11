@@ -5,7 +5,9 @@ import { detectIOS } from '../lib/volume';
 import type { PlaySource, ZoneInfo } from '../lib/types';
 import { playableZones, spotifyDeepLink, spotifyDeviceHint } from '../player/routing';
 import { usePlayer } from '../store/player';
-import { capsFrom, useSpotify } from '../store/spotify';
+import { capsFrom, restingNotice, useSpotify } from '../store/spotify';
+import { usePhoneStream } from '../store/phoneStream';
+import { isHandheld } from '../lib/device';
 import { Dialog } from './Dialog';
 
 const icons = { pc: Speaker, browser: Globe, spotify: Smartphone } as const;
@@ -32,17 +34,22 @@ export function PlayOnSheet() {
   const phase = useSpotify((s) => s.sdk.phase);
   const playOn = usePlayer((s) => s.playOn);
   const refresh = usePlayer((s) => s.refreshZones);
+  const restingUntil = useSpotify((s) => s.restingUntil);
+  const refreshStatus = useSpotify((s) => s.refreshStatus);
 
   // Connect devices appear and disappear (the phone's Spotify app): read the list at once on opening, then keep
   // looking while the sheet is open (the server's short cache keeps the interval from spending a request each time).
+  // The status says whether Spotify is resting (daily limit): then the sheet says so before a tap can fail.
   useEffect(() => {
     if (!req) return;
     void refresh({ fresh: true });
+    void refreshStatus();
     const t = setInterval(() => void refresh(), 3000);
     return () => clearInterval(t);
-  }, [req, refresh]);
+  }, [req, refresh, refreshStatus]);
 
   if (!req) return null;
+  const resting = req.need === 'spotify' ? restingNotice(restingUntil) : null;
   const ios = typeof navigator === 'undefined' ? null : detectIOS(navigator.userAgent, navigator.maxTouchPoints);
   const caps = capsFrom({ connected, supported, sdk: { phase, deviceId: null } });
   const options = playableZones(zones, req.need, caps);
@@ -56,6 +63,7 @@ export function PlayOnSheet() {
       <p className="dialog__lead">
         {req.need === 'spotify' ? 'Spotify tracks can’t play on' : 'Local files can’t play on'} <b>{cur?.name ?? 'this zone'}</b>. Pick where to hear <b>{what}</b>.
       </p>
+      {resting && <p className="sheet__note sheet__note--resting" role="status">{resting}</p>}
       <div className="sheet__list" role="menu">
         {options.map(({ zone: z, label }) => {
           const I = icons[z.kind] ?? Monitor;
@@ -66,10 +74,15 @@ export function PlayOnSheet() {
               role="menuitem"
               disabled={z.isRestricted === true}
               title={z.isRestricted ? 'This device is in a private session; Spotify does not let rune control it' : undefined}
-              onClick={() => { close(); void playOn(z.id, req); }}
+              onClick={() => {
+                close();
+                // Soloist picked from a phone: the phone hears it (the stream starts inside this tap).
+                if (z.soloist && isHandheld() && !usePhoneStream.getState().listening) void usePhoneStream.getState().start();
+                void playOn(z.id, req);
+              }}
             >
               <I size={20} />
-              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : hintFor(z, req.need)}</small></span>
+              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify Web Player in this browser' : z.soloist && isHandheld() ? 'Spotify on the PC, no app · you hear it on this phone' : hintFor(z, req.need)}</small></span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
           );

@@ -17,6 +17,7 @@ import {
   listPlaylists,
   setSpotifyAlbumSaved,
   syncPlaylists,
+  LIKED_FULL_SYNC_TTL_MS,
 } from '../src/spotify/library.js';
 import { ensureSpotifyLibrarySchema } from '../src/spotify/library-schema.js';
 import { syncSavedAlbums } from '../src/spotify/map.js';
@@ -221,10 +222,13 @@ describe('syncPlaylists', () => {
     expect(third.liked).toBe(2);
     expect(getPlaylist(db, 'pl:sp:liked')?.tracks.map((t) => t.id)).toEqual(['sp:t2', 'sp:t1']);
 
-    // Unchanged but the last full pass is over 24 h old: full pass again.
+    // Unchanged but the last full pass is older than the safety-net TTL (a week): full pass again. A day is not enough.
     clock += 24 * 60 * 60_000 + 1;
     await syncPlaylists(source, db, { now });
-    expect(counts).toEqual({ probe: 4, full: 3 });
+    expect(counts).toEqual({ probe: 4, full: 2 });
+    clock += LIKED_FULL_SYNC_TTL_MS;
+    await syncPlaylists(source, db, { now });
+    expect(counts).toEqual({ probe: 5, full: 3 });
   });
 
   it('stores Liked Songs as a virtual playlist and removes playlists Spotify no longer returns', async () => {

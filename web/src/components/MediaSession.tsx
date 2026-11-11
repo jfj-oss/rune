@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { coverSrc } from '../api';
 import { livePosition } from '../player/types';
 import { currentItem, usePlayer } from '../store/player';
+import { usePhoneStream } from '../store/phoneStream';
 
 /** Lock-screen / hardware-key controls for the browser zone, wired to the player store. */
 export function MediaSessionBridge() {
@@ -14,7 +15,9 @@ export function MediaSessionBridge() {
   const zones = usePlayer((s) => s.zones);
   const command = usePlayer((s) => s.command);
   const kind = zones.find((z) => z.id === zone)?.kind;
-  const active = kind === 'browser' && 'mediaSession' in navigator;
+  // The browser zone plays here; so does the Soloist zone while this phone listens to its stream.
+  const listening = usePhoneStream((s) => s.listening);
+  const active = (kind === 'browser' || listening) && 'mediaSession' in navigator;
 
   useEffect(() => {
     if (!active) return;
