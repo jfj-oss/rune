@@ -94,7 +94,7 @@ export function genKindFor(id: string): { kind: GenKind; seed: number } {
   return { kind: KINDS[k % KINDS.length]!, seed: (k >>> 8) % 7 };
 }
 
-/** Generative cover + header for the wave playlists (MUDs, HORSE); other playlists keep their own art. */
+/** Generative cover + header for the wave playlists (two fixed playlist ids); other playlists keep their own art. */
 export function genArtFor(id: string): { kind: GenKind; seed: number } | null {
   return WAVE_COVER_IDS.has(id) ? { kind: 'wave', seed: hash(id) % 7 } : null;
 }

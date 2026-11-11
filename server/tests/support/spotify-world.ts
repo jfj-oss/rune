@@ -80,7 +80,7 @@ export class World implements SpotifyZoneApi {
     const bus = this.mpris;
     setTimeout(() => bus.emit(ev), SIGNAL_LAG_MS);
   }
-  private onHorse() { return this.device === DEV || (this.mirrorsOtherDevice && this.device !== null); }
+  private onPc() { return this.device === DEV || (this.mirrorsOtherDevice && this.device !== null); }
   /** With MPRIS on, the World also runs on its own clock: a song ending is signalled when it ends. */
   private arm() {
     if (!this.mpris) return;
@@ -102,11 +102,11 @@ export class World implements SpotifyZoneApi {
         if (next) {
           this.cur = this.songs.get(next)!; this.basePos = Date.now() - end; this.baseAt = Date.now();
           this.note(`[spotify] next in context: ${next}`);
-          if (this.onHorse()) this.signal({ ev: 'signal', trackId: `sp:${next}`, lengthMs: this.cur.duration_ms });
+          if (this.onPc()) this.signal({ ev: 'signal', trackId: `sp:${next}`, lengthMs: this.cur.duration_ms });
           this.arm();
         } else {
           this.playing = false; this.basePos = 0; this.pausedAt = end; this.note(`[spotify] ${this.cur.id} finished: paused, rewound`);
-          if (this.onHorse()) this.signal({ ev: 'signal', status: 'Paused' });
+          if (this.onPc()) this.signal({ ev: 'signal', status: 'Paused' });
         }
       }
     }
@@ -116,7 +116,7 @@ export class World implements SpotifyZoneApi {
   pos() { return this.playing ? this.basePos + Date.now() - this.baseAt : this.basePos; }
   externalPause() {
     this.settle(); const p = this.pos(); this.playing = false; this.basePos = p; this.pausedAt = Date.now(); this.note(`[user] paused in the Spotify app at ${(p / 1000).toFixed(0)}s`);
-    if (this.onHorse()) this.signal({ ev: 'signal', status: 'Paused' });
+    if (this.onPc()) this.signal({ ev: 'signal', status: 'Paused' });
     this.arm();
   }
   /** The user presses play in the desktop app: playback is on this PC again. */
@@ -130,7 +130,7 @@ export class World implements SpotifyZoneApi {
   }
   externalSeek(ms: number) {
     this.settle(); this.basePos = ms; this.baseAt = Date.now(); this.note(`[user] seeked in the Spotify app to ${(ms / 1000).toFixed(0)}s`);
-    if (this.onHorse()) this.signal({ ev: 'seeked', positionMs: ms });
+    if (this.onPc()) this.signal({ ev: 'seeked', positionMs: ms });
     this.arm();
   }
   otherDevice(id: string) {
@@ -157,7 +157,7 @@ export class World implements SpotifyZoneApi {
   mprisProps(): MprisProps | null {
     if (!this.appOpen) return null;
     this.settle();
-    const here = this.onHorse();
+    const here = this.onPc();
     const song = here ? this.cur : this.appCur;
     if (!song) return { status: 'Stopped', trackId: null, lengthMs: 0, positionMs: 0, volume: 1, shuffle: false, loop: 'None', title: null, artists: [], album: null, artUrl: null };
     // MPRIS reports the length a little short of the catalogue's (89000 vs 89373 ms in phase 0).
