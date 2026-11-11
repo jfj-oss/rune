@@ -47,10 +47,12 @@ export function createSpeakerGuard(zones: { pc(): SpeakerZone | undefined; spoti
         else if (opts.canWake?.() ?? true) spotify?.wake?.();
         return;
       }
-      if (pc?.state().status !== 'playing') return;
+      // No Spotify player on the speakers right now (Soloist streaming to the phone, or driven by the pc queue itself):
+      // its start is not a start on the speakers, and nothing is paused for it.
+      if (!spotify || pc?.state().status !== 'playing') return;
       // Seen now, but it may have begun before mpv did: then mpv is the newer one and stays.
-      const spotifyAt = spotify?.startedAt?.() ?? now();
-      if (spotify && spotifyAt < pcStartedAt) pause(spotify, 'spotify', 'spotify');
+      const spotifyAt = spotify.startedAt?.() ?? now();
+      if (spotifyAt < pcStartedAt) pause(spotify, 'spotify', 'spotify');
       else pause(pc, 'pc', 'spotify');
     },
   };

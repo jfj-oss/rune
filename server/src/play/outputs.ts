@@ -39,10 +39,13 @@ export class MpvOutput implements Output {
 
   async start(run: QueueItem[], opts: { token: number; positionMs: number; volume: number }): Promise<void> {
     this.token = opts.token;
-    this.active = true;
+    // Not active yet: the volume change below makes an idle mpv zone report its state (stopped), and that must not
+    // be read as this run failing before it was even sent.
+    this.active = false;
     this.cur = null;
-    this.last = 'loading';
     if (Math.abs(this.zone.state().volume - opts.volume) > 0.25) await this.zone.command({ type: 'volume', volume: opts.volume });
+    this.active = true;
+    this.last = 'loading';
     await this.zone.loadRun(run, { positionMs: opts.positionMs, paused: false });
   }
 

@@ -27,7 +27,7 @@ import {
   upcoming as queueUpcoming,
   type QueueState,
 } from '../play/queue.js';
-import { idOfUri, type SoloistCommand, type SoloistEvent, type SoloistView } from './client.js';
+import { idOfUri, type SoloistCommand, type SoloistEntity, type SoloistEvent, type SoloistView } from './client.js';
 import type { SoloistOutput } from './audio.js';
 
 /** What the zone needs from the Soloist client (the real one, or a fake in tests). */
@@ -118,6 +118,25 @@ export class SoloistZone implements PlaybackZone {
   async close(): Promise<void> {
     for (const off of this.offs) off();
     this.subs.clear();
+  }
+
+  /**
+   * The server-owned pc queue edited the songs after the current one: the current song keeps playing, the rest of the
+   * zone's queue becomes `items` (play order). A song already queued in Soloist is corrected when its track_changed comes.
+   */
+  setUpcoming(items: QueueItem[]): Promise<PlayerState> {
+    const run = this.chain.then(() => this.replaceUpcoming(items));
+    this.chain = run.catch(() => undefined);
+    return run.then(() => this.state());
+  }
+
+  private async replaceUpcoming(items: QueueItem[]): Promise<void> {
+    const cur = currentItem(this.q);
+    if (!cur) return;
+    const list = [cur, ...items.filter((i) => i.track.source === 'spotify' && uriOf(i))];
+    // The driver orders the queue (shuffle included): this zone plays it straight.
+    this.q = { ...this.q, items: list, index: 0, shuffle: false, order: list.map((_, i) => i) };
+    await this.syncNext();
   }
 
   // ----- commands -----
@@ -293,6 +312,7 @@ export class SoloistZone implements PlaybackZone {
   private onEvent(ev: SoloistEvent): void {
     switch (ev.type) {
       case 'track_changed':
+        this.describe(ev.item);
         this.onTrack(idOfUri(ev.item?.uri));
         return;
       case 'playback_changed':
@@ -302,7 +322,10 @@ export class SoloistZone implements PlaybackZone {
         return;
       case 'playback_state':
         if (!currentItem(this.q)) return;
-        if (ev.item) this.onTrack(idOfUri(ev.item.uri), true);
+        if (ev.item) {
+          this.describe(ev.item);
+          this.onTrack(idOfUri(ev.item.uri), true);
+        }
         if (ev.position) this.positionMs = ev.position.position_ms;
         if (typeof ev.volume === 'number') this.volume = ev.volume;
         if (ev.status === 'idle') this.status = 'stopped';
@@ -336,15 +359,22 @@ export class SoloistZone implements PlaybackZone {
     if (id === this.expected) return;
     const cur = currentItem(this.q);
     if (this.queuedNext && id === this.queuedNext.id) {
-      // The natural end of the current song: Soloist moved on to what rune queued (gapless, same HLS program).
+      // The natural end of the current song: Soloist moved on to what rune queued (gapless, same HLS program). The
+      // queue may have been edited since it was queued: the cursor goes to that song wherever it is now, and a song
+      // edited out of the queue is handled below like any other song rune did not ask for.
       const r = queueNext(this.q, { auto: true });
-      this.q = r.state.index === this.queuedNext.index ? r.state : { ...this.q, index: this.queuedNext.index };
-      this.expected = id;
+      const queuedAt = this.queuedNext.index;
+      const same = (index: number) => { const item = this.q.items[index]; return !!item && idOf(item) === id; };
+      const at = !r.ended && same(r.state.index) ? r.state.index : same(queuedAt) ? queuedAt : this.q.items.findIndex((i) => idOf(i) === id);
       this.queuedNext = null;
-      this.positionMs = 0;
-      this.updatedAt = this.now();
-      void this.chain.then(() => this.syncNext());
-      return;
+      if (at >= 0) {
+        this.q = at === r.state.index ? r.state : { ...this.q, index: at };
+        this.expected = id;
+        this.positionMs = 0;
+        this.updatedAt = this.now();
+        void this.chain.then(() => this.syncNext());
+        return;
+      }
     }
     const at = this.q.items.findIndex((i) => idOf(i) === id);
     if (at >= 0 && at !== this.q.index) {
@@ -370,6 +400,38 @@ export class SoloistZone implements PlaybackZone {
     }
     this.q = r.state;
     this.chain = this.chain.then(() => this.startCurrent({ positionMs: 0, paused: false })).catch((err) => this.deps.log?.({ err: String(err) }, 'soloist: could not continue the queue'));
+  }
+
+  /**
+   * A song rune never stored (a placeholder with no title) gets its title, artists, album, cover and length from what
+   * Soloist says about it: metadata from Soloist's own events, not one Web API request.
+   */
+  private describe(entity: SoloistEntity | null | undefined): void {
+    const id = idOfUri(entity?.uri);
+    const d = entity?.decorations;
+    if (!id || !d?.identity?.name) return;
+    let changed = false;
+    const items = this.q.items.map((item) => {
+      if (idOf(item) !== id || item.track.title) return item;
+      changed = true;
+      const artists = (d.creators ?? [])
+        .map((c) => c.entity)
+        .filter((e): e is SoloistEntity => !!e?.uri && !!e.decorations?.identity?.name)
+        .map((e) => ({ id: `sp:${idOfUri(e.uri) ?? e.uri.split(':').pop() ?? ''}`, name: e.decorations!.identity!.name! }));
+      const album = d.parent?.entity;
+      const albumId = album?.uri ? `sp:${album.uri.split(':').pop() ?? ''}` : item.album.id;
+      const covers = [...(d.visual_identity?.cover ?? [])];
+      const cover = covers.find((c) => c.size === 'large')?.url ?? covers[0]?.url;
+      const durationMs = d.playback?.duration_ms ?? item.track.durationMs;
+      return {
+        ...item,
+        track: { ...item.track, title: d.identity!.name!, artists: artists.length ? artists : item.track.artists, albumId, durationMs },
+        album: { id: albumId, title: album?.decorations?.identity?.name ?? item.album.title, ...(cover ? { coverUrl: cover } : {}) },
+      };
+    });
+    if (!changed) return;
+    this.q = { ...this.q, items };
+    this.bump();
   }
 
   // ----- state plumbing -----

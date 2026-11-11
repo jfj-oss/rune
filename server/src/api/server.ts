@@ -78,7 +78,19 @@ import {
   type ShutdownResult,
 } from '../ops/index.js';
 import { createUpdateService, registerUpdateRoutes } from '../update.js';
-import { createSoloist, soloistEnabled, soloistSettings, SOLOIST_ZONE, type Soloist, type SoloistOptions } from '../soloist/index.js';
+import {
+  createSoloist,
+  pcSpotifyRoute,
+  PcSpotifyOutput,
+  soloistEnabled,
+  soloistFallbackNotice,
+  soloistSettings,
+  SoloistRunOutput,
+  SOLOIST_ZONE,
+  type PcSpotifyEngine,
+  type Soloist,
+  type SoloistOptions,
+} from '../soloist/index.js';
 
 export interface AppOptions {
   /** Start mpv for the PC zone (false in tests). */
@@ -383,9 +395,26 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     : undefined;
   spotify?.registerRoutes(app);
 
+  // Spotify Soloist: Spotify's own headless client as a zone of its own, driven over its local WebSocket only (no Web
+  // API calls), with a stream the phone can listen to. It is also how the pc zone plays Spotify songs whenever it can
+  // (soloist/pcRoute.ts); the flatpak "PC Spotify" path stays beside it for when it cannot.
+  const soloist: Soloist | undefined =
+    opts.soloist && (typeof opts.soloist === 'object' || soloistEnabled(cfg, existsSync))
+      ? createSoloist(cfg, {
+          // Spotify songs rune never stored play too (placeholders; Soloist's own events then name them).
+          loadItems: (ids) => loadDriverItems(ids),
+          log: (obj, msg) => app.log.warn(obj, msg),
+          ...(typeof opts.soloist === 'object' ? opts.soloist : {}),
+        })
+      : undefined;
+  soloist?.zone.onChange((state) => {
+    recordHistory(state);
+    broadcast({ type: 'player', state: sanitize(state) });
+  });
+
   // ---------- the server-owned pc queue (phase 3, flag spotify.serverQueue)
   const horseDeviceId = (): string | null => (pcSpotifyDevice ? pcSpotifyDevice.id.slice('spotify:'.length) : null);
-  const spotifyOut =
+  const appOut =
     serverQueue && spotify && mprisBus
       ? new SpotifyAppOutput({
           bus: mprisBus,
@@ -396,6 +425,23 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             return horseDeviceId();
           },
           startApp: () => pcSpotify.start(),
+          log: (obj, msg) => app.log.warn(obj, msg),
+        })
+      : undefined;
+  // Soloist first, the app when Soloist cannot play; the song waits with the reason when neither can.
+  const spotifyOut =
+    serverQueue && (soloist || appOut)
+      ? new PcSpotifyOutput({
+          ...(soloist
+            ? {
+                soloist: {
+                  output: new SoloistRunOutput({ zone: soloist.zone, ensureOutput: () => soloist.ensureOutput('pc'), log: (obj, msg) => app.log.warn(obj, msg) }),
+                  available: () => soloist.available(),
+                  notice: () => soloistFallbackNotice(soloist.info()),
+                },
+              }
+            : {}),
+          ...(appOut ? { app: appOut } : {}),
           log: (obj, msg) => app.log.warn(obj, msg),
         })
       : undefined;
@@ -443,6 +489,20 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     return out;
   }
   driver?.onChange((state) => broadcast({ type: 'player', state: sanitize(state) }));
+  // Soloist on the PC speakers and mpv share them as well: whichever started last plays, the other is paused. Not
+  // while Soloist streams to the phone (that is not the speakers), and not for the pc queue's own Spotify runs on it.
+  if (soloist) {
+    const pcSide = driver ?? pc;
+    const soloistSpeakers = createSpeakerGuard(
+      { pc: () => pcSide, spotify: () => (soloist.info().output === 'pc' && !driver?.ownsSpotifyApp() ? soloist.zone : undefined) },
+      {
+        onError: (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers (Soloist)'),
+        onPause: (info) => app.log.warn(info, 'speaker guard paused a player (Soloist)'),
+      },
+    );
+    pcSide?.onChange((state) => soloistSpeakers.changed('pc', state));
+    soloist.zone.onChange((state) => soloistSpeakers.changed('spotify', state));
+  }
   /** One live subscription per Connect zone id. */
   const spotifyListeners = new Map<Zone, { zone: PlaybackZone; off: () => void }>();
   /**
@@ -469,20 +529,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // (≈900 requests in an hour) is what earned the account an 11-hour lockout.
   const linking = spotify ? createLinking(db, cfg, { api: spotify.api, rateLimitMs: 2500, maxAlbumsPerRun: 40 }) : undefined;
   let lastDevicesRateLimitLog = 0;
-  // Spotify Soloist: Spotify's own headless client as a zone of its own, driven over its local WebSocket only (no Web
-  // API calls), with a stream the phone can listen to. The flatpak "PC Spotify" path stays as it is beside it.
-  const soloist: Soloist | undefined =
-    opts.soloist && (typeof opts.soloist === 'object' || soloistEnabled(cfg, existsSync))
-      ? createSoloist(cfg, {
-          loadItems: (ids) => loadQueueItems(db, ids),
-          log: (obj, msg) => app.log.warn(obj, msg),
-          ...(typeof opts.soloist === 'object' ? opts.soloist : {}),
-        })
-      : undefined;
-  soloist?.zone.onChange((state) => {
-    recordHistory(state);
-    broadcast({ type: 'player', state: sanitize(state) });
-  });
   // New songs + song radio: ListenBrainz similarity → Spotify catalogue, through
   // a small persisted request budget shared by every discovery call.
   const discover = createDiscover(db, cfg, spotify, {
@@ -1409,6 +1455,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           spotifyDeviceName?: string;
           /** For 'pc': its queue lives on the server (phase 3); the page is a plain remote. */
           serverQueue?: boolean;
+          /** For 'pc': how its Spotify songs play (soloist/pcRoute.ts). `spotifyZone` is the zone that plays them
+           *  ('soloist', or the app's Connect zone once the app runs); `spotifyNotice` says why the app stands in. */
+          spotifyEngine?: PcSpotifyEngine;
+          spotifyZone?: Zone;
+          spotifyNotice?: string;
           /** For 'spotify': Spotify's own description, so the picker can label phones and sleeping devices. */
           deviceType?: string;
           isActive?: boolean;
@@ -1446,11 +1497,19 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           // machine). After a failed list it is still the last one known: an answer without it means "the app went
           // away" to the page, which then throws out a mixed queue.
           const match = spotifyConnected ? pcSpotifyDevice : null;
+          let appZone: Zone | null = null;
           if (match) {
             const deviceId = match.id.startsWith('spotify:') ? match.id.slice('spotify:'.length) : match.id;
             entry.spotifyDeviceId = deviceId;
             entry.spotifyDeviceName = match.name;
+            appZone = `spotify:${deviceId}`;
           }
+          // Soloist plays the pc zone's Spotify songs when it can; the app's device stays listed above so the page
+          // keeps folding it into this zone (same speakers) and knows the fallback.
+          const route = pcSpotifyRoute(soloist?.info(), appZone, spotifyConnected);
+          if (route.engine) entry.spotifyEngine = route.engine;
+          if (route.zone) entry.spotifyZone = route.zone;
+          if (route.notice) entry.spotifyNotice = route.notice;
           // PC speakers first: the phone's default target.
           zones.unshift(entry);
         }

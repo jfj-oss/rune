@@ -11,18 +11,22 @@ import type { QueueItem } from '@liner/shared';
 import type { Config } from '../config.js';
 import { SoloistAudio, type AudioRunner, type SoloistOutput } from './audio.js';
 import { SoloistClient, type SocketCtor } from './client.js';
+import { soloistAvailable } from './pcRoute.js';
 import { SoloistSupervisor, type ChildLike, type SoloistRun } from './supervisor.js';
 import { SOLOIST_ZONE, SoloistZone, type SoloistLink } from './zone.js';
 
 export * from './audio.js';
 export * from './client.js';
+export * from './output.js';
+export * from './pcRoute.js';
 export * from './supervisor.js';
 export * from './zone.js';
 
 export interface SoloistOptions {
   loadItems(ids: string[]): QueueItem[];
   log?: (obj: Record<string, unknown>, msg: string) => void;
-  /** Tests: no process is started and the client connects to this URL (a fake Soloist on the loopback). */
+  /** Tests: no process is started and the client connects to this URL (a fake Soloist on the loopback). With `spawn`
+   *  given as well, a supervisor runs that fake process (for the expired / crashed / not-installed states). */
   url?: string;
   /** Tests: a link in place of the WebSocket client altogether. */
   link?: SoloistLink;
@@ -45,6 +49,8 @@ export interface SoloistInfo {
   loggedIn: boolean;
   isActive: boolean;
   deviceName: string;
+  /** Running, connected and signed in: it can play a song right now. */
+  available: boolean;
   /** Why it cannot play right now, in plain words, or null. */
   problem: string | null;
 }
@@ -52,7 +58,11 @@ export interface SoloistInfo {
 export interface Soloist {
   zone: SoloistZone;
   info(): SoloistInfo;
+  /** Can it play a song right now (the pc zone then sends Spotify songs here instead of to the app)? */
+  available(): boolean;
   setOutput(output: SoloistOutput): Promise<SoloistInfo>;
+  /** Switch only when the output differs (a play on the PC speakers must not move a stream that is already there). */
+  ensureOutput(output: SoloistOutput): Promise<void>;
   /** Mounted inside the /api plugin: /soloist/status, /soloist/output, /soloist/stream/… */
   registerRoutes(app: FastifyInstance): void;
   close(): Promise<void>;
@@ -96,7 +106,7 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
   const set = soloistSettings(cfg);
   const ws = `127.0.0.1:${set.wsPort}`;
   const audio = new SoloistAudio({ sink: set.sink, kbps: set.kbps, runner: opts.runner, hlsDir: opts.hlsDir, log: opts.log, now: opts.now });
-  const supervisor = opts.url || opts.link
+  const supervisor = opts.link || (opts.url && !opts.spawn)
     ? null
     : new SoloistSupervisor({
         binary: set.binary,
@@ -141,15 +151,18 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
     if (!v.loggedIn) return 'Soloist is not signed in to Spotify — pair it once (soloist --pair), then try again';
     return null;
   };
+  const run = (): SoloistRun => supervisor?.run ?? (link.view.connected ? 'running' : 'starting');
+  const available = (): boolean => soloistAvailable({ run: run(), connected: link.view.connected, loggedIn: link.view.loggedIn });
   const info = (): SoloistInfo => ({
     id: SOLOIST_ZONE,
     name: 'Spotify (Soloist)',
     output: audio.output,
-    run: supervisor?.run ?? (link.view.connected ? 'running' : 'starting'),
+    run: run(),
     connected: link.view.connected,
     loggedIn: link.view.loggedIn,
     isActive: link.view.isActive,
     deviceName: link.view.deviceName || set.deviceName,
+    available: available(),
     problem: problem(),
   });
 
@@ -163,7 +176,11 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
   return {
     zone,
     info,
+    available,
     setOutput,
+    async ensureOutput(output) {
+      if (audio.output !== output) await setOutput(output);
+    },
     registerRoutes(app) {
       app.get('/soloist/status', async () => info());
       app.post<{ Body: { output?: unknown } }>('/soloist/output', async (req, reply) => {
