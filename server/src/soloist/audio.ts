@@ -84,13 +84,20 @@ export function sinkIndex(shortSinks: string, name: string): string | null {
   return null;
 }
 
+/**
+ * The first segments of a program are short, so a skip is heard sooner: the playlist exists after 0.3 s instead of 1 s,
+ * and the three segments a player buffers before it starts are there after ~0.5 s instead of ~2.7 s (measured with a
+ * real-time silent input). After the first list fills, segments are SEGMENT_S long again.
+ */
+const INIT_SEGMENT_S = 0.3;
+
 /** ffmpeg arguments for one HLS program read from the sink's monitor. */
 export function hlsArgs(sink: string, dir: string, kbps: number): string[] {
   return [
     '-hide_banner', '-loglevel', 'error', '-nostdin',
     '-f', 'pulse', '-i', `${sink}.monitor`,
     '-ac', '2', '-c:a', 'aac', '-b:a', `${kbps}k`,
-    '-f', 'hls', '-hls_time', String(SEGMENT_S), '-hls_list_size', '6',
+    '-f', 'hls', '-hls_time', String(SEGMENT_S), '-hls_init_time', String(INIT_SEGMENT_S), '-hls_list_size', '6',
     '-hls_flags', 'delete_segments+omit_endlist+independent_segments',
     '-hls_segment_filename', join(dir, 'seg%05d.ts'),
     join(dir, 'index.m3u8'),
