@@ -68,20 +68,50 @@ export function useStill(): boolean {
   );
 }
 
-/** Is anyone looking at the page: its tab shown and its window focused. The animated canvases hold still otherwise, so
- *  a rune window behind another app (or on a laptop running something else) costs nothing. */
-export function looking(): boolean {
-  return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
+// "Battery saver" (Settings → Background): the animated canvases also hold still while another window has focus, not
+// only while the tab is hidden. Per device too: on a laptop it saves power, on a desktop with rune on a second screen
+// you may want it moving. A `data-saver="on"` attribute on <html>; the same event tells the animated parts.
+export const SAVER_KEY = 'rune.batterySaver';
+
+export function loadBatterySaver(): boolean {
+  try { return localStorage.getItem(SAVER_KEY) === '1'; } catch { return false; }
 }
 
-/** Calls `fn` whenever `looking()` may have changed. Returns the unsubscribe. */
+export function saveBatterySaver(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(SAVER_KEY, '1');
+    else localStorage.removeItem(SAVER_KEY);
+  } catch { /* storage blocked */ }
+}
+
+export function batterySaverOn(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.saver === 'on';
+}
+
+export function applyBatterySaver(on: boolean): void {
+  if (typeof document === 'undefined') return;
+  if (on === batterySaverOn()) return;
+  if (on) document.documentElement.dataset.saver = 'on';
+  else delete document.documentElement.dataset.saver;
+  window.dispatchEvent(new Event(EVENT));
+}
+
+/** Should the animated canvases run: the tab is shown and, with Battery saver on, its window has focus. */
+export function looking(): boolean {
+  if (typeof document === 'undefined' || document.visibilityState !== 'visible') return false;
+  return !batterySaverOn() || document.hasFocus();
+}
+
+/** Calls `fn` whenever `looking()` may have changed (tab shown/hidden, focus, Battery saver). Returns the unsubscribe. */
 export function onLooking(fn: () => void): () => void {
   document.addEventListener('visibilitychange', fn);
   window.addEventListener('focus', fn);
   window.addEventListener('blur', fn);
+  window.addEventListener(EVENT, fn);
   return () => {
     document.removeEventListener('visibilitychange', fn);
     window.removeEventListener('focus', fn);
     window.removeEventListener('blur', fn);
+    window.removeEventListener(EVENT, fn);
   };
 }

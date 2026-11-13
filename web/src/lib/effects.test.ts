@@ -101,3 +101,52 @@ describe('Reduce effects', () => {
     expect(main).toContain("import './styles/effects.css';");
   });
 });
+
+describe('Battery saver', () => {
+  function page(opts: { saved?: string; focused: boolean }) {
+    const store = new Map<string, string>(opts.saved ? [['rune.batterySaver', opts.saved]] : []);
+    const win = new EventTarget() as EventTarget & { matchMedia: (q: string) => EventTarget & { matches: boolean } };
+    win.matchMedia = () => Object.assign(new EventTarget(), { matches: false });
+    const doc = Object.assign(new EventTarget(), { documentElement: { dataset: {} as Record<string, string | undefined> }, visibilityState: 'visible', hasFocus: () => opts.focused, querySelectorAll: () => [] });
+    vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });
+    vi.stubGlobal('window', win);
+    vi.stubGlobal('location', { search: '' });
+    vi.stubGlobal('document', doc);
+    return { store, doc, win };
+  }
+
+  it('is off by default: an unfocused but shown window keeps animating', async () => {
+    const { doc } = page({ focused: false });
+    await import('../store/ui');
+    const { looking } = await import('./effects');
+    expect(doc.documentElement.dataset.saver).toBeUndefined();
+    expect(looking()).toBe(true);
+  });
+
+  it('on: holds still while another window has focus, persists, and tells the animated parts', async () => {
+    const { doc, store, win } = page({ focused: false });
+    const { useUi } = await import('../store/ui');
+    const { looking, onLooking } = await import('./effects');
+    const seen = vi.fn();
+    const off = onLooking(seen);
+    useUi.getState().setBatterySaver(true);
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect(store.get('rune.batterySaver')).toBe('1');
+    expect(doc.documentElement.dataset.saver).toBe('on');
+    expect(looking()).toBe(false);
+    win.dispatchEvent(new Event('blur'));
+    expect(seen).toHaveBeenCalledTimes(2);
+    off();
+    useUi.getState().setBatterySaver(false);
+    expect(seen).toHaveBeenCalledTimes(2);
+    expect(looking()).toBe(true);
+    expect(store.has('rune.batterySaver')).toBe(false);
+  });
+
+  it('on, focused window: animates', async () => {
+    page({ saved: '1', focused: true });
+    await import('../store/ui');
+    const { looking } = await import('./effects');
+    expect(looking()).toBe(true);
+  });
+});
