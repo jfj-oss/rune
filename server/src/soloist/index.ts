@@ -128,6 +128,8 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
     output: () => audio.output,
     // A play, skip or seek while the phone listens: a fresh HLS program, so the change is heard after one segment.
     newProgram: () => audio.restart(),
+    // A second opinion when Soloist says it is not the active Connect device: is its own stream running?
+    sounding: () => audio.sounding(),
     now: opts.now,
     log: opts.log,
   });

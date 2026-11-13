@@ -169,6 +169,17 @@ describe('the pc zone with Soloist as its Spotify engine (tab-driven queue)', ()
     await t.close();
   });
 
+  it('GET /zones tells a page on this very PC that the pc zone is its player (no browser player beside Soloist); a phone or another computer is not told so', { timeout: 20000 }, async () => {
+    const t = await boot();
+    const pcFor = async (headers: Record<string, string>) =>
+      (JSON.parse((await t.app.inject({ method: 'GET', url: '/api/zones', headers })).body) as { id: string; playsForBrowser?: boolean }[]).find((z) => z.id === 'pc')!;
+    expect((await pcFor({ host: 'localhost:4545' })).playsForBrowser).toBe(true);
+    // Through the proxy on the PC: a client from somewhere else (documentation address), then one the proxy does not name.
+    expect((await pcFor({ host: 'pc.example.net:8445', 'x-forwarded-for': '203.0.113.9' })).playsForBrowser).toBeUndefined();
+    expect((await pcFor({ host: 'pc.example.net:8445' })).playsForBrowser).toBeUndefined();
+    await t.close();
+  });
+
   it('a Spotify song for the PC goes straight to Soloist: play, pause, seek, volume and now-playing all work', { timeout: 20000 }, async () => {
     const t = await boot();
     const res = await t.send('soloist', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });

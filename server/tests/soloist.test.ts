@@ -42,6 +42,10 @@ afterEach(() => {
   fake.status = 'idle';
   fake.shuffle = false;
   fake.repeat = 'off';
+  fake.isActive = false;
+  fake.elsewhere = false;
+  fake.remote = [];
+  fake.claimsInactive = false;
   fake.setLoggedIn(true);
 });
 
@@ -304,6 +308,193 @@ describe('SoloistZone', () => {
     fake.resumeFromApp();
     await until(() => zone.state().status === 'playing');
     expect(zone.state().queue[zone.state().index]?.track.id).toBe('sp:a');
+    await zone.close();
+    client.close();
+  });
+});
+
+// The live bug: a rune browser tab on the PC played a playlist through its own Web Playback SDK player while the Soloist
+// zone still held an older queue. Soloist (not the active Connect device) mirrored the tab's songs; the zone took them
+// for Soloist's own, "went on with rune's queue", and its play command landed in the TAB's session: the tab showed its
+// next song while the old queue's song was heard.
+describe('SoloistZone while another Spotify device plays', () => {
+  const settle = () => new Promise((r) => setTimeout(r, 150));
+  const sentAfter = (from: number) => fake.commands.slice(from).filter((c) => c.command !== 'get_auth_state');
+
+  for (const deviceFirst of [true, false]) {
+    it(`a browser tab's own player taking over is not followed and nothing is sent into its session (device_changed ${deviceFirst ? 'first' : 'last'})`, async () => {
+      let t = Date.now();
+      const client = new SoloistClient({ url: fake.url, reconnectMs: 50, now: () => t });
+      client.connect();
+      await until(() => client.view.connected && client.view.loggedIn);
+      const logs: string[] = [];
+      const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc', now: () => t, log: (_o, m) => logs.push(m) });
+      // rune's older queue on the PC speakers: a plays, b is queued in Soloist.
+      await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b', 'sp:c'], startIndex: 0 });
+      await until(() => fake.queue.length === 1 && client.view.isActive);
+      const before = fake.commands.length;
+      // The tab starts a song from another playlist on its own player; much later that song ends and its next one starts.
+      t += 60_000;
+      fake.playsElsewhere('spotify:track:tab1', { deviceFirst });
+      await until(() => zone.playsElsewhere());
+      await settle();
+      t += 179_000; // rune's own song a would be over by now: "the song ended by itself" must not be concluded
+      fake.playsElsewhere('spotify:track:tab2', { deviceFirst });
+      await settle();
+      // Nothing was played, queued, paused or sought in the tab's session, and Soloist did not snatch the sound back.
+      expect(fake.remote).toEqual([]);
+      expect(sentAfter(before)).toEqual([]);
+      expect(fake.item).toBe('spotify:track:tab2');
+      expect(fake.isActive).toBe(false);
+      // The zone waits with its own song, paused where it was; the tab's songs are not in its queue.
+      const s = zone.state();
+      expect(s.status).toBe('paused');
+      expect(s.queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b', 'sp:c']);
+      expect(s.index).toBe(0);
+      expect(s.positionMs).toBeGreaterThanOrEqual(59_000);
+      expect(s.positionMs).toBeLessThan(62_000);
+      expect(zone.adopted()).toBeNull();
+      expect(logs.filter((m) => /went on by itself|did not queue/.test(m))).toEqual([]);
+      expect(logs.some((m) => /another Spotify device plays now/.test(m))).toBe(true);
+      await zone.close();
+      client.close();
+    });
+  }
+
+  it('Soloist that was never the active device (rune started while a tab played) is not shown as playing, and the queue controls stay out of that session', async () => {
+    fake.playsElsewhere('spotify:track:tab1');
+    const client = new SoloistClient({ url: fake.url, reconnectMs: 50 });
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    client.connect();
+    await until(() => client.view.connected && client.view.item?.uri === 'spotify:track:tab1');
+    await settle();
+    expect(zone.playsElsewhere()).toBe(true);
+    expect(zone.state().status).toBe('stopped');
+    expect(zone.state().queue).toEqual([]);
+    // The tab goes on to its next songs: still nothing of Soloist's.
+    fake.playsElsewhere('spotify:track:tab2');
+    fake.playsElsewhere('spotify:track:tab3');
+    await settle();
+    expect(zone.state().queue).toEqual([]);
+    expect(zone.state().status).toBe('stopped');
+    expect(fake.remote).toEqual([]);
+    expect(fake.commands.filter((c) => !['get_auth_state'].includes(String(c.command)))).toEqual([]);
+    await zone.close();
+    client.close();
+  });
+
+  it('pause, seek, volume and queue edits while the other device plays touch nothing there; Play brings rune\'s song back on Soloist itself', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.queue.length === 1 && client.view.isActive);
+    fake.playsElsewhere('spotify:track:tab1');
+    await until(() => zone.playsElsewhere());
+    const before = fake.commands.length;
+    await zone.command({ type: 'pause' });
+    await zone.command({ type: 'seek', positionMs: 42_000 });
+    await zone.command({ type: 'volume', volume: 33 });
+    await zone.command({ type: 'enqueue', trackIds: ['sp:c'], next: true });
+    await zone.command({ type: 'shuffle', on: false });
+    expect(fake.remote).toEqual([]);
+    expect(sentAfter(before)).toEqual([]);
+    expect(fake.item).toBe('spotify:track:tab1');
+    expect(fake.status).toBe('playing'); // the other device plays on
+    expect(zone.state()).toMatchObject({ status: 'paused', index: 0, positionMs: 42_000, volume: 33 });
+    // Play: Soloist is made the active device FIRST, then rune's song starts on it, at the place and level rune kept.
+    await zone.command({ type: 'resume' });
+    const sent = sentAfter(before).map((c) => c.command);
+    expect(sent.indexOf('activate')).toBeGreaterThanOrEqual(0);
+    expect(sent.indexOf('activate')).toBeLessThan(sent.indexOf('play'));
+    expect(fake.remote).toEqual([]);
+    expect(fake.isActive).toBe(true);
+    expect(fake.item).toBe('spotify:track:a');
+    expect(fake.positionMs).toBe(42_000);
+    await until(() => fake.volume === 33);
+    expect(zone.playsElsewhere()).toBe(false);
+    expect(zone.state()).toMatchObject({ status: 'playing', index: 0 });
+    // ...and the queue goes on as usual: the song added meanwhile is queued, and its natural start is followed.
+    await until(() => fake.queue.length === 1);
+    expect(fake.queue).toEqual(['spotify:track:c']);
+    fake.finishTrack();
+    await until(() => zone.state().index === 1);
+    expect(zone.state().queue[1]!.track.id).toBe('sp:c');
+    await zone.close();
+    client.close();
+  });
+
+  it('a play for the PC while another device holds the session takes it over first, instead of playing into that device', async () => {
+    fake.playsElsewhere('spotify:track:tab1');
+    const client = new SoloistClient({ url: fake.url, reconnectMs: 50 });
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    client.connect();
+    await until(() => client.view.connected && client.view.loggedIn && client.view.status === 'playing');
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    expect(fake.remote).toEqual([]);
+    expect(fake.isActive).toBe(true);
+    expect(fake.item).toBe('spotify:track:a');
+    await until(() => fake.queue.length === 1);
+    expect(fake.queue).toEqual(['spotify:track:b']);
+    expect(zone.state()).toMatchObject({ status: 'playing', index: 0 });
+    await zone.close();
+    client.close();
+  });
+
+  it('Soloist picked in a Spotify app after another device played is followed again', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await until(() => client.view.isActive);
+    fake.playsElsewhere('spotify:track:tab1');
+    await until(() => zone.playsElsewhere());
+    fake.takeOver('spotify:track:zzz'); // the app moves playback to the "rune" device with a song of its own
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:zzz');
+    expect(zone.playsElsewhere()).toBe(false);
+    expect(zone.state().status).toBe('playing');
+    expect(zone.adopted()).toMatchObject({ id: 'zzz' });
+    await zone.close();
+    client.close();
+  });
+
+  it('the end of rune\'s queue is still the end when Soloist gives the device up before it says idle', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await until(() => client.view.isActive);
+    await client.send({ command: 'deactivate' });
+    await until(() => zone.playsElsewhere());
+    fake.finishTrack(); // nothing queued, no autoplay: idle
+    await until(() => zone.state().status === 'stopped');
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a']);
+    await zone.close();
+    client.close();
+  });
+
+  it('"not the active device" is not believed while Soloist\'s own stream runs: autoplay is still followed', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc', sounding: async () => true });
+    fake.claimsInactive = true;
+    fake.autoplay = ['spotify:track:x1'];
+    await zone.command({ type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await until(() => fake.item === 'spotify:track:a');
+    await new Promise((r) => setTimeout(r, 2100)); // past the grace after rune's own play
+    fake.finishTrack();
+    await until(() => zone.state().queue[zone.state().index]?.track.id === 'sp:x1');
+    expect(zone.playsElsewhere()).toBe(false);
+    expect(zone.state().status).toBe('playing');
+    await zone.close();
+    client.close();
+  });
+
+  it('a play that never made Soloist the active device (its stream is silent) is noticed: the zone stops claiming to play', async () => {
+    const client = await connected();
+    const logs: string[] = [];
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc', sounding: async () => false, log: (_o, m) => logs.push(m) });
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    expect(zone.state().status).toBe('playing');
+    fake.claimsInactive = true; // Soloist keeps saying another device is the active one
+    await until(() => zone.playsElsewhere(), 5000);
+    expect(zone.state().status).toBe('paused');
     await zone.close();
     client.close();
   });

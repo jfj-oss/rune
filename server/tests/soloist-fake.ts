@@ -29,6 +29,16 @@ export class FakeSoloist {
   dropQueue = false;
   /** Songs played before the current one, with where each came from (the `previous` of queue_changed). */
   previous: { uri: string; source: string }[] = [];
+  /**
+   * Another Connect device of the account is the active one (a browser tab's Web Playback SDK player, a Spotify app).
+   * Like the real Soloist then: is_active is false, its events mirror that device's playback, and its control commands
+   * act on that device. They are recorded in `remote`, and nothing sounds from Soloist until `activate`.
+   */
+  elsewhere = false;
+  /** Control commands that went to the other device's session instead of to Soloist's own player. */
+  remote: Record<string, unknown>[] = [];
+  /** A build that keeps saying is_active: false although it plays (never seen; the zone must still not go silent). */
+  claimsInactive = false;
   private currentSource = 'context';
   positionMs = 0;
   volume = 70;
@@ -85,8 +95,40 @@ export class FakeSoloist {
     }
   }
 
+  /**
+   * Another Connect device starts `uri` on ITS OWN speakers (Soloist goes silent and only mirrors it). `deviceFirst`:
+   * whether device_changed comes before or after the song's own events (the zone must cope with both).
+   */
+  playsElsewhere(uri: string, opts: { deviceFirst?: boolean } = {}): void {
+    const wasActive = this.isActive;
+    this.elsewhere = true;
+    this.isActive = false;
+    this.item = uri;
+    this.queue = [];
+    this.previous = [];
+    this.currentSource = 'context';
+    this.status = 'playing';
+    this.positionMs = 0;
+    const device = () => { if (wasActive) this.broadcast({ type: 'device_changed', is_active: false, device_name: this.deviceName }); };
+    if (opts.deviceFirst) device();
+    this.broadcast({ type: 'track_changed', item: this.entity(uri) });
+    this.broadcast({ type: 'playback_changed', status: 'playing' });
+    this.broadcast({ type: 'position_sync', position: this.position() });
+    this.broadcast(this.queueChanged());
+    if (!opts.deviceFirst) device();
+  }
+
+  /** Soloist becomes the device that plays (its own play, `activate`, or picked in a Spotify app). */
+  private becomeActive(): void {
+    this.elsewhere = false;
+    if (this.isActive) return;
+    this.isActive = true;
+    this.broadcast({ type: 'device_changed', is_active: true, device_name: this.deviceName });
+  }
+
   /** Another Spotify app on the account started a song on Soloist (a context of its own: the queue is gone). */
   takeOver(uri: string): void {
+    this.becomeActive();
     this.item = uri;
     this.queue = [];
     this.previous = [];
@@ -140,6 +182,20 @@ export class FakeSoloist {
     const command = msg.command;
     if (command === 'get_auth_state') return this.sendTo(socket, this.authState());
     if (!this.loggedIn) return this.sendTo(socket, { type: 'error', message: 'command requires authentication' });
+    // Not the active device: a control command remote-controls the device that is (as the live Soloist does).
+    if (this.elsewhere && !this.isActive && !['get_state', 'get_queue', 'activate', 'deactivate'].includes(command)) {
+      this.remote.push(rest);
+      this.ok(socket, command);
+      if (command === 'play' && typeof msg.uri === 'string') {
+        this.item = msg.uri;
+        this.positionMs = 0;
+        this.status = 'playing';
+        this.broadcast({ type: 'track_changed', item: this.entity(msg.uri) });
+        this.broadcast({ type: 'playback_changed', status: 'playing' });
+        this.broadcast({ type: 'position_sync', position: this.position() });
+      }
+      return;
+    }
     switch (command) {
       case 'get_state':
         return this.sendTo(socket, this.playbackState());
@@ -155,7 +211,7 @@ export class FakeSoloist {
           this.previous = [];
           this.currentSource = 'context';
           this.status = 'playing';
-          this.isActive = true;
+          this.becomeActive();
           this.broadcast({ type: 'track_changed', item: this.entity(uri) });
           this.broadcast({ type: 'playback_changed', status: 'playing' });
           this.broadcast({ type: 'position_sync', position: this.position() });
@@ -220,8 +276,8 @@ export class FakeSoloist {
         return;
       case 'activate':
         this.ok(socket, command);
-        this.isActive = true;
-        this.broadcast({ type: 'device_changed', is_active: true, device_name: this.deviceName });
+        // The session moves to Soloist as it is (the other device's song goes on here until something else is played).
+        this.becomeActive();
         return;
       case 'deactivate':
         this.ok(socket, command);
@@ -238,7 +294,7 @@ export class FakeSoloist {
   }
 
   private authState() {
-    return { type: 'auth_state', logged_in: this.loggedIn, is_active: this.isActive, device_name: this.deviceName };
+    return { type: 'auth_state', logged_in: this.loggedIn, is_active: this.isActive && !this.claimsInactive, device_name: this.deviceName };
   }
   private position() {
     return { position_ms: this.positionMs, timestamp_ms: this.now(), speed: this.status === 'playing' ? 1 : 0 };
@@ -265,7 +321,7 @@ export class FakeSoloist {
       context: null,
       position: this.position(),
       volume: this.volume,
-      is_active: this.isActive,
+      is_active: this.isActive && !this.claimsInactive,
       options: { shuffle: this.shuffle, repeat: this.repeat, playback_speed: 1, modes: {} },
       available_actions: {},
     };
