@@ -67,3 +67,21 @@ export function useStill(): boolean {
     () => false,
   );
 }
+
+/** Is anyone looking at the page: its tab shown and its window focused. The animated canvases hold still otherwise, so
+ *  a rune window behind another app (or on a laptop running something else) costs nothing. */
+export function looking(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'visible' && document.hasFocus();
+}
+
+/** Calls `fn` whenever `looking()` may have changed. Returns the unsubscribe. */
+export function onLooking(fn: () => void): () => void {
+  document.addEventListener('visibilitychange', fn);
+  window.addEventListener('focus', fn);
+  window.addEventListener('blur', fn);
+  return () => {
+    document.removeEventListener('visibilitychange', fn);
+    window.removeEventListener('focus', fn);
+    window.removeEventListener('blur', fn);
+  };
+}
