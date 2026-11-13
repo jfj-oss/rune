@@ -2,7 +2,7 @@ import { clientLog } from '../clientLog';
 import { create } from 'zustand';
 import type { DitherPalette, DotSize } from '../lib/dither';
 import { cleanPlaylistKeys, validAlbumKey, type PlaylistKeys } from '../lib/keys';
-import { applyReduceEffects, loadReduceEffects, saveReduceEffects } from '../lib/effects';
+import { applyBatterySaver, applyReduceEffects, loadBatterySaver, loadReduceEffects, saveBatterySaver, saveReduceEffects } from '../lib/effects';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -80,6 +80,9 @@ interface UiStore {
   /** "Reduce effects": no glass blur, no decorative animation (lib/effects.ts). Per device; off by default. */
   reduceEffects: boolean;
   setReduceEffects(on: boolean): void;
+  /** "Battery saver": animations also hold still while rune's window is not focused (lib/effects.ts). Per device; off by default. */
+  batterySaver: boolean;
+  setBatterySaver(on: boolean): void;
   duotone: Duotone;
   setDuotone(d: Duotone): void;
   /** Palette of the album page being viewed: while set, every Dither mode shows it (Ambient). */
@@ -117,6 +120,8 @@ const initialAmbient = loadAmbient();
 applyAmbient(initialAmbient);
 const initialReduceEffects = loadReduceEffects();
 applyReduceEffects(initialReduceEffects);
+const initialBatterySaver = loadBatterySaver();
+applyBatterySaver(initialBatterySaver);
 
 export const useUi = create<UiStore>((set) => ({
   ambient: initialAmbient,
@@ -137,6 +142,12 @@ export const useUi = create<UiStore>((set) => ({
     saveReduceEffects(on);
     applyReduceEffects(on);
     set({ reduceEffects: on });
+  },
+  batterySaver: initialBatterySaver,
+  setBatterySaver: (on) => {
+    saveBatterySaver(on);
+    applyBatterySaver(on);
+    set({ batterySaver: on });
   },
   duotone: loadDuotone(),
   setDuotone: (d) => {

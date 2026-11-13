@@ -100,6 +100,8 @@ function AmbientPicker() {
   const setDots = useUi((s) => s.setDots);
   const reduceEffects = useUi((s) => s.reduceEffects);
   const setReduceEffects = useUi((s) => s.setReduceEffects);
+  const batterySaver = useUi((s) => s.batterySaver);
+  const setBatterySaver = useUi((s) => s.setBatterySaver);
   return (
     <section className="statuscard ambientpick">
       <h2 className="statuscard__head"><Palette size={17} /> Background</h2>
@@ -127,6 +129,13 @@ function AmbientPicker() {
         <div className="seg" role="radiogroup" aria-label="Reduce effects">
           <button role="radio" aria-checked={!reduceEffects} className={!reduceEffects ? 'is-active' : ''} onClick={() => setReduceEffects(false)}>Off</button>
           <button role="radio" aria-checked={reduceEffects} className={reduceEffects ? 'is-active' : ''} onClick={() => setReduceEffects(true)}>On</button>
+        </div>
+      </div>
+      <div className="dotpick">
+        <div><b>Battery saver</b><span className="muted">The moving backgrounds hold still while another window has focus, not only when the tab is hidden. This device only.</span></div>
+        <div className="seg" role="radiogroup" aria-label="Battery saver">
+          <button role="radio" aria-checked={!batterySaver} className={!batterySaver ? 'is-active' : ''} onClick={() => setBatterySaver(false)}>Off</button>
+          <button role="radio" aria-checked={batterySaver} className={batterySaver ? 'is-active' : ''} onClick={() => setBatterySaver(true)}>On</button>
         </div>
       </div>
     </section>
