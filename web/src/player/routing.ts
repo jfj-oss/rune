@@ -119,6 +119,14 @@ export function withoutPcDevice(zones: ZoneInfo[]): ZoneInfo[] {
   return hidden.size ? zones.filter((z) => !(z.kind === 'spotify' && hidden.has(z.id))) : zones;
 }
 
+/**
+ * Does this page run on the PC whose speakers are the pc zone (the server says so, see ZoneInfo.playsForBrowser)? Then
+ * the pc zone is its one player: local files through mpv, Spotify through Soloist. A phone or tablet is never that PC.
+ */
+export function pageIsOnThePc(zones: Pick<ZoneInfo, 'kind' | 'playsForBrowser'>[], handheld: boolean): boolean {
+  return !handheld && zones.some((z) => z.kind === 'pc' && z.playsForBrowser === true);
+}
+
 /** rune's own Web Playback SDK device also shows up in /api/zones as a Connect device: hide that duplicate. */
 export function withoutOwnDevice(zones: ZoneInfo[], own: { name: string; deviceId?: string | null }): ZoneInfo[] {
   return zones.filter((z) => !(z.kind === 'spotify' && ((own.deviceId && z.id === `spotify:${own.deviceId}`) || z.name === own.name)));

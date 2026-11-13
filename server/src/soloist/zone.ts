@@ -9,6 +9,13 @@
 // add_to_queue that was lost) — then rune's song plays, not autoplay. Position comes from `position_sync` anchors: no
 // polling, and not one Web API request.
 //
+// Soloist is a Spotify Connect client, and only ONE device of an account plays at a time. While another device is the
+// active one (a rune browser tab's Web Playback SDK player, a Spotify app playing on its own speakers), Soloist's events
+// describe THAT device's playback and its commands remote-control THAT device. None of it is this zone's: such events
+// are not followed and nothing is sent, or rune's queue here would be played into the other player's session (the song
+// shown there and the song heard then differ). The zone waits, paused, until rune starts a song on it again, which
+// first makes Soloist the active device (`activate`).
+//
 // `output` says where the sound goes: the PC speakers, or the rune-phone sink that the phone hears over HLS. The state's
 // `rev` is bumped whenever a new HLS program starts (play, skip, seek), which is the phone's cue to reload its player;
 // a song that simply follows the previous one keeps the program, so the phone hears it gapless.
@@ -50,6 +57,8 @@ export interface SoloistZoneDeps {
   output(): SoloistOutput;
   /** Start a new HLS program (play, skip, seek while the phone listens). */
   newProgram?(): void;
+  /** Is Soloist's own sound stream there and running (PipeWire)? null: unknown. Second opinion on "not the active device". */
+  sounding?(): Promise<boolean | null>;
   now?(): number;
   log?(obj: Record<string, unknown>, msg: string): void;
 }
@@ -71,6 +80,13 @@ export interface AdoptedSong {
 
 /** A song that ended this close to its length ended by itself: what plays next was Soloist's own next, not a takeover. */
 const END_SLACK_MS = 5000;
+
+/** A snapshot saying "not the active device" this soon after rune's own play may describe the moment before it. */
+const OWN_PLAY_GRACE_MS = 2000;
+/** After rune's own play: when Soloist is asked whether it really became the active device. */
+const OWN_PLAY_CHECK_MS = 2500;
+/** A song rune did not ask for is acted on once Soloist confirmed it is the device playing it; at the latest after this. */
+const CONFIRM_MS = 400;
 
 const uriOf = (item: QueueItem): string | null => item.track.spotifyUri ?? (item.track.id.startsWith('sp:') ? `spotify:track:${item.track.id.slice(3)}` : null);
 const idOf = (item: QueueItem): string | null => idOfUri(uriOf(item));
@@ -104,6 +120,20 @@ export class SoloistZone implements PlaybackZone {
   /** Soloist's own shuffle/repeat were switched off once (rune orders the queue). */
   private modesChecked = false;
   private modesSet = false;
+  /**
+   * Soloist is the device that plays (or nothing plays anywhere). False once Soloist said another Connect device is the
+   * active one: its events and commands then belong to that device's session (see the top of this file).
+   */
+  private mine = true;
+  /** When rune last started a song on Soloist itself (which makes it the active device). */
+  private ownPlayAt = Number.NEGATIVE_INFINITY;
+  private ownPlayCheck: ReturnType<typeof setTimeout> | null = null;
+  /** A song rune did not ask for, held until Soloist says whether it is the active device (`confirm`). */
+  private pending: { id: string; live: boolean; ended: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** The "not believed" line was logged (once per run). */
+  private doubted = false;
+  /** A volume set while another device was the active one: Soloist gets it when it plays again. */
+  private volumeDue = false;
   private readonly subs = new Set<(s: PlayerState) => void>();
   private readonly offs: (() => void)[] = [];
   private readonly now: () => number;
@@ -152,6 +182,14 @@ export class SoloistZone implements PlaybackZone {
   async close(): Promise<void> {
     for (const off of this.offs) off();
     this.subs.clear();
+    this.dropPending();
+    if (this.ownPlayCheck) clearTimeout(this.ownPlayCheck);
+    this.ownPlayCheck = null;
+  }
+
+  /** Another Spotify Connect device is the active one: Soloist is silent and this zone waits (see the top of this file). */
+  playsElsewhere(): boolean {
+    return !this.mine;
   }
 
   /** The current item is a song Soloist plays that rune never queued (autoplay, a Spotify app), or null. */
@@ -200,12 +238,14 @@ export class SoloistZone implements PlaybackZone {
         return;
       }
       case 'pause':
-        await this.deps.link.send({ command: 'pause' });
+        // Not Soloist's session: a pause would stop the other device.
+        if (this.mine) await this.deps.link.send({ command: 'pause' });
         this.setStatus('paused');
         return;
       case 'resume':
         if (!currentItem(this.q)) return;
-        if (this.status === 'stopped' || this.deps.link.view.status === 'idle') { await this.startCurrent({ positionMs: this.positionMs, paused: false }); return; }
+        // A bare `play` resumes whatever the active device holds: after another device took over, rune's song is started anew.
+        if (this.status === 'stopped' || this.deps.link.view.status === 'idle' || !this.mine) { await this.startCurrent({ positionMs: this.positionMs, paused: false }); return; }
         await this.deps.link.send({ command: 'play' });
         this.setStatus('playing');
         return;
@@ -213,7 +253,7 @@ export class SoloistZone implements PlaybackZone {
         const r = queueNext(this.q);
         if (r.ended) {
           // Skipping a song rune only follows (autoplay): Soloist's own next, and that one is followed too.
-          if (this.adopted()) { await this.deps.link.send({ command: 'skip_next' }); this.newProgram(); return; }
+          if (this.adopted() && this.mine) { await this.deps.link.send({ command: 'skip_next' }); this.newProgram(); return; }
           await this.stopAll();
           return;
         }
@@ -256,7 +296,9 @@ export class SoloistZone implements PlaybackZone {
         return;
       case 'volume': {
         const v = Math.max(0, Math.min(100, Math.round(cmd.volume)));
-        await this.deps.link.send({ command: 'set_volume', volume: v });
+        // Not Soloist's session: the level is kept and set when Soloist plays again, the other device keeps its own.
+        if (this.mine) await this.deps.link.send({ command: 'set_volume', volume: v });
+        else this.volumeDue = true;
         this.volume = v;
         this.bump();
         return;
@@ -286,11 +328,37 @@ export class SoloistZone implements PlaybackZone {
     const uri = cur && uriOf(cur);
     if (!cur || !uri) { await this.stopAll(); return; }
     if (!this.deps.link.view.connected || !this.deps.link.view.loggedIn) throw new Error('Soloist is not running or not paired yet — see Settings');
-    await this.ensureModes();
+    // Another Connect device holds the session (playing or paused): Soloist's commands would act on THAT device, so it
+    // is made the active device first. With nothing active anywhere, a play alone does that.
+    const takeover = !this.deps.link.view.isActive && this.deps.link.view.status !== 'idle';
+    if (takeover) await this.deps.link.send({ command: 'activate' }).catch((err) => this.deps.log?.({ err: String(err) }, 'soloist: could not become the active device'));
+    else await this.ensureModes();
     this.expected = idOf(cur);
     this.queuedNext = null;
     this.adoptedSong = null;
-    await this.deps.link.send({ command: 'play', uri });
+    this.dropPending();
+    // The song's own events can arrive before the play is acknowledged: from here on they are this zone's.
+    const was = this.mine;
+    this.mine = true;
+    this.ownPlayAt = this.now();
+    try {
+      await this.deps.link.send({ command: 'play', uri });
+    } catch (err) {
+      this.mine = was;
+      this.ownPlayAt = Number.NEGATIVE_INFINITY;
+      throw err;
+    }
+    this.ownPlayAt = this.now();
+    this.checkOwnPlay();
+    if (takeover) {
+      // The options seen so far were the other device's: Soloist's own are checked now that the session is its own.
+      this.modesChecked = false;
+      await this.ensureModes();
+    }
+    if (this.volumeDue) {
+      this.volumeDue = false;
+      await this.deps.link.send({ command: 'set_volume', volume: this.volume }).catch(() => undefined);
+    }
     if (opts.positionMs > 0) await this.deps.link.send({ command: 'seek', position_ms: Math.round(opts.positionMs) });
     if (opts.paused) await this.deps.link.send({ command: 'pause' });
     this.setPos(opts.positionMs);
@@ -321,6 +389,8 @@ export class SoloistZone implements PlaybackZone {
   private async syncNext(): Promise<void> {
     this.bump();
     if (this.status === 'stopped') return;
+    // Not Soloist's session: the song would land in the other device's queue and play there.
+    if (!this.mine) return;
     const nextEntry = this.q.repeat === 'one' ? undefined : queueUpcoming(this.q, 1)[0];
     const id = nextEntry ? idOf(nextEntry.item) : null;
     if (!nextEntry || !id) return;
@@ -337,6 +407,8 @@ export class SoloistZone implements PlaybackZone {
   }
 
   private async seekTo(ms: number): Promise<void> {
+    // Not Soloist's session: the place is kept for when rune's song starts here again.
+    if (!this.mine) { this.setPos(ms); this.bump(); return; }
     await this.deps.link.send({ command: 'seek', position_ms: ms });
     this.setPos(ms);
     this.updatedAt = this.now();
@@ -347,7 +419,8 @@ export class SoloistZone implements PlaybackZone {
   private async stopAll(): Promise<void> {
     this.expected = null;
     this.queuedNext = null;
-    if (this.deps.link.view.connected && this.deps.link.view.status !== 'idle') await this.deps.link.send({ command: 'pause' }).catch(() => undefined);
+    this.dropPending();
+    if (this.mine && this.deps.link.view.connected && this.deps.link.view.status !== 'idle') await this.deps.link.send({ command: 'pause' }).catch(() => undefined);
     this.status = 'stopped';
     this.setPos(0);
     this.bump();
@@ -356,6 +429,23 @@ export class SoloistZone implements PlaybackZone {
   // ----- events from Soloist -----
 
   private onEvent(ev: SoloistEvent): void {
+    // Who plays comes first: everything else in an event is only this zone's while Soloist is the active device.
+    if (ev.type === 'device_changed') { this.setMine(!!ev.is_active); return; }
+    if (ev.type === 'auth_state') { void this.onActiveWord(typeof ev.is_active === 'boolean' ? ev.is_active : null); return; }
+    if (ev.type === 'playback_state' && typeof ev.is_active === 'boolean') {
+      // "Not the active device" is checked before it is believed, and such a snapshot describes another device's playback.
+      if (ev.is_active) this.setMine(true);
+      else {
+        void this.onActiveWord(false);
+        if (ev.status !== 'idle') return;
+      }
+    }
+    if (!this.mine) {
+      // Nothing plays anywhere any more (Soloist may give the device up before it says "idle" at the end of a queue).
+      const idle = (ev.type === 'playback_changed' || ev.type === 'playback_state') && ev.status === 'idle';
+      if (idle && this.status !== 'stopped' && currentItem(this.q)) { this.status = 'stopped'; this.bump(); }
+      return;
+    }
     switch (ev.type) {
       case 'track_changed':
         this.describe(ev.item);
@@ -376,7 +466,8 @@ export class SoloistZone implements PlaybackZone {
         // Soloist sounds: rune shows what it plays, even when it thought nothing was playing (a Spotify app pressed
         // Play on this device, or started a song of its own). While rune plays, track_changed says which song it is.
         if (!cur || this.status === 'stopped') this.onTrack(idOfUri(this.deps.link.view.item?.uri));
-        if (!currentItem(this.q)) return;
+        // A song rune did not ask for is held until Soloist says who plays it: the status comes with that decision.
+        if (this.pending || !currentItem(this.q)) return;
         this.setStatus(ev.status === 'buffering' ? 'loading' : 'playing');
         return;
       }
@@ -403,7 +494,8 @@ export class SoloistZone implements PlaybackZone {
         }
         return;
       case 'position_sync':
-        if (!currentItem(this.q) || this.status === 'stopped') return;
+        // While a song is held (`confirm`), the anchor already describes that song, not the current item.
+        if (!currentItem(this.q) || this.status === 'stopped' || this.pending) return;
         this.setPos(ev.position.position_ms + (ev.position.speed > 0 ? Math.max(0, this.now() - ev.position.timestamp_ms) : 0));
         this.updatedAt = this.now();
         this.emit();
@@ -487,9 +579,49 @@ export class SoloistZone implements PlaybackZone {
       return;
     }
     if (at === this.q.index && cur) { this.expected = id; this.revive(live); return; }
-    // A song rune never queued. Soloist's own next (autoplay after rune's song, its context, a song queued in a Spotify
-    // app) is one it listed in its queue, or one that began as rune's song ran out; anything else is a takeover.
-    const natural = this.soloistSources.has(id) || (!!cur && this.nearEnd(cur));
+    // A song rune never asked for: what happens with it depends on which device plays it. A snapshot said so itself;
+    // otherwise Soloist is asked first (another device taking over shows up as a song change here too).
+    const ended = !!cur && this.nearEnd(cur);
+    if (opts.snapshot) this.unasked(id, { snapshot: true, live, ended });
+    else this.confirm(id, live, ended);
+  }
+
+  /**
+   * Hold a song rune did not ask for until Soloist says whether it is the active device (its answer to get_auth_state
+   * comes after every event of the same change, device_changed included). `ended`: rune's song was as good as over
+   * when the change came, noted now because the next position_sync already describes the new song.
+   */
+  private confirm(id: string, live: boolean, ended: boolean): void {
+    this.dropPending();
+    const timer = setTimeout(() => this.settlePending(), CONFIRM_MS);
+    (timer as { unref?: () => void }).unref?.();
+    this.pending = { id, live, ended, timer };
+    this.deps.link.send({ command: 'get_auth_state' }).catch(() => this.settlePending());
+  }
+
+  private dropPending(): void {
+    if (this.pending) clearTimeout(this.pending.timer);
+    this.pending = null;
+  }
+
+  /** Soloist answered (or did not, in time): the held song is acted on if Soloist is the device playing it. */
+  private settlePending(): void {
+    const p = this.pending;
+    if (!p) return;
+    this.dropPending();
+    if (!this.mine) return;
+    // Soloist's status may have moved on while the song was held (its "playing" follows the track change).
+    this.unasked(p.id, { live: p.live || this.soloistLive(), ended: p.ended });
+  }
+
+  /** Soloist itself plays a song rune never queued here: go on with rune's queue, or follow it. */
+  private unasked(id: string, opts: { snapshot?: boolean; live: boolean; ended: boolean }): void {
+    const live = opts.live;
+    const cur = currentItem(this.q);
+    if (id === this.expected) { this.revive(live); return; }
+    // Soloist's own next (autoplay after rune's song, its context, a song queued in a Spotify app) is one it listed in
+    // its queue, or one that began as rune's song ran out; anything else is a takeover.
+    const natural = this.soloistSources.has(id) || opts.ended;
     const r = queueNext(this.q, { auto: true });
     if (natural && !r.ended && cur && this.status !== 'stopped') {
       if (opts.snapshot) return;
@@ -505,6 +637,69 @@ export class SoloistZone implements PlaybackZone {
     // Nothing sounds and nothing is about to: nothing to follow (a playing/buffering playback_changed comes back here).
     if (!live && this.deps.link.view.status === 'idle') return;
     this.adopt(id, natural ? 'autoplay' : 'takeover', live);
+  }
+
+  // ----- which device plays -----
+
+  /**
+   * Soloist's word on whether it is the active device (auth_state, a snapshot), then the held song. "Not active" is not
+   * believed when it may predate rune's own play, nor while Soloist's own sound stream is running: silencing a zone
+   * that audibly plays would be the worse mistake. (device_changed, the event for the change itself, needs no check.)
+   */
+  private async onActiveWord(active: boolean | null): Promise<void> {
+    if (active === false && this.mine) {
+      if (this.now() - this.ownPlayAt < OWN_PLAY_GRACE_MS) active = null;
+      else if (this.status === 'playing' && this.deps.sounding) {
+        const sounding = await this.deps.sounding().catch(() => null);
+        if (sounding === true) {
+          if (!this.doubted) this.deps.log?.({}, 'soloist: says it is not the active device while its own stream runs; not believed');
+          this.doubted = true;
+          active = null;
+        }
+      }
+    }
+    if (active !== null) this.setMine(active);
+    this.settlePending();
+  }
+
+  /** Soloist stopped being, or became, the device that plays. */
+  private setMine(mine: boolean): void {
+    if (mine === this.mine) return;
+    if (!mine) {
+      // Another device took the session over: Soloist is silent. rune's song waits where it was (Play starts it here
+      // again), and what the other device plays from now on is not followed.
+      const was = this.status;
+      if (was === 'playing' || was === 'loading') {
+        this.setPos(this.livePosition());
+        this.status = 'paused';
+      }
+      this.mine = false;
+      this.queuedNext = null;
+      this.dropPending();
+      if (was !== 'stopped' && currentItem(this.q)) this.deps.log?.({}, 'soloist: another Spotify device plays now; rune\'s queue here waits');
+      this.bump();
+      return;
+    }
+    // Soloist became the active device without rune asking (picked in a Spotify app): what it plays is followed again.
+    this.mine = true;
+    if (this.soloistLive()) this.onTrack(idOfUri(this.deps.link.view.item?.uri));
+    this.bump();
+  }
+
+  /**
+   * A while after rune's own play, Soloist is asked whether it really became the active device. If it says no (and its
+   * own sound stream is not running either, see `onActiveWord`), the song went into another device's session and this
+   * zone must not act as if it played.
+   */
+  private checkOwnPlay(): void {
+    if (this.ownPlayCheck) clearTimeout(this.ownPlayCheck);
+    const timer = setTimeout(() => {
+      if (this.ownPlayCheck === timer) this.ownPlayCheck = null;
+      if (!this.mine || this.status !== 'playing' || !this.deps.link.view.connected) return;
+      this.deps.link.send({ command: 'get_auth_state' }).catch(() => undefined);
+    }, OWN_PLAY_CHECK_MS);
+    (timer as { unref?: () => void }).unref?.();
+    this.ownPlayCheck = timer;
   }
 
   /**
@@ -574,7 +769,7 @@ export class SoloistZone implements PlaybackZone {
 
   private livePosition(): number {
     const p = this.deps.link.positionMs(this.now());
-    if (p !== null && this.status !== 'stopped' && this.expected && idOfUri(this.deps.link.view.item?.uri) === this.expected) return p;
+    if (p !== null && this.mine && this.status !== 'stopped' && this.expected && idOfUri(this.deps.link.view.item?.uri) === this.expected) return p;
     return this.status === 'playing' ? this.positionMs + Math.max(0, this.now() - this.anchorAt) : this.positionMs;
   }
 

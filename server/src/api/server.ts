@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import type { AlbumSummary, ArtistRef, PlayerCommand, PlayerState, ScanProgress, ServerEvent, Track, Zone } from '@liner/shared';
 import type { Db } from '../db/index.js';
 import type { Config } from '../config.js';
+import { fromThisMachine } from './sameMachine.js';
 import type { PlaybackZone } from '../modules.js';
 import { createScanner } from '../scan/index.js';
 import { createMatcher } from '../match/index.js';
@@ -1468,6 +1469,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           spotifyEngine?: PcSpotifyEngine;
           spotifyZone?: Zone;
           spotifyNotice?: string;
+          /** For 'pc': the page asking runs on this very PC and Soloist is part of this rune, so the pc zone is that
+           *  page's player: it gets no browser zone and starts no Spotify player of its own (a second Connect device
+           *  on the same speakers, which Soloist would mirror and fight). */
+          playsForBrowser?: boolean;
           /** For 'spotify': Spotify's own description, so the picker can label phones and sleeping devices. */
           deviceType?: string;
           isActive?: boolean;
@@ -1522,6 +1527,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           if (route.engine) entry.spotifyEngine = route.engine;
           if (route.zone) entry.spotifyZone = route.zone;
           if (route.notice) entry.spotifyNotice = route.notice;
+          if (soloist && fromThisMachine({ remote: req.ip, forwardedFor: req.headers['x-forwarded-for'], host: req.headers.host })) entry.playsForBrowser = true;
           // PC speakers first: the phone's default target.
           zones.unshift(entry);
         }

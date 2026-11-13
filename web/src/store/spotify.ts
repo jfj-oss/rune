@@ -29,7 +29,8 @@ interface SpotifyStore {
   scopes: string[] | null;
   /** Session memory: where the user last sent Spotify / local tracks that their zone couldn't play. */
   choices: Partial<Record<PlaySource, string>>;
-  init(): Promise<void>;
+  /** `sdk: false`: this page must not become a Spotify player (a tab on the PC itself, where Soloist plays). */
+  init(opts?: { sdk?: boolean }): Promise<void>;
   /** Re-read /spotify/status (connected, resting): the "Play on…" sheet does this when it opens. */
   refreshStatus(): Promise<void>;
   askWhere(req: ChooserRequest): void;
@@ -74,10 +75,10 @@ export const useSpotify = create<SpotifyStore>((set, get) => ({
   scopes: null,
   choices: loadChoices(),
 
-  async init() {
+  async init(opts) {
     if (get().loaded) return;
     const st = await api.spotifyStatus();
-    const supported = isMock ? true : sdkSupported();
+    const supported = isMock ? true : opts?.sdk !== false && sdkSupported();
     set({ loaded: true, connected: st.connected, user: st.user, supported, restingUntil: restingFrom(st), scopes: Array.isArray(st.scopes) ? st.scopes : null, ...(isMock ? { sdk: { phase: 'ready' as const, deviceId: 'mock-sdk' } } : {}) });
     // Register this tab as a Spotify device as soon as we know the account is connected.
     if (!isMock && st.connected && supported) void getSdkEngine().activate().catch(() => undefined);

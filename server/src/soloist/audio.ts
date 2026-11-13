@@ -170,6 +170,18 @@ export class SoloistAudio {
     return moving.length;
   }
 
+  /** Is one of Soloist's own streams there and running (not corked)? null when PipeWire cannot be asked. */
+  async sounding(): Promise<boolean | null> {
+    const [list, sinks] = await Promise.all([
+      this.runner.run('pactl', ['list', 'sink-inputs']),
+      this.runner.run('pactl', ['list', 'short', 'sinks']),
+    ]);
+    if (!list.ok) return null;
+    const phoneSink = sinks.ok ? sinkIndex(sinks.stdout, this.sink) : null;
+    const mine = new Set(soloistSinkInputs(list.stdout, { pid: this.pidOf(), phoneSink }));
+    return sinkInputs(list.stdout).some((s) => mine.has(s.id) && /^\s*Corked:\s*no/m.test(s.block));
+  }
+
   /** The current program's directory, starting the encoder if a phone is listening and none runs. */
   listen(): { gen: number; dir: string } | null {
     if (this.output !== 'phone') return null;

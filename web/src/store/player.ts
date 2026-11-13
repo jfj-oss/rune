@@ -14,7 +14,7 @@ import { needsPcSpotify, pcSpotifyFallbackNotice, pcSpotifyZone, startPcSpotifyA
 import { PHONE_SOLOIST_PATH, PhoneSoloistEngine, phoneSoloistRoute, SOLOIST_ZONE } from '../player/phoneSoloist';
 import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
-import { cantPlayMessage, followPcSpeakers, noteSounding, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay, type Caps } from '../player/routing';
+import { cantPlayMessage, followPcSpeakers, noteSounding, pageIsOnThePc, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay, type Caps } from '../player/routing';
 import { emptyState, livePosition, type Backend, type PlayModes } from '../player/types';
 import { helloAction, holdNotice, RELOAD_NOTICE, usesServerQueue } from '../player/serverQueue';
 import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
@@ -69,7 +69,10 @@ function syncPcDevice(zones: ZoneInfo[]) {
  */
 function tidyZones(zones: ZoneInfo[]): ZoneInfo[] {
   let out = zones;
-  if (!isMock && !out.some((z) => z.kind === 'browser')) out = [...out, BROWSER_ZONE]; // the browser zone lives in this tab
+  // The browser zone lives in this tab. Not on the PC itself: there the pc zone is this page's player (Soloist plays its
+  // Spotify songs), and a second Spotify player in the tab would race it for the account's one stream.
+  if (!isMock && pageIsOnThePc(out, isHandheld())) out = out.filter((z) => z.kind !== 'browser');
+  else if (!isMock && !out.some((z) => z.kind === 'browser')) out = [...out, BROWSER_ZONE];
   if (!isMock) out = withoutOwnDevice(out, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
   return withoutPcDevice(out);
 }
@@ -293,7 +296,10 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (follows && followPcSpeakers(e.state, was, { zone, status: state.status }, zones.find((z) => z.kind === 'pc'))) void setZone('pc', { handoff: false });
         });
       }
-      const [zonesRes] = await Promise.all([api.zones().catch(() => FALLBACK_ZONES), useSpotify.getState().init().catch(() => undefined)]);
+      // The zones first: they say whether this page runs on the PC itself, and then it must not register a Spotify
+      // player of its own (the SDK does that as soon as the Spotify store starts).
+      const zonesRes = await api.zones().catch(() => FALLBACK_ZONES);
+      await useSpotify.getState().init({ sdk: isMock || !pageIsOnThePc(zonesRes, isHandheld()) }).catch(() => undefined);
       const zones = tidyZones(zonesRes.length ? zonesRes : FALLBACK_ZONES);
       const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches;
       const saved = loadLocal<string | null>('rune.zone', null);
