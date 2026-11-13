@@ -312,7 +312,11 @@ export class ZoneEngine implements Engine {
     const snap = this.snap;
     const sinceEnd = snap?.playing ? t - (snap.at + Math.max(0, dur - snap.pos)) : null;
     const followed = s.status === 'stopped' || (sinceEnd !== null && Math.abs(s.positionMs - sinceEnd) <= this.endSlackMs);
-    if (letGo && (s.elsewhere || !(nearEnd || reportedEnd) || (!match && !followed))) {
+    // The zone went on to the very next song of our run, whatever the clock says (Soloist skipped a song it could not
+    // play, or our song ended sooner than its length said, or a remote Next): that is our queue going on, not someone
+    // else's song. Following it sends nothing (the next load adopts the song already sounding).
+    const nextOfRun = !match && !!cur && s.status !== 'stopped' && !this.userPaused && !s.elsewhere && this.run.length > 1 && sameTrack(this.run[1]!, cur.track);
+    if (letGo && !nextOfRun && (s.elsewhere || !(nearEnd || reportedEnd) || (!match && !followed))) {
       this.armed = false;
       this.detach();
       this.displaced = true;
@@ -335,7 +339,7 @@ export class ZoneEngine implements Engine {
       // A tab that slept (a closed laptop, a background tab) finds out long after the song ended. It must not start
       // the next song on the PC out of nowhere minutes later, with nobody there: it stops instead.
       // The same goes for a song paused elsewhere that Spotify drops as stopped minutes later: nobody asked for the next one.
-      const overdue = sinceEnd !== null ? sinceEnd > ZoneEngine.STALE_END_MS : s.status !== 'paused';
+      const overdue = sinceEnd !== null ? sinceEnd > ZoneEngine.STALE_END_MS : s.status !== 'paused' && !nextOfRun;
       this.snap = { pos: dur, at: t, playing: false };
       if (overdue) {
         this.displaced = true;
