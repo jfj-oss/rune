@@ -2,6 +2,7 @@ import { clientLog } from '../clientLog';
 import { create } from 'zustand';
 import type { DitherPalette, DotSize } from '../lib/dither';
 import { cleanPlaylistKeys, validAlbumKey, type PlaylistKeys } from '../lib/keys';
+import { applyReduceEffects, loadReduceEffects, saveReduceEffects } from '../lib/effects';
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -76,6 +77,9 @@ interface UiStore {
   setAmbient(a: Ambient): void;
   dots: DotSize;
   setDots(d: DotSize): void;
+  /** "Reduce effects": no glass blur, no decorative animation (lib/effects.ts). Per device; off by default. */
+  reduceEffects: boolean;
+  setReduceEffects(on: boolean): void;
   duotone: Duotone;
   setDuotone(d: Duotone): void;
   /** Palette of the album page being viewed: while set, every Dither mode shows it (Ambient). */
@@ -111,6 +115,8 @@ function loadDuotone(): Duotone {
 let toastN = 0;
 const initialAmbient = loadAmbient();
 applyAmbient(initialAmbient);
+const initialReduceEffects = loadReduceEffects();
+applyReduceEffects(initialReduceEffects);
 
 export const useUi = create<UiStore>((set) => ({
   ambient: initialAmbient,
@@ -125,6 +131,12 @@ export const useUi = create<UiStore>((set) => ({
     try { localStorage.setItem('rune.dots', d); } catch { /* storage blocked */ }
     set({ dots: d });
     void syncDots('push', d);
+  },
+  reduceEffects: initialReduceEffects,
+  setReduceEffects: (on) => {
+    saveReduceEffects(on);
+    applyReduceEffects(on);
+    set({ reduceEffects: on });
   },
   duotone: loadDuotone(),
   setDuotone: (d) => {

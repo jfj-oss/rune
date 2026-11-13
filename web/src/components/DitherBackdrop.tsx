@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { stillQuery } from '../lib/effects';
 import { publishBackdrop } from '../lib/backdropShown';
 import {
   blueNoise, calmFor, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
@@ -295,7 +296,7 @@ export function DitherBackdrop({ colour, main = false }: { colour: BackdropColou
     if (!renderer) renderer = canvas2dRenderer(canvas);
     if (!renderer) { canvas.remove(); return; }
     const r = renderer;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduce = stillQuery();
     // the 2D fallback is CPU-bound: draw it chunkier and never animate it
     let coarse = animated ? 0 : 1;
     let grain = useUi.getState().dots;
