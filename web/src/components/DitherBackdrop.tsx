@@ -301,7 +301,7 @@ export function DitherBackdrop({ colour, main = false }: { colour: BackdropColou
     let grain = useUi.getState().dots;
     const phone = window.matchMedia('(max-width: 899px)');
     let raf = 0, last = -Infinity, prev = 0, slow = 0, frames = 0;
-    // 10 fps for the slow drift, playing or not; only the new-song swell runs faster.
+    // 30 fps only while something is happening; ~12 fps is plenty for the slow drift.
     let playing = usePlayer.getState().state.status === 'playing';
     let nowPlayingOpen = useUi.getState().nowPlayingOpen;
     const offPlaying = usePlayer.subscribe((s) => { playing = s.state.status === 'playing'; });
