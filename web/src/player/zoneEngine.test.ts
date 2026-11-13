@@ -92,6 +92,49 @@ describe('ZoneEngine', () => {
     expect(ended).toHaveBeenCalledTimes(1);
   });
 
+  it('the zone going on to the next song of our run is our end, even after it briefly showed our song back at 0:00', async () => {
+    // Live, Soloist went on with a song of its own for a moment at the end of ours; the zone showed our song at 0:00
+    // from that song's snapshot, then started our next one. The tab took that for someone else's song and stopped
+    // following: the bar kept the old song while the next one played.
+    const { zone, eng, ended, sync } = setup();
+    const [a, b, c] = [mkTrack('sp:a', 'spotify'), mkTrack('sp:b', 'spotify'), mkTrack('sp:c', 'spotify')];
+    eng.load(a, 0, true, [b, c]);
+    await flush();
+    expect(zone.log).toContain('play:sp:a,sp:b,sp:c@0');
+    zone.progress(197_000);
+    zone.progress(0); // the snapshot of the other song, taken for ours
+    zone.moveOn(); // the zone plays b
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(sync).not.toHaveBeenLastCalledWith(expect.anything(), false);
+    // The queue's next load follows b where it is: nothing is sent.
+    const sent = zone.log.length;
+    eng.load(b, 0, true, [c]);
+    await flush();
+    expect(zone.log.length).toBe(sent);
+  });
+
+  it('the zone skipping to the next song of our run mid-song (a song it could not play) moves the queue on with it', async () => {
+    const { zone, eng, ended } = setup();
+    const [a, b] = [mkTrack('sp:a', 'spotify'), mkTrack('sp:b', 'spotify')];
+    eng.load(a, 0, true, [b]);
+    await flush();
+    zone.progress(6000);
+    zone.moveOn();
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
+  it('a song outside our run mid-song still displaces us (another client), and a user pause keeps us off the next song', async () => {
+    const { zone, eng, ended } = setup();
+    const [a, b] = [mkTrack('sp:a', 'spotify'), mkTrack('sp:b', 'spotify')];
+    eng.load(a, 0, true, [b]);
+    await flush();
+    zone.progress(60_000);
+    eng.pause();
+    await flush();
+    zone.moveOn();
+    expect(ended).not.toHaveBeenCalled();
+  });
+
   it('a tab that slept through the end stops instead of starting the next song minutes later', async () => {
     const { zone, eng, ended, tick } = setup();
     eng.load(mkTrack('sp:1', 'spotify'), 0, true);

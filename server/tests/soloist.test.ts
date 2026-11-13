@@ -35,6 +35,7 @@ afterAll(async () => {
 afterEach(() => {
   fake.commands = [];
   fake.queue = [];
+  fake.seekRestrictedMs = 0;
   fake.autoplay = [];
   fake.previous = [];
   fake.dropQueue = false;
@@ -317,6 +318,119 @@ describe('SoloistZone', () => {
 // zone still held an older queue. Soloist (not the active Connect device) mirrored the tab's songs; the zone took them
 // for Soloist's own, "went on with rune's queue", and its play command landed in the TAB's session: the tab showed its
 // next song while the old queue's song was heard.
+describe('SoloistZone with songs left in Soloist\'s own queue', () => {
+  // The live Soloist keeps its user queue across `play {uri}` (as Spotify does): a song rune queued for a list it then
+  // left (a new play, Next, a clear) is still there and plays at the next song's end, before anything added later.
+  const sentAfter = (from: number) => fake.commands.slice(from).filter((c) => c.command !== 'get_auth_state');
+  const states = (zone: SoloistZone) => {
+    const seen: { index: number; positionMs: number; status: string }[] = [];
+    zone.onChange((s) => seen.push({ index: s.index, positionMs: s.positionMs, status: s.status }));
+    return seen;
+  };
+
+  it('a left-over song at a song\'s end: rune\'s next song plays, and the ended song is never shown started again from 0:00', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    fake.queue = ['spotify:track:old1']; // queued by rune for an earlier list
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b', 'sp:c'], startIndex: 0 });
+    await new Promise((r) => setTimeout(r, 100));
+    // Nothing is queued behind the left-over song: it would only play after it.
+    expect(fake.commands.filter((c) => c.command === 'add_to_queue')).toEqual([]);
+    expect(fake.queue).toEqual(['spotify:track:old1']);
+    await zone.command({ type: 'seek', positionMs: 178_500 }); // a near its end
+    await new Promise((r) => setTimeout(r, 2100)); // past the grace after rune's own play
+    const seen = states(zone);
+    fake.finishTrack(); // Soloist goes on with old1 (with snapshots of it at 0:00)
+    await until(() => fake.item === 'spotify:track:b');
+    await until(() => zone.state().index === 1 && zone.state().status === 'playing');
+    // The tab following this zone must never see song a "start again": that read as someone else's song next.
+    expect(seen.filter((s) => s.index === 0 && s.positionMs < 170_000)).toEqual([]);
+    expect(zone.adopted()).toBeNull();
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b', 'sp:c']);
+    // The left-over song is used up: rune queues its next song again and the change after b is gapless.
+    await until(() => fake.queue.length === 1);
+    expect(fake.queue).toEqual(['spotify:track:c']);
+    fake.finishTrack();
+    await until(() => zone.state().index === 2);
+    expect(fake.item).toBe('spotify:track:c');
+    await zone.close();
+    client.close();
+  }, 15_000);
+
+  it('while Soloist plays a song of its own for a moment (a lost add_to_queue: autoplay), its snapshots never show rune\'s ended song at 0:00', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    fake.dropQueue = true;
+    fake.autoplay = ['spotify:track:x1'];
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.commands.some((c) => c.command === 'add_to_queue'));
+    await zone.command({ type: 'seek', positionMs: 178_500 });
+    const seen = states(zone);
+    fake.finishTrack(); // x1 by itself, with playback_state snapshots of x1 at 0:00
+    await until(() => fake.item === 'spotify:track:b');
+    await until(() => zone.state().index === 1);
+    expect(seen.filter((s) => s.index === 0 && s.positionMs < 170_000)).toEqual([]);
+    await zone.close();
+    client.close();
+  }, 15_000);
+
+  it('a left-over song that is in rune\'s list does not make the list jump to it', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    fake.queue = ['spotify:track:d']; // from playing the same list before
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b', 'sp:c', 'sp:d'], startIndex: 0 });
+    await new Promise((r) => setTimeout(r, 2100));
+    fake.finishTrack(); // Soloist plays d out of order
+    await until(() => fake.item === 'spotify:track:b');
+    await until(() => zone.state().index === 1);
+    await zone.close();
+    client.close();
+  }, 15_000);
+
+  it('a left-over copy of the song that just ended: the song is not heard twice, rune\'s next one plays', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    fake.queue = ['spotify:track:a'];
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await new Promise((r) => setTimeout(r, 2100));
+    fake.finishTrack(); // a again, from Soloist's queue
+    await until(() => fake.item === 'spotify:track:b');
+    await until(() => zone.state().index === 1);
+    expect(fake.queue).toEqual([]);
+    await zone.close();
+    client.close();
+  }, 15_000);
+
+  it('Next to the song rune queued skips to it in Soloist\'s queue, so it is not left there to play again', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b', 'sp:c'], startIndex: 0 });
+    await until(() => fake.queue.length === 1);
+    const before = fake.commands.length;
+    await zone.command({ type: 'next' });
+    expect(fake.item).toBe('spotify:track:b');
+    expect(zone.state().index).toBe(1);
+    expect(sentAfter(before).map((c) => c.command)).toContain('skip_next');
+    expect(sentAfter(before).some((c) => c.command === 'play')).toBe(false);
+    await until(() => fake.queue.length === 1);
+    expect(fake.queue).toEqual(['spotify:track:c']);
+    await zone.close();
+    client.close();
+  }, 15_000);
+
+  it('a seek Soloist refuses while the song loads (seek_to_restricted) is tried again, and never fails the play', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    fake.seekRestrictedMs = 300;
+    const s = await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0, positionMs: 42_000 });
+    expect(s.status).toBe('playing');
+    expect(fake.positionMs).toBe(42_000);
+    expect(zone.state().positionMs).toBeGreaterThanOrEqual(42_000);
+    await zone.close();
+    client.close();
+  }, 15_000);
+});
+
 describe('SoloistZone while another Spotify device plays', () => {
   const settle = () => new Promise((r) => setTimeout(r, 150));
   const sentAfter = (from: number) => fake.commands.slice(from).filter((c) => c.command !== 'get_auth_state');

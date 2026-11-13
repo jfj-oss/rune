@@ -21,8 +21,14 @@ export class FakeSoloist {
   isActive = false;
   status: 'idle' | 'playing' | 'paused' | 'buffering' = 'idle';
   item: string | null = null;
-  /** Soloist's own queue: track uris added with add_to_queue, next first. */
+  /**
+   * Soloist's own queue: track uris added with add_to_queue, next first. Like the live Soloist (and Spotify), a
+   * `play {uri}` leaves it as it is: only playing a song from it (the song's end, skip_next) uses an entry up.
+   */
   queue: string[] = [];
+  /** A seek this soon after a `play {uri}` is refused as the live Soloist does while the song loads (seek_to_restricted). */
+  seekRestrictedMs = 0;
+  private playedAt = Number.NEGATIVE_INFINITY;
   /** Spotify's autoplay: when the queue runs out, these play on (source "autoplay"), one after another. */
   autoplay: string[] = [];
   /** add_to_queue is acknowledged but the song never lands in the queue (a lost request): autoplay then follows. */
@@ -85,9 +91,7 @@ export class FakeSoloist {
       this.currentSource = queued ? 'queue' : 'autoplay';
       this.item = next;
       this.positionMs = 0;
-      this.broadcast({ type: 'track_changed', item: this.entity(next) });
-      this.broadcast({ type: 'position_sync', position: this.position() });
-      this.broadcast(this.queueChanged());
+      this.songChanged();
     } else {
       this.status = 'idle';
       this.item = null;
@@ -116,6 +120,24 @@ export class FakeSoloist {
     this.broadcast({ type: 'position_sync', position: this.position() });
     this.broadcast(this.queueChanged());
     if (!opts.deviceFirst) device();
+  }
+
+  /**
+   * The events of a song change, in the live Soloist's order: track_changed first, then buffering, the new queue, a
+   * playback_state snapshot of the new song at 0:00, then playing with another snapshot.
+   */
+  private songChanged(): void {
+    const item = this.item!;
+    this.broadcast({ type: 'track_changed', item: this.entity(item) });
+    this.status = 'buffering';
+    this.broadcast({ type: 'playback_changed', status: 'buffering' });
+    this.broadcast(this.queueChanged());
+    this.broadcast(this.playbackState());
+    this.broadcast({ type: 'position_sync', position: this.position() });
+    this.status = 'playing';
+    this.broadcast({ type: 'playback_changed', status: 'playing' });
+    this.broadcast(this.playbackState());
+    this.broadcast({ type: 'position_sync', position: this.position() });
   }
 
   /** Soloist becomes the device that plays (its own play, `activate`, or picked in a Spotify app). */
@@ -207,15 +229,11 @@ export class FakeSoloist {
         if (uri) {
           this.item = uri;
           this.positionMs = 0;
-          this.queue = [];
           this.previous = [];
           this.currentSource = 'context';
-          this.status = 'playing';
+          this.playedAt = this.now();
           this.becomeActive();
-          this.broadcast({ type: 'track_changed', item: this.entity(uri) });
-          this.broadcast({ type: 'playback_changed', status: 'playing' });
-          this.broadcast({ type: 'position_sync', position: this.position() });
-          this.broadcast(this.queueChanged());
+          this.songChanged();
         } else if (this.item) {
           this.status = 'playing';
           this.broadcast({ type: 'playback_changed', status: 'playing' });
@@ -242,6 +260,7 @@ export class FakeSoloist {
         return;
       case 'seek':
         if (typeof msg.position_ms !== 'number') return this.sendTo(socket, { type: 'error', message: 'position_ms required' });
+        if (this.now() - this.playedAt < this.seekRestrictedMs) return this.sendTo(socket, { type: 'error', message: 'seek failed: seek_to_restricted' });
         this.ok(socket, command);
         this.positionMs = msg.position_ms;
         this.broadcast({ type: 'position_sync', position: this.position() });
