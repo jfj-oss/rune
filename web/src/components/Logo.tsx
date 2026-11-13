@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { stillQuery, useStill } from '../lib/effects';
+import { looking, onLooking, stillQuery, useStill } from '../lib/effects';
 import { useCoverColor } from '../hooks/useCoverColor';
 import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type DitherPalette } from '../lib/dither';
 import { currentItem, usePlayer } from '../store/player';
@@ -22,7 +22,7 @@ function useBackdropPalette(): DitherPalette {
   useEffect(() => {
     if (!cycling || still) return;
     const start = performance.now() - (Number(new URLSearchParams(location.search).get('dither-t')) || 0) * 1000;
-    const id = window.setInterval(() => { if (document.visibilityState === 'visible') setT((performance.now() - start) / 1000); }, 500);
+    const id = window.setInterval(() => { if (looking()) setT((performance.now() - start) / 1000); }, 500);
     return () => clearInterval(id);
   }, [cycling, still]);
   if (ambient === 'off') return DITHER_PALETTES.red;
@@ -79,22 +79,22 @@ export function Logo({ size = 28 }: { size?: number }) {
     const frame = (now: number) => {
       raf = 0;
       draw(now - born);
-      if (!reduce.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!reduce.matches && looking()) raf = requestAnimationFrame(frame);
     };
     const start = () => {
       if (reduce.matches) { cancelAnimationFrame(raf); raf = 0; draw(0); return; }
-      if (!raf && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!raf && looking()) raf = requestAnimationFrame(frame);
     };
     redraw.current = () => { if (!raf) draw(reduce.matches ? 0 : performance.now() - born); };
     start();
     // when still (reduced motion), repaint as the backdrop's colour changes
     const offBackdrop = onBackdrop(() => redraw.current());
-    document.addEventListener('visibilitychange', start);
+    const offLooking = onLooking(start);
     reduce.addEventListener('change', start);
     return () => {
       cancelAnimationFrame(raf);
       offBackdrop();
-      document.removeEventListener('visibilitychange', start);
+      offLooking();
       reduce.removeEventListener('change', start);
       redraw.current = () => {};
     };

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { stillQuery } from '../lib/effects';
+import { looking, onLooking, stillQuery } from '../lib/effects';
 import { backdropShown } from '../lib/backdropShown';
 import { DITHER_PALETTES } from '../lib/dither';
 import { ditherLevels } from '../lib/dotLogo';
@@ -48,13 +48,13 @@ export function WaveCover({ seed = 0, kind = 'wave' }: { seed?: number; kind?: G
     const frame = (now: number) => {
       raf = 0;
       if (now - last >= FRAME_MS - 2) { last = now; draw(now - born); }
-      if (!still() && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!still() && onScreen && looking()) raf = requestAnimationFrame(frame);
     };
     // thumbnails in lists stay still (many of them, too small to see the motion)
     const still = () => reduce.matches || canvas.getBoundingClientRect().width < 64;
     const start = () => {
       if (still()) { cancelAnimationFrame(raf); raf = 0; draw(4); return; }
-      if (!raf && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!raf && onScreen && looking()) raf = requestAnimationFrame(frame);
     };
     const ro = new ResizeObserver(() => { fit(); draw(still() ? 4 : performance.now() - born); start(); });
     ro.observe(canvas);
@@ -62,13 +62,13 @@ export function WaveCover({ seed = 0, kind = 'wave' }: { seed?: number; kind?: G
     io.observe(canvas);
     fit();
     start();
-    document.addEventListener('visibilitychange', start);
+    const offLooking = onLooking(start);
     reduce.addEventListener('change', start);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
-      document.removeEventListener('visibilitychange', start);
+      offLooking();
       reduce.removeEventListener('change', start);
     };
   }, [seed, kind]);

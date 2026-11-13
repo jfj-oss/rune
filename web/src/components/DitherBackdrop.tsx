@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { stillQuery } from '../lib/effects';
+import { looking, onLooking, stillQuery } from '../lib/effects';
 import { publishBackdrop } from '../lib/backdropShown';
 import {
   blueNoise, calmFor, densities, dotSize, ditherLevel, field, MASK, MOTTLE, mottle, mixPalette, paletteAt, POOLS, radiusScale, RIBBONS, TONE, toneCurve, WARP,
@@ -354,12 +354,12 @@ export function DitherBackdrop({ colour, main = false }: { colour: BackdropColou
       last = now;
       paint();
     };
-    const start = () => { if (!raf && !still() && document.visibilityState === 'visible') raf = requestAnimationFrame(loop); };
+    const start = () => { if (!raf && !still() && looking()) raf = requestAnimationFrame(loop); };
     const stop = () => { cancelAnimationFrame(raf); raf = 0; };
     // time stands still while the tab is hidden, so the forms carry on where they were instead of jumping
     const onVis = () => {
-      if (document.visibilityState === 'visible') { if (hiddenAt) t0 += performance.now() - hiddenAt; hiddenAt = 0; start(); }
-      else { hiddenAt = performance.now(); stop(); }
+      if (looking()) { if (hiddenAt) t0 += performance.now() - hiddenAt; hiddenAt = 0; start(); }
+      else { if (!hiddenAt) hiddenAt = performance.now(); stop(); }
     };
     // the CPU fallback redraws a whole frame per resize, so let a window drag settle first
     let resizeTimer = 0;
@@ -374,7 +374,7 @@ export function DitherBackdrop({ colour, main = false }: { colour: BackdropColou
     paint();
     start();
     window.addEventListener('resize', onResize);
-    document.addEventListener('visibilitychange', onVis);
+    const offLooking = onLooking(onVis);
     reduce.addEventListener('change', onMotion);
     const lost = (e: Event) => { e.preventDefault(); stop(); };
     const restored = () => setGen((g) => g + 1);
@@ -386,7 +386,7 @@ export function DitherBackdrop({ colour, main = false }: { colour: BackdropColou
       offUi();
       clearTimeout(resizeTimer);
       window.removeEventListener('resize', onResize);
-      document.removeEventListener('visibilitychange', onVis);
+      offLooking();
       reduce.removeEventListener('change', onMotion);
       canvas.removeEventListener('webglcontextlost', lost);
       canvas.removeEventListener('webglcontextrestored', restored);

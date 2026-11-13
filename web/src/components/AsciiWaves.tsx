@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { stillQuery } from '../lib/effects';
+import { looking, onLooking, stillQuery } from '../lib/effects';
 import { backdropShown } from '../lib/backdropShown';
 import { blueNoise, DITHER_PALETTES, type Rgb } from '../lib/dither';
 import { ASCII_CHARS, asciiAt, oppositePalette, type GenKind } from '../lib/waveCover';
@@ -56,11 +56,11 @@ export function AsciiWaves({ kind = 'wave' }: { kind?: GenKind }) {
     const frame = (now: number) => {
       raf = 0;
       if (now - last >= FRAME_MS - 2) { last = now; draw(now - born); }
-      if (!reduce.matches && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!reduce.matches && onScreen && looking()) raf = requestAnimationFrame(frame);
     };
     const start = () => {
       if (reduce.matches) { cancelAnimationFrame(raf); raf = 0; draw(0); return; }
-      if (!raf && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
+      if (!raf && onScreen && looking()) raf = requestAnimationFrame(frame);
     };
     const ro = new ResizeObserver(() => { fit(); draw(reduce.matches ? 0 : performance.now() - born); });
     ro.observe(canvas);
@@ -68,13 +68,13 @@ export function AsciiWaves({ kind = 'wave' }: { kind?: GenKind }) {
     io.observe(canvas);
     fit();
     start();
-    document.addEventListener('visibilitychange', start);
+    const offLooking = onLooking(start);
     reduce.addEventListener('change', start);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
-      document.removeEventListener('visibilitychange', start);
+      offLooking();
       reduce.removeEventListener('change', start);
     };
   }, [kind]);
