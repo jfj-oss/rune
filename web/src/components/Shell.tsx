@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { stillQuery } from '../lib/effects';
 import { useLocation } from 'react-router-dom';
 import { ScrollRootContext } from '../hooks/scrollRoot';
 import { useIsDesktop } from '../hooks/useMedia';
@@ -52,7 +53,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const firstRoute = useRef(true);
   useLayoutEffect(() => {
     if (firstRoute.current) { firstRoute.current = false; return; }
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (stillQuery().matches) return;
     main.current?.firstElementChild?.animate?.(
       [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
       { duration: 180, easing: 'cubic-bezier(0.2, 0, 0, 1)' },

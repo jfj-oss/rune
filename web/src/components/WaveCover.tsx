@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { stillQuery } from '../lib/effects';
 import { backdropShown } from '../lib/backdropShown';
 import { DITHER_PALETTES } from '../lib/dither';
 import { ditherLevels } from '../lib/dotLogo';
@@ -17,7 +18,7 @@ export function WaveCover({ seed = 0, kind = 'wave' }: { seed?: number; kind?: G
     const canvas = ref.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduce = stillQuery();
     let w = 0, h = 0, img: ImageData | null = null, field = new Float32Array(0), levels = new Uint8Array(0);
     let raf = 0, last = 0, onScreen = true;
     const born = performance.now();
@@ -52,7 +53,7 @@ export function WaveCover({ seed = 0, kind = 'wave' }: { seed?: number; kind?: G
     // thumbnails in lists stay still (many of them, too small to see the motion)
     const still = () => reduce.matches || canvas.getBoundingClientRect().width < 64;
     const start = () => {
-      if (still()) { draw(4); return; }
+      if (still()) { cancelAnimationFrame(raf); raf = 0; draw(4); return; }
       if (!raf && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
     const ro = new ResizeObserver(() => { fit(); draw(still() ? 4 : performance.now() - born); start(); });

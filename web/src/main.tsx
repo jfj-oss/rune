@@ -15,6 +15,7 @@ import './styles/components.css';
 import './styles/pages.css';
 import './styles/browse.css';
 import './styles/ambient.css';
+import './styles/effects.css';
 import './styles/spotify.css';
 import './styles/playlists.css';
 import './styles/radio.css';

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { stillQuery, useStill } from '../lib/effects';
 import { useCoverColor } from '../hooks/useCoverColor';
 import { DITHER_PALETTES, paletteAt, paletteFromColour, type DitherHue, type DitherPalette } from '../lib/dither';
 import { currentItem, usePlayer } from '../store/player';
@@ -17,12 +18,13 @@ function useBackdropPalette(): DitherPalette {
   const tint = useCoverColor(ambient === 'dither-album' ? album : undefined);
   const [t, setT] = useState(0);
   const cycling = ambient === 'dither-cycle' && !page;
+  const still = useStill();
   useEffect(() => {
-    if (!cycling || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!cycling || still) return;
     const start = performance.now() - (Number(new URLSearchParams(location.search).get('dither-t')) || 0) * 1000;
     const id = window.setInterval(() => { if (document.visibilityState === 'visible') setT((performance.now() - start) / 1000); }, 500);
     return () => clearInterval(id);
-  }, [cycling]);
+  }, [cycling, still]);
   if (ambient === 'off') return DITHER_PALETTES.red;
   if (page) return page;
   if (ambient === 'dither-album') return (album && paletteFromColour(tint)) || DITHER_PALETTES.purple;
@@ -57,7 +59,7 @@ export function Logo({ size = 28 }: { size?: number }) {
     canvas.style.width = canvas.style.height = `${(w * dot) / dpr}px`;
     const img = ctx.createImageData(w, w);
     const field = new Float32Array(w * w), levels = new Uint8Array(w * w);
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduce = stillQuery();
     const born = performance.now();
     let raf = 0;
     const draw = (ms: number) => {
@@ -80,7 +82,7 @@ export function Logo({ size = 28 }: { size?: number }) {
       if (!reduce.matches && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
     const start = () => {
-      if (reduce.matches) { draw(0); return; }
+      if (reduce.matches) { cancelAnimationFrame(raf); raf = 0; draw(0); return; }
       if (!raf && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
     redraw.current = () => { if (!raf) draw(reduce.matches ? 0 : performance.now() - born); };

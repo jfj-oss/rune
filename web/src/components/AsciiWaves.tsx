@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { stillQuery } from '../lib/effects';
 import { backdropShown } from '../lib/backdropShown';
 import { blueNoise, DITHER_PALETTES, type Rgb } from '../lib/dither';
 import { ASCII_CHARS, asciiAt, oppositePalette, type GenKind } from '../lib/waveCover';
@@ -22,7 +23,7 @@ export function AsciiWaves({ kind = 'wave' }: { kind?: GenKind }) {
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     rank ??= blueNoise(N);
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const reduce = stillQuery();
     let cols = 0, rows = 0, dpr = 1, raf = 0, last = 0, onScreen = true;
     const born = performance.now();
     const fit = () => {
@@ -58,7 +59,7 @@ export function AsciiWaves({ kind = 'wave' }: { kind?: GenKind }) {
       if (!reduce.matches && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
     const start = () => {
-      if (reduce.matches) { draw(0); return; }
+      if (reduce.matches) { cancelAnimationFrame(raf); raf = 0; draw(0); return; }
       if (!raf && onScreen && document.visibilityState === 'visible') raf = requestAnimationFrame(frame);
     };
     const ro = new ResizeObserver(() => { fit(); draw(reduce.matches ? 0 : performance.now() - born); });
