@@ -11,6 +11,8 @@ export interface SoloistAvailability {
   run: SoloistRun;
   connected: boolean;
   loggedIn: boolean;
+  /** Soloist's own line about why it cannot play (index.ts): used for a sign-in that is still being retried. */
+  problem?: string | null;
 }
 
 export interface PcSpotifyRoute {
@@ -43,7 +45,7 @@ export function soloistFallbackNotice(s: SoloistAvailability): string | null {
       break;
   }
   if (!s.connected) return `Soloist is not running yet — ${using}`;
-  if (!s.loggedIn) return `Soloist is not signed in to Spotify (pair it once with soloist --pair) — ${using}`;
+  if (!s.loggedIn) return s.problem ? `${s.problem.replace(/ — try again in a moment$/, '')} — ${using}` : `Soloist is not signed in to Spotify (pair it once with soloist --pair) — ${using}`;
   return null;
 }
 

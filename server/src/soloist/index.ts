@@ -12,6 +12,7 @@ import type { Config } from '../config.js';
 import { SoloistAudio, type AudioRunner, type SoloistOutput } from './audio.js';
 import { SoloistClient, type SocketCtor } from './client.js';
 import { soloistAvailable } from './pcRoute.js';
+import { SoloistSignIn, spotifyReachable } from './signin.js';
 import { SoloistSupervisor, type ChildLike, type SoloistRun } from './supervisor.js';
 import { SOLOIST_ZONE, SoloistZone, type SoloistLink } from './zone.js';
 
@@ -19,6 +20,7 @@ export * from './audio.js';
 export * from './client.js';
 export * from './output.js';
 export * from './pcRoute.js';
+export * from './signin.js';
 export * from './supervisor.js';
 export * from './zone.js';
 
@@ -36,6 +38,10 @@ export interface SoloistOptions {
   hlsDir?: string;
   exists?: (path: string) => boolean;
   readKey?: (path: string) => string;
+  /** Can Spotify be reached? Default: a DNS lookup for the real Soloist; always yes for a fake process (`spawn`). */
+  online?: () => Promise<boolean>;
+  /** Tests: the sign-in watchdog's timing (signin.ts). */
+  signIn?: { graceMs?: number; backoffMs?: number[]; maxAttempts?: number; slowMs?: number; offlinePollMs?: number };
   now?: () => number;
 }
 
@@ -106,6 +112,8 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
   const set = soloistSettings(cfg);
   const ws = `127.0.0.1:${set.wsPort}`;
   const audio = new SoloistAudio({ sink: set.sink, kbps: set.kbps, runner: opts.runner, hlsDir: opts.hlsDir, log: opts.log, now: opts.now });
+  // The real Soloist: ask the resolver. A fake process (tests): the network is never asked.
+  const online = opts.online ?? (opts.spawn ? async () => true : () => spotifyReachable());
   const supervisor = opts.link || (opts.url && !opts.spawn)
     ? null
     : new SoloistSupervisor({
@@ -118,10 +126,24 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
         spawn: opts.spawn,
         exists: opts.exists,
         readKey: opts.readKey,
+        // Only the real Soloist's first start waits for the network (it signs in once, at its start).
+        ...(opts.spawn ? {} : { online }),
         log: opts.log,
       });
   const client = opts.link ? null : new SoloistClient({ url: opts.url ?? `ws://${ws}`, socket: opts.socket, log: opts.log, now: opts.now });
   const link: SoloistLink = opts.link ?? client!;
+  // A Soloist that came up signed out (no network yet at boot) is started again until it is signed in.
+  const signIn = supervisor
+    ? new SoloistSignIn({
+        view: () => link.view,
+        onView: (fn) => link.onView(fn),
+        restart: (reason) => supervisor.restart(reason),
+        online,
+        ...opts.signIn,
+        now: opts.now,
+        log: opts.log,
+      })
+    : null;
   const zone = new SoloistZone({
     link,
     loadItems: opts.loadItems,
@@ -163,7 +185,7 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
     if (fromProcess) return fromProcess;
     const v = link.view;
     if (!v.connected) return 'Soloist is not running yet — try again in a moment';
-    if (!v.loggedIn) return 'Soloist is not signed in to Spotify — pair it once (soloist --pair), then try again';
+    if (!v.loggedIn) return signIn?.problem() ?? 'Soloist is not signed in to Spotify — pair it once (soloist --pair), then try again';
     return null;
   };
   const run = (): SoloistRun => supervisor?.run ?? (link.view.connected ? 'running' : 'starting');
@@ -229,6 +251,7 @@ export function createSoloist(cfg: Config, opts: SoloistOptions): Soloist {
       clearInterval(keep);
       for (const t of timers) clearTimeout(t);
       timers.clear();
+      signIn?.close();
       supervisor?.stop();
       client?.close();
       await zone.close();
