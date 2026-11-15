@@ -5,8 +5,9 @@
 //
 // Soloist always starts into the null sink, so nothing is ever audible by accident; choosing the PC speakers moves the
 // running stream. The encoder runs only while a phone is asking for the playlist, and writes to tmpfs (never to disk).
-// A skip or seek starts a new "program" (a fresh ffmpeg and playlist), so the phone hears the change after about one
-// segment instead of after its whole buffer.
+// A skip or seek starts a new "program" (a fresh ffmpeg and playlist), so the phone hears the change after a second
+// or two instead of after its whole buffer. The phone gets a program's playlist only when it is valid HLS and holds a
+// cushion of segments (phonePlaylist below).
 import { execFile, spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,7 +40,15 @@ export interface SoloistAudioOptions {
 }
 
 export const DEFAULT_SINK = 'rune-phone';
-const SEGMENT_S = 1;
+/** Half-second segments: a skip is heard soon, and the phone still has a cushion of several segments. */
+const SEGMENT_S = 0.5;
+/** The one EXT-X-TARGETDURATION of every playlist: a whole number of seconds, never below the longest segment. */
+const TARGET_S = 1;
+/** A playlist is handed to the phone only once it lists this many segments and this much sound (its cushion). */
+const READY_SEGMENTS = 3;
+const READY_S = 1.2;
+/** An encoder whose playlist has not moved for this long while a phone asks is started again. */
+const STUCK_MS = 5000;
 
 export interface SinkInput { id: string; sink: string | null; block: string }
 
@@ -85,23 +94,41 @@ export function sinkIndex(shortSinks: string, name: string): string | null {
 }
 
 /**
- * The first segments of a program are short, so a skip is heard sooner: the playlist exists after 0.3 s instead of 1 s,
- * and the three segments a player buffers before it starts are there after ~0.5 s instead of ~2.7 s (measured with a
- * real-time silent input). After the first list fills, segments are SEGMENT_S long again.
+ * ffmpeg arguments for one HLS program read from the sink's monitor. Every segment has the same length: short first
+ * segments (hls_init_time) made ffmpeg write `EXT-X-TARGETDURATION:0` for the first two seconds of every program and
+ * change it to 1 afterwards, which is not valid HLS, and Safari refused the stream after every skip and seek.
  */
-const INIT_SEGMENT_S = 0.3;
-
-/** ffmpeg arguments for one HLS program read from the sink's monitor. */
 export function hlsArgs(sink: string, dir: string, kbps: number): string[] {
   return [
     '-hide_banner', '-loglevel', 'error', '-nostdin',
     '-f', 'pulse', '-i', `${sink}.monitor`,
     '-ac', '2', '-c:a', 'aac', '-b:a', `${kbps}k`,
-    '-f', 'hls', '-hls_time', String(SEGMENT_S), '-hls_init_time', String(INIT_SEGMENT_S), '-hls_list_size', '6',
+    '-f', 'hls', '-hls_time', String(SEGMENT_S), '-hls_list_size', '12',
     '-hls_flags', 'delete_segments+omit_endlist+independent_segments',
     '-hls_segment_filename', join(dir, 'seg%05d.ts'),
     join(dir, 'index.m3u8'),
   ];
+}
+
+/**
+ * ffmpeg's playlist made fit for the phone, or null while it is not ready to be played.
+ *
+ * - Not ready until it lists READY_SEGMENTS segments and READY_S of sound: a player that starts on a single short
+ *   segment has no cushion at all, underruns at once (crackle, then a stall) and reloads in a loop.
+ * - EXT-X-TARGETDURATION is the same whole number in every playlist of every program, at least 1 and never below a
+ *   segment's length (RFC 8216 4.3.3.1; Safari answers NotSupportedError to `0` or to a value that changes).
+ * - Segment names become the paths the HTTP route serves (`g<gen>/seg00001.ts`).
+ */
+export function phonePlaylist(text: string, gen: number): string | null {
+  const durations = [...text.matchAll(/^#EXTINF:([\d.]+)/gm)].map((m) => Number(m[1])).filter((d) => Number.isFinite(d));
+  const segments = text.match(/^seg\d+\.ts$/gm) ?? [];
+  if (segments.length < READY_SEGMENTS || durations.length < segments.length) return null;
+  if (durations.reduce((a, b) => a + b, 0) < READY_S) return null;
+  const target = Math.max(TARGET_S, ...durations.map((d) => Math.round(d)));
+  const body = text.replace(/^(seg\d+\.ts)$/gm, `g${gen}/$1`);
+  return /^#EXT-X-TARGETDURATION:/m.test(body)
+    ? body.replace(/^#EXT-X-TARGETDURATION:.*$/m, `#EXT-X-TARGETDURATION:${target}`)
+    : body.replace(/^#EXTM3U\s*$/m, `#EXTM3U\n#EXT-X-TARGETDURATION:${target}`);
 }
 
 export class SoloistAudio {
@@ -116,6 +143,9 @@ export class SoloistAudio {
   private gen = 0;
   private encoder: { kill(signal?: NodeJS.Signals): boolean } | null = null;
   private lastAsked = 0;
+  /** ffmpeg's playlist as last read, and when it last changed (or the encoder started): a stuck encoder shows here. */
+  private lastRaw = '';
+  private movedAt = 0;
   private idleTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly opts: SoloistAudioOptions = {}) {
@@ -197,13 +227,28 @@ export class SoloistAudio {
     this.startEncoder();
   }
 
-  /** The playlist of the current program with segment paths the HTTP route serves; null until ffmpeg wrote one. */
+  /**
+   * The playlist of the current program for the phone (phonePlaylist); null until ffmpeg has written enough of it.
+   * An encoder that writes nothing for STUCK_MS while a phone keeps asking is started again (a new program).
+   */
   playlist(): string | null {
-    const here = this.listen();
+    let here = this.listen();
     if (!here) return null;
-    const file = join(here.dir, 'index.m3u8');
-    if (!existsSync(file)) return null;
-    return readFileSync(file, 'utf8').replace(/^(seg\d+\.ts)$/gm, `g${here.gen}/$1`);
+    let raw = this.read(here.dir);
+    if (raw !== this.lastRaw) {
+      this.lastRaw = raw;
+      this.movedAt = this.now();
+    } else if (this.now() - this.movedAt > STUCK_MS) {
+      this.opts.log?.({ gen: here.gen, afterMs: this.now() - this.movedAt }, 'soloist: the phone stream stood still; starting its encoder again');
+      this.stopEncoder();
+      here = this.listen()!;
+      raw = this.read(here.dir);
+    }
+    return raw ? phonePlaylist(raw, here.gen) : null;
+  }
+
+  private read(dir: string): string {
+    try { return readFileSync(join(dir, 'index.m3u8'), 'utf8'); } catch { return ''; }
   }
 
   segmentPath(gen: number, name: string): string | null {
@@ -228,6 +273,8 @@ export class SoloistAudio {
     this.gen++;
     const dir = this.dirOf(this.gen);
     mkdirSync(dir, { recursive: true });
+    this.lastRaw = '';
+    this.movedAt = this.now();
     if (old > 0) rmSync(this.dirOf(old), { recursive: true, force: true });
     const child = this.runner.spawn('ffmpeg', hlsArgs(this.sink, dir, this.kbps));
     this.encoder = child;
