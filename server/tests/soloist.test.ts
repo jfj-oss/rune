@@ -727,8 +727,9 @@ describe('SoloistAudio', () => {
     expect(args).toContain('rune-phone.monitor');
     expect(args).toContain('-f');
     expect(args.join(' ')).toMatch(/-c:a aac -b:a 256k/);
-    expect(args.join(' ')).toMatch(/hls_time 1/);
-    expect(args.join(' ')).toMatch(/hls_init_time 0\.3/); // short first segments: a skip is heard after ~0.5 s, not ~2.7 s
+    expect(args.join(' ')).toMatch(/hls_time 0\.5 /);
+    // No short first segments: they made ffmpeg write TARGETDURATION:0, which Safari refuses (tests/soloist-stream.test.ts).
+    expect(args.join(' ')).not.toMatch(/hls_init_time/);
   });
 
   it('creates the silent sink once, moves soloist between the phone sink and the speakers, and runs the encoder only while a phone listens', async () => {
@@ -760,7 +761,7 @@ describe('SoloistAudio', () => {
     expect(spawned).toBe(1);
     expect(audio.playlist()).toBeNull(); // ffmpeg has written nothing yet
     mkdirSync(first!.dir, { recursive: true });
-    writeFileSync(join(first!.dir, 'index.m3u8'), '#EXTM3U\n#EXTINF:1.0,\nseg00001.ts\n');
+    writeFileSync(join(first!.dir, 'index.m3u8'), '#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:0.5,\nseg00001.ts\n#EXTINF:0.5,\nseg00002.ts\n#EXTINF:0.5,\nseg00003.ts\n');
     writeFileSync(join(first!.dir, 'seg00001.ts'), 'x');
     expect(audio.playlist()).toContain('g1/seg00001.ts');
     expect(audio.segmentPath(1, 'seg00001.ts')).toBe(join(first!.dir, 'seg00001.ts'));
