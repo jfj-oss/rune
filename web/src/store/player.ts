@@ -174,6 +174,20 @@ function recordPlayed(state: PlayerState, prev: { albumId: string | null }) {
   saveLocal('rune.played', list.slice(0, 60));
 }
 
+/**
+ * A shuffled copy of `items` to play from index 0. `keep` is the index of the song the user chose, which stays first;
+ * -1 mixes everything (Shuffle play).
+ */
+export function shuffledList<T>(items: T[], keep: number, rng: () => number = Math.random): { list: T[]; start: number } {
+  const first = keep >= 0 && keep < items.length ? [items[keep] as T] : [];
+  const rest = items.filter((_, i) => i !== keep);
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [rest[i], rest[j]] = [rest[j] as T, rest[i] as T];
+  }
+  return { list: [...first, ...rest], start: 0 };
+}
+
 /** Spotify's play call takes at most 100 URIs, so a Connect device gets a window of the list. */
 const CONNECT_WINDOW = 100;
 
@@ -416,16 +430,9 @@ export const usePlayer = create<PlayerStore>((set, get) => {
         const st = get();
         let z = st.zones.find((x) => x.id === st.zone);
         if (!z || !backends.get(z.id)) return;
-        let list = items;
-        let start = startIndex;
-        if (opts?.shuffle) {
-          list = items.slice();
-          for (let i = list.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [list[i], list[j]] = [list[j] as PlayItem, list[i] as PlayItem];
-          }
-          start = 0;
-        }
+        // "Shuffle play" mixes the whole list; with Shuffle switched on, the chosen song plays first and the rest are mixed.
+        const shuffleOn = backends.get(z.id)!.state.shuffle;
+        let { list, start } = opts?.shuffle ? shuffledList(items, -1) : shuffleOn ? shuffledList(items, startIndex) : { list: items, start: startIndex };
         // Owned songs play from the local file (and then need no Spotify player at all).
         list = await ownCopies(z, list, start);
         // Sending Spotify tracks to the PC speakers: Soloist, or (saying why) the app — started and waited for.
