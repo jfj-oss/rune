@@ -55,7 +55,8 @@ async function setup(opts: { playsForBrowser: boolean; savedZone?: string; narro
     async setVolume() {}
     async activateElement() {}
   }
-  const store = new Map<string, string>(opts.savedZone ? [['rune.zone', JSON.stringify(opts.savedZone)]] : []);
+  // This browser's own id is fixed, so its zone ("browser:<id>") can be named in a saved choice.
+  const store = new Map<string, string>([['rune.client', 'testclient1'], ...(opts.savedZone ? [['rune.zone', JSON.stringify(opts.savedZone === 'browser' ? 'browser:testclient1' : opts.savedZone)] as [string, string]] : [])]);
   vi.stubGlobal('localStorage', { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) });
   vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36', maxTouchPoints: 0, requestMediaKeySystemAccess: () => Promise.reject(new Error('not in a test')) });
   vi.stubGlobal('window', {
@@ -113,7 +114,8 @@ describe('a rune tab on the PC itself (Soloist plays there)', () => {
     await h.usePlayer.getState().playItems([item('sp:tab1'), item('sp:tab2')], 0);
     await new Promise((r) => setTimeout(r, 20));
     const plays = h.playerPosts.filter((p) => p.type === 'play');
-    expect(plays).toEqual([{ zone: 'soloist', type: 'play', trackIds: ['sp:tab1', 'sp:tab2'] }]);
+    // the pc zone's queue is the server's: it hands the songs to Soloist itself
+    expect(plays).toEqual([{ zone: 'pc', type: 'play', trackIds: ['sp:tab1', 'sp:tab2'] }]);
     // The tab asked Spotify for nothing: no second device starts the song.
     expect(h.spotifyRequests).toEqual([]);
     expect(h.sdkPlayers).toEqual([]);
@@ -130,7 +132,7 @@ describe('a rune tab on the PC itself (Soloist plays there)', () => {
     const h = await setup({ playsForBrowser: true });
     await h.usePlayer.getState().refreshZones();
     expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc']);
-    await h.usePlayer.getState().setZone('browser');
+    await h.usePlayer.getState().setZone('browser:testclient1');
     expect(h.usePlayer.getState().zone).toBe('pc');
   });
 });
@@ -138,8 +140,8 @@ describe('a rune tab on the PC itself (Soloist plays there)', () => {
 describe('a rune tab on another computer', () => {
   it('keeps its own browser zone and Web Playback SDK player (it has speakers of its own)', async () => {
     const h = await setup({ playsForBrowser: false, savedZone: 'browser' });
-    expect(h.usePlayer.getState().zone).toBe('browser');
-    expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc', 'browser']);
+    expect(h.usePlayer.getState().zone).toBe('browser:testclient1');
+    expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc', 'browser:testclient1']);
     expect(h.sdkPlayers).toHaveLength(1);
     expect(h.useSpotify.getState().sdk).toMatchObject({ phase: 'ready', deviceId: 'tab-device' });
   });

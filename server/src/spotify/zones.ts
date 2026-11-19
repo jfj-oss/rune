@@ -4,6 +4,7 @@
 // is still seen immediately without asking Spotify every few seconds.
 import type { PlayerCommand, PlayerState, QueueItem, Track, Zone } from '@liner/shared';
 import type { PlaybackZone } from '../modules.js';
+import { shuffled } from '../play/queue.js';
 import type {
   SpotifyBudgetLevel,
   SpotifyBudgetLogger,
@@ -625,7 +626,10 @@ export class SpotifyConnectZone implements PlaybackZone {
     const device = this.deviceId;
     switch (cmd.type) {
       case 'play': {
-        const window = playWindow(cmd.trackIds.map((id) => this.requireSpotifyTrack(id)), cmd.startIndex ?? 0);
+        // With Spotify's shuffle on (or the Shuffle button) the list is mixed here, so the order sent is the order wanted.
+        const mix = cmd.shuffle === true || this.snapshot.shuffle;
+        const ids = mix ? shuffled(cmd.trackIds, cmd.shuffle === true ? -1 : cmd.startIndex ?? 0) : cmd.trackIds;
+        const window = playWindow(ids.map((id) => this.requireSpotifyTrack(id)), mix ? 0 : cmd.startIndex ?? 0);
         const spotifyIds = window.list;
         const uris = spotifyIds.map((id) => `spotify:track:${id}`);
         const body: SpotifyPlayBody = { uris };

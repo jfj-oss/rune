@@ -1,10 +1,9 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { GripVertical, ListMusic, ListPlus, MoreHorizontal, TriangleAlert, X } from 'lucide-react';
+import { GripVertical, ListMusic, ListPlus, MoreHorizontal, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type RefObject } from 'react';
 import { formatDuration, formatTotalLength, plural } from '../../lib/format';
 import { isLiveTrack } from '../../lib/listenTypes';
 import { liveSubtitle } from '../../lib/live';
-import { isMixedQueue } from '../../player/pc';
 import { queueName } from '../../lib/playlists';
 import { usePlayer } from '../../store/player';
 import { usePlaylistUi } from '../../store/playlistUi';
@@ -129,8 +128,6 @@ export function QueuePanel({ onClose }: { onClose(): void }) {
   const queue = usePlayer((s) => s.state.queue);
   const index = usePlayer((s) => s.state.index);
   const command = usePlayer((s) => s.command);
-  // A server-owned pc queue plays a mixed queue with no tab open: no note then.
-  const onPc = usePlayer((s) => { const z = s.zones.find((x) => x.id === s.zone); return z?.kind === 'pc' && !z.serverQueue; });
   const body = useRef<HTMLDivElement>(null);
   const total = queue.reduce((n, q) => n + q.track.durationMs, 0);
   const save = () => usePlaylistUi.getState().openPicker({
@@ -153,9 +150,6 @@ export function QueuePanel({ onClose }: { onClose(): void }) {
           <button className="btn-icon" aria-label="Close queue" onClick={onClose}><X size={20} /></button>
         </div>
       </header>
-      {onPc && isMixedQueue(queue) && (
-        <p className="queue__note" role="note"><TriangleAlert size={14} /> Mixed queue on the PC speakers: keep a rune tab open so it can switch between local files and Spotify.</p>
-      )}
       <div className="queue__body" ref={body}><QueueList scrollRef={body} /></div>
     </aside>
   );

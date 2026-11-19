@@ -1,13 +1,9 @@
 // Spotify on a phone through Soloist on the PC (phoneSoloist.ts): the browser zone's Spotify half on a handheld.
 // Fake soloist zone (what the server's SoloistZone reports), fake <audio> element, fake output switch; nothing real.
-import type { Track } from '@liner/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ZoneInfo } from '../lib/types';
-import type { Engine } from './engine';
-import { HybridEngine } from './hybrid';
-import { LocalBackend } from './local';
 import { PhoneSoloistEngine, phoneSoloistRoute, type StreamElement } from './phoneSoloist';
-import { FakeZone, mkItem, mkTrack } from './testkit';
+import { FakeZone, mkTrack } from './testkit';
 
 const flush = async (n = 3) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
 
@@ -23,23 +19,6 @@ class FakeEl implements StreamElement {
   removeAttribute(name: string) { if (name === 'src') this.src = ''; }
   addEventListener(type: string, fn: () => void) { this.handlers.set(type, fn); }
   fire(type: string) { this.handlers.get(type)?.(); }
-}
-
-/** The phone's own player for local files, as far as the hand-over needs it. */
-class FakeLocal implements Engine {
-  loaded: string[] = [];
-  stopped = 0;
-  private endedFn = () => {};
-  load(track: Track) { this.loaded.push(track.id); }
-  play() {}
-  pause() {}
-  seek() {}
-  setVolume() {}
-  position() { return null; }
-  stop() { this.stopped++; }
-  onEnded(fn: () => void) { this.endedFn = fn; }
-  onError() {}
-  end() { this.endedFn(); }
 }
 
 function setup() {
@@ -61,7 +40,6 @@ function setup() {
   return { zone, el, outputs, engine, notice, ended, sync, err, volume, setProblem: (p: string | null) => { problem = p; } };
 }
 const S = (n: number) => mkTrack(`sp:${n}`, 'spotify');
-const L = (n: number) => mkTrack(`l:${n}`, 'local');
 
 let live: { stop(): void }[] = [];
 afterEach(() => { for (const x of live.splice(0)) x.stop(); });
@@ -191,82 +169,5 @@ describe('PhoneSoloistEngine', () => {
     engine.pause(); // what the queue does at its end
     await flush();
     expect(zone.log.at(-1)).toBe('pause');
-  });
-});
-
-describe('the phone’s queue over the hybrid engine (local files here, Spotify through Soloist)', () => {
-  function queue() {
-    const s = setup();
-    const local = new FakeLocal();
-    const notice = vi.fn();
-    const b = new LocalBackend('browser', new HybridEngine(local, s.engine), undefined, notice);
-    live.push({ stop: () => b.dispose() });
-    return { ...s, local, b, notice };
-  }
-  const play = (tracks: Track[], startIndex = 0) => ({ type: 'play' as const, trackIds: tracks.map((t) => t.id), startIndex });
-
-  it('a run of Spotify songs goes to Soloist together; when it moves on to the next, the queue follows without a new play and the element keeps the program', async () => {
-    const { zone, el, b } = queue();
-    const tracks = [S(1), S(2), S(3)];
-    await b.send(play(tracks), tracks.map(mkItem));
-    await flush();
-    expect(zone.log).toEqual(['play:sp:1,sp:2,sp:3@0']);
-    const loads = el.loads;
-    zone.progress(198_000);
-    zone.moveOn(); // Soloist went on to sp:2 by itself (gapless)
-    await flush();
-    expect(b.state.index).toBe(1);
-    expect(b.state.status).toBe('playing');
-    expect(zone.log).toEqual(['play:sp:1,sp:2,sp:3@0']); // nothing re-sent
-    expect(el.loads).toBe(loads); // same program, no reload
-    expect(el.paused).toBe(false);
-  });
-
-  it('mixed queue: a local file plays here, the Spotify song after it through Soloist, the local one after that here again — Soloist silenced in between', async () => {
-    const { zone, el, b, local, outputs } = queue();
-    const tracks = [L(1), S(1), L(2)];
-    await b.send(play(tracks), tracks.map(mkItem));
-    await flush();
-    expect(local.loaded).toEqual(['l:1']);
-    expect(zone.log).toEqual([]);
-    expect(outputs).toEqual([]);
-    local.end();
-    await flush();
-    expect(b.state.index).toBe(1);
-    expect(outputs).toEqual(['phone@0']);
-    expect(zone.log).toEqual(['play:sp:1@0']); // only the Spotify run (one song) goes to Soloist
-    expect(el.src).not.toBe('');
-    zone.progress(199_000);
-    zone.finish(); // Soloist went idle
-    await flush();
-    expect(b.state.index).toBe(2);
-    expect(local.loaded).toEqual(['l:1', 'l:2']);
-    expect(el.src).toBe('');
-    expect(zone.log.filter((l) => l.startsWith('play'))).toEqual(['play:sp:1@0']);
-  });
-
-  it('Next during a Spotify run restarts Soloist on the chosen song (a new program the element joins)', async () => {
-    const { zone, el, b } = queue();
-    const tracks = [S(1), S(2)];
-    await b.send(play(tracks), tracks.map(mkItem));
-    await flush();
-    const plays = el.plays.length;
-    await b.send({ type: 'next' });
-    await flush();
-    expect(zone.log.filter((l) => l.startsWith('play'))).toEqual(['play:sp:1,sp:2@0', 'play:sp:2@0']);
-    expect(el.plays.length).toBe(plays + 1); // joined the new program once
-    expect(el.src).not.toBe('');
-    expect(el.paused).toBe(false);
-  });
-
-  it('the slider shows Soloist’s level while a Spotify song sounds, and moves it', async () => {
-    const { zone, b } = queue();
-    zone.state = { ...zone.state, volume: 35 };
-    await b.send(play([S(1)]), [mkItem(S(1))]);
-    await flush();
-    expect(b.state.volume).toBe(35);
-    await b.send({ type: 'volume', volume: 60 });
-    await flush();
-    expect(zone.log.at(-1)).toBe('volume:60');
   });
 });

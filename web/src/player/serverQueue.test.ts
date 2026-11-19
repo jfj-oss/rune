@@ -1,46 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import type { PlayerState } from '@liner/shared';
-import { helloAction, holdNotice, usesServerQueue } from './serverQueue';
-import { needsPcSpotify } from './pcStart';
-import { emptyState } from './types';
+import { helloAction, holdNotice } from './serverQueue';
+import { pcSpotifyFallbackNotice } from './pcStart';
 import { mkItem, mkTrack } from './testkit';
+import { emptyState } from './types';
 
-const tab = { build: 'b1', pcServerQueue: false as boolean | null, playingHere: false };
-
-describe('server queue on the page', () => {
-  it('only a pc zone the server marks uses it', () => {
-    expect(usesServerQueue({ kind: 'pc', serverQueue: true })).toBe(true);
-    expect(usesServerQueue({ kind: 'pc' })).toBe(false);
-    expect(usesServerQueue({ kind: 'spotify', serverQueue: true })).toBe(false);
-    expect(usesServerQueue(undefined)).toBe(false);
+describe('hello', () => {
+  const tab = { build: 'b1', playingHere: false };
+  it('a tab from the build the server serves is left alone', () => {
+    expect(helloAction({ build: 'b1' }, tab)).toBe('none');
+    expect(helloAction({ build: null }, tab)).toBe('none');
   });
-
-  it('the page never starts the Spotify app itself for a server-queue pc zone: the server does', () => {
-    const items = [mkItem(mkTrack('sp:1', 'spotify'))];
-    expect(needsPcSpotify({ id: 'pc', name: 'PC', kind: 'pc' }, items)).toBe(true);
-    expect(needsPcSpotify({ id: 'pc', name: 'PC', kind: 'pc', serverQueue: true }, items)).toBe(false);
+  it('a tab from another build is told to reload (not in dev)', () => {
+    expect(helloAction({ build: 'b2' }, tab)).toBe('notice');
+    expect(helloAction({ build: 'b2' }, { ...tab, playingHere: true })).toBe('notice');
+    expect(helloAction({ build: 'b2' }, { ...tab, dev: true })).toBe('none');
   });
+});
 
-  it('a tab that drives the pc zone the other way reloads; one playing in itself is told to', () => {
-    expect(helloAction({ build: 'b1', serverQueue: true }, tab)).toBe('reload');
-    expect(helloAction({ build: 'b1', serverQueue: true }, { ...tab, playingHere: true })).toBe('notice');
-    expect(helloAction({ build: 'b1', serverQueue: false }, { ...tab, pcServerQueue: true })).toBe('reload');
+describe('hold notice', () => {
+  const held = (zone: string, reason: 'rate-limited' | 'takeover'): PlayerState => ({ ...emptyState(zone), hold: { reason, message: `${reason}!` } });
+  it('says why the queue stopped, once per reason', () => {
+    expect(holdNotice(undefined, held('pc', 'takeover'))).toBe('takeover!');
+    expect(holdNotice(held('pc', 'takeover'), held('pc', 'takeover'))).toBeNull();
+    expect(holdNotice(held('pc', 'takeover'), held('pc', 'rate-limited'))).toBe('rate-limited!');
+    expect(holdNotice(undefined, emptyState('pc'))).toBeNull();
   });
+});
 
-  it('a tab from another web build is told to reload; the same build, or no pc zone yet, is left alone', () => {
-    expect(helloAction({ build: 'b2', serverQueue: false }, tab)).toBe('notice');
-    expect(helloAction({ build: 'b1', serverQueue: false }, tab)).toBe('none');
-    expect(helloAction({ build: 'b1', serverQueue: true }, { ...tab, pcServerQueue: null })).toBe('none');
-    expect(helloAction({ build: null, serverQueue: false }, tab)).toBe('none');
-    expect(helloAction({ build: 'b2', serverQueue: false }, { ...tab, dev: true })).toBe('none');
-  });
-
-  it('a hold is announced once, when it starts or its reason changes', () => {
-    const base: PlayerState = { ...emptyState('pc') };
-    const held: PlayerState = { ...base, hold: { reason: 'rate-limited', message: 'limit' } };
-    expect(holdNotice(base, held)).toBe('limit');
-    expect(holdNotice(held, { ...held, positionMs: 5 })).toBeNull();
-    expect(holdNotice(held, { ...held, hold: { reason: 'takeover', message: 'other' } })).toBe('other');
-    expect(holdNotice(held, base)).toBeNull();
+describe('Spotify on the pc zone', () => {
+  it('names the stand-in only when Spotify songs head for the pc zone', () => {
+    const pc = { id: 'pc', name: 'PC', kind: 'pc' as const, spotifyNotice: 'Soloist needs updating — using the Spotify app' };
+    expect(pcSpotifyFallbackNotice(pc, [mkItem(mkTrack('sp:1', 'spotify'))])).toBe(pc.spotifyNotice);
+    expect(pcSpotifyFallbackNotice(pc, [mkItem(mkTrack('l:1', 'local'))])).toBeNull();
+    expect(pcSpotifyFallbackNotice({ ...pc, kind: 'browser' as never }, [mkItem(mkTrack('sp:1', 'spotify'))])).toBeNull();
   });
 });

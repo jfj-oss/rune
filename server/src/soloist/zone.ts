@@ -235,7 +235,7 @@ export class SoloistZone implements PlaybackZone {
       case 'play': {
         const items = this.playable(cmd.trackIds);
         if (!items.length) throw new Error('None of these songs is a Spotify song');
-        this.q = queuePlay(this.q, items, cmd.startIndex ?? 0);
+        this.q = queuePlay(this.q, items, cmd.startIndex ?? 0, Math.random, cmd.shuffle === true);
         await this.startCurrent({ positionMs: cmd.positionMs ?? 0, paused: cmd.paused === true });
         return;
       }
