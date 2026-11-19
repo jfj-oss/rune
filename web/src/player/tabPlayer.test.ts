@@ -170,6 +170,32 @@ describe('TabPlayer: song ends', () => {
   });
 });
 
+describe('TabPlayer: a page that went quiet catches up', () => {
+  it('keeps reports a locked page could not send and sends them in order, then where it is, then re-reads the state', async () => {
+    const engine = new FakeEngine();
+    const sent: string[] = [];
+    let failing = true;
+    const refresh = vi.fn(async () => {});
+    const player = new TabPlayer('browser:me', engine, {
+      report: async (r) => { if (failing) throw new Error('suspended'); sent.push(`${r.type}:${r.queueId}`); },
+      setVolume: vi.fn(), notice: vi.fn(), refresh, visible: () => false, channel: null,
+    });
+    live.push(player);
+    player.claim();
+    player.apply(state({ status: 'playing' }));
+    await flush();
+    engine.endedFn(); // q1 ended and q2 began while locked: the reports fail
+    await flush();
+    expect(sent).toEqual([]);
+    failing = false;
+    engine.pos = 4_000;
+    await player.sync(); // unlock
+    expect(sent).toEqual(['started:q1', 'ended:q1', 'started:q2', 'started:q2']);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(engine.calls.filter((c) => c.startsWith('load')).length).toBe(2); // it did not reload anything meanwhile
+  });
+});
+
 describe('TabPlayer: which tab sounds', () => {
   function channel() {
     let letGo = () => {}, asked = () => false, answer = false;

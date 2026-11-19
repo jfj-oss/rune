@@ -17,6 +17,10 @@ export interface TabPlayerDeps {
   /** The engine's own level changed (Soloist heard on the phone keeps its own): tell the server queue. */
   setVolume(volume: number): void;
   notice(message: string): void;
+  /** Is this page on screen? (reports say so: a hidden page may go quiet without being gone) */
+  visible?(): boolean;
+  /** Re-read the server's state (after a lock or a missed push); resolves once it was applied. */
+  refresh?(): Promise<void>;
   channel: TabChannel | null;
 }
 
@@ -41,6 +45,7 @@ export class TabPlayer {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private adopting = false;
   private quietUntil = 0;
+  private unsent: TabReport[] = [];
 
   constructor(
     readonly zone: string,
@@ -217,8 +222,35 @@ export class TabPlayer {
   private send(r: TabReportBody): void {
     const plan = this.state?.tab;
     if (!plan) return;
-    const report = { ...r, token: plan.token } as TabReport;
-    this.reports = this.reports.then(() => this.deps.report(report)).catch(() => undefined);
+    const report = { ...r, token: plan.token, ...(this.deps.visible ? { visible: this.deps.visible() } : {}) } as TabReport;
+    this.reports = this.reports
+      .then(() => this.deps.report(report))
+      .catch(() => {
+        // A fetch a locked phone refused: keep it, in order, for the next time this page can speak (sync).
+        if (report.type !== 'position') { this.unsent.push(report); if (this.unsent.length > 20) this.unsent.shift(); }
+      });
+  }
+
+  /**
+   * The page can speak again (unlock, visibility change, page hide, a media-key command) or is about to go quiet: send what
+   * the server missed, in order, then where the player is now, then catch up with the server's state. The tab never
+   * depends on a timer for any of this: song ends are handled when the audio element says so.
+   */
+  async sync(): Promise<void> {
+    if (!this.hosting) { await this.deps.refresh?.(); return; }
+    const missed = this.unsent.splice(0);
+    for (const r of missed) await this.deps.report(r).catch(() => { this.unsent.push(r); });
+    const qid = this.loaded;
+    const s = this.state;
+    if (qid && this.sounding && s) {
+      // The truth of this page: what it sounds. (If the server missed song ends meanwhile, this moves its cursor here.)
+      const pos = this.engine.position() ?? livePosition(s);
+      const plan = s.tab;
+      if (plan && s.queue[s.index]?.queueId !== qid) this.send({ type: 'started', queueId: qid, positionMs: Math.round(pos) });
+      else this.send({ type: 'position', queueId: qid, positionMs: Math.round(pos) });
+    }
+    await this.reports;
+    await this.deps.refresh?.();
   }
 
   private startHeartbeat(): void {

@@ -115,7 +115,7 @@ export function parseTabReport(body: unknown): { ok: true; report: TabReport } |
   if (!isRecord(body)) return { ok: false, error: 'report must be a JSON object' };
   const { type, token, queueId, positionMs } = body;
   if (!isWholeAtLeast(token, 0) || !isQueueId(queueId) || queueId.length > 200) return { ok: false, error: 'report needs a token and a queueId' };
-  const base = { token, queueId };
+  const base = { token, queueId, ...(typeof body.visible === 'boolean' ? { visible: body.visible } : {}) };
   const pos = isFiniteNumber(positionMs) && positionMs >= 0 ? Math.round(positionMs) : null;
   switch (type) {
     case 'ended':

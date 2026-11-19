@@ -1,7 +1,9 @@
 // The output behind a browser zone: the tab that sounds it. The server queue (play/driver.ts) decides what plays; this
 // output only publishes the instruction (PlayerState.tab: which run, a new load, a new seek) and turns the tab's
-// reports back into the facts every output gives the driver. If the tab goes quiet the zone pauses with a reason
-// instead of showing "playing" for ever.
+// reports back into the facts every output gives the driver. A quiet tab (a locked or backgrounded phone, whose timers
+// and fetches the browser suspends while its audio goes on) is never a reason to pause: its position is then unknown
+// (the driver counts by the clock) and the queue stays as it is. It catches up when it reports again. Only a tab that
+// has been gone for 30 minutes releases the zone.
 import type { PlayerState, QueueItem, TabReport } from '@liner/shared';
 import type { Output, OutputFact } from './driver.js';
 
@@ -9,12 +11,15 @@ export interface TabOutputOptions {
   now?: () => number;
   /** A song the tab never started within this long failed (nobody is listening). */
   startTimeoutMs?: number;
-  /** A playing tab that has not reported within this long is gone. */
-  silentMs?: number;
+  /** A tab that has not reported within this long is gone (the zone is released, paused). */
+  goneMs?: number;
+  /** Without a report for this long the tab's position is unknown (the clock counts instead). */
+  staleMs?: number;
 }
 
 export const TAB_START_TIMEOUT_MS = 20_000;
-export const TAB_SILENT_MS = 45_000;
+export const TAB_GONE_MS = 30 * 60_000;
+export const TAB_STALE_MS = 20_000;
 
 export class TabOutput implements Output {
   readonly kind = 'tab' as const;
@@ -32,13 +37,17 @@ export class TabOutput implements Output {
   private readonly detailFns = new Set<() => void>();
   private readonly now: () => number;
   private readonly startTimeoutMs: number;
-  private readonly silentMs: number;
+  private readonly goneMs: number;
+  private readonly staleMs: number;
+  /** The last report said the page is not on screen: it may be unable to answer a new start. */
+  private hidden = false;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: TabOutputOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.startTimeoutMs = opts.startTimeoutMs ?? TAB_START_TIMEOUT_MS;
-    this.silentMs = opts.silentMs ?? TAB_SILENT_MS;
+    this.goneMs = opts.goneMs ?? TAB_GONE_MS;
+    this.staleMs = opts.staleMs ?? TAB_STALE_MS;
   }
 
   async start(run: QueueItem[], opts: { token: number; positionMs: number; volume: number }): Promise<void> {
@@ -90,6 +99,7 @@ export class TabOutput implements Output {
 
   position(): number | null {
     if (!this.active || !this.playing || !this.reported) return null;
+    if (this.now() - this.lastContact > this.staleMs) return null;
     return this.reported.positionMs + Math.max(0, this.now() - this.reported.at);
   }
 
@@ -113,6 +123,7 @@ export class TabOutput implements Output {
 
   /** The tab's own report. Reports of an older run, or about a song that is not in the run, are dropped. */
   report(r: TabReport): void {
+    if (r.visible !== undefined) this.hidden = !r.visible;
     if (!this.active || r.token !== this.token) return;
     const at = this.now();
     this.lastContact = at;
@@ -175,23 +186,23 @@ export class TabOutput implements Output {
     this.timer = null;
   }
 
-  /** Nobody answered the start, or a playing tab fell silent: the zone pauses with a reason. */
+  /** Nobody answered a start of a page that is on screen, or the tab has been gone for 30 minutes: the zone pauses with a reason. */
   private watch(): void {
     if (!this.active) return;
     const at = this.now();
     const waited = at - this.lastContact;
     const starting = this.cur === null;
-    if (starting ? waited > this.startTimeoutMs : this.playing && waited > this.silentMs) {
-      this.fact({
-        type: 'failed',
-        token: this.token,
-        queueId: this.cur,
-        reason: 'output-failed',
-        message: starting ? 'No rune page answered to play this: open rune in this browser and press Play.' : 'This browser stopped answering: playback paused.',
-        at,
-      });
-      this.active = false;
-      this.disarm();
-    }
+    const dead = starting ? !this.hidden && waited > this.startTimeoutMs && waited > 0 : this.playing && waited > this.goneMs;
+    if (!dead) return;
+    this.fact({
+      type: 'failed',
+      token: this.token,
+      queueId: this.cur,
+      reason: 'output-failed',
+      message: starting ? 'No rune page answered to play this: open rune in this browser and press Play.' : 'This browser has been gone for a long time: playback paused.',
+      at,
+    });
+    this.active = false;
+    this.disarm();
   }
 }

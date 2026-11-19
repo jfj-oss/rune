@@ -171,7 +171,7 @@ export interface TabPlan {
 }
 
 /** What the sounding tab tells the server about its own player (POST /api/player/:zone/report). */
-export type TabReport = { token: number; queueId: string } & (
+export type TabReport = { token: number; queueId: string; /** Is the page on screen? (A hidden or locked page may go quiet: that is never a reason to pause.) */ visible?: boolean } & (
   | { type: 'started'; positionMs: number; durationMs?: number }
   | { type: 'ended' }
   | { type: 'paused'; positionMs: number }

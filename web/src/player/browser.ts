@@ -32,6 +32,7 @@ export class BrowserBackend implements Backend {
   private readonly remote: RemoteBackend;
   private readonly player: TabPlayer;
   private readonly off: () => void;
+  private unhook: () => void = () => {};
 
   constructor(
     readonly zone: string,
@@ -43,9 +44,19 @@ export class BrowserBackend implements Backend {
       report: (r) => api.tabReport(zone, r),
       setVolume: (volume) => void this.remote.send({ type: 'volume', volume }).catch(() => undefined),
       notice: deps.notice,
+      visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+      refresh: () => this.remote.refresh(),
       channel: deps.channel,
     });
     this.off = this.remote.subscribe((s) => this.player.apply(s));
+    // Timers and fetches of a locked or hidden page are suspended while its audio goes on: whenever the page can speak
+    // again, or is about to be frozen, it tells the server where it is and catches up.
+    const sync = () => void this.player.sync().catch(() => undefined);
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', sync);
+      window.addEventListener('pagehide', sync);
+      this.unhook = () => { document.removeEventListener('visibilitychange', sync); window.removeEventListener('pagehide', sync); };
+    }
   }
 
   get state(): PlayerState { return this.remote.state; }
@@ -59,10 +70,13 @@ export class BrowserBackend implements Backend {
   async send(cmd: ExtCommand, items?: PlayItem[]): Promise<void> {
     if (startsSoundHere(cmd, this.remote.state)) this.player.claim();
     await this.remote.send(cmd, items);
+    // (a lock-screen next/previous lands here too: the answer was applied above; say where this page is now)
+    if (cmd.type === 'next' || cmd.type === 'prev') void this.player.sync().catch(() => undefined);
   }
 
   dispose(): void {
     this.off();
+    this.unhook();
     this.player.dispose();
     this.remote.dispose();
   }

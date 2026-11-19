@@ -73,6 +73,9 @@ Shuffle is a real reordering: the queue shown is the play order; turning it off 
   it shows the server's state and sends button presses, and the ONE tab of that browser that sounds the zone follows
   `PlayerState.tab` (which run to play, a new load, a new seek) with its audio engine and reports back (`TabReport`). Spotify
   songs in the browser zone: the Web Playback SDK on a desktop, Soloist heard over a stream on a phone (`phoneSoloist.ts`).
+  A quiet tab (locked phone) never pauses the zone: its position becomes unknown, the tab hands over to the next song of its run
+  itself on audio `ended`, and on unlock/visibility/pagehide it sends what the server missed and re-reads the state. Only 30 min
+  of silence releases the zone.
 - Spotify Connect devices (`spotify:<device>`) keep Spotify's own queue (`server/src/spotify/zones.ts`); only a Shuffle play
   is mixed by rune before it is sent.
 - Tests: `server/tests/e2e/` plays real silent FLACs through a real server (mpv on a null output) and a muted headless Chromium;
