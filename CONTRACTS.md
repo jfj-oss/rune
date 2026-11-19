@@ -35,7 +35,7 @@ from the PC browser and an iPhone (installable web app).
 | `POST /player/:zone` body `PlayerCommand` | `PlayerState` |
 | `POST /player/browser:<id>/report` body `TabReport` | `{ ok }` (the tab that sounds a browser zone tells the server what its player did) |
 | `GET /zones` | `{ id: Zone, name: string, kind: 'pc'\|'browser'\|'spotify' }[]` (browser zones are not listed: each page names its own, `browser:<id>`) |
-| `GET /spotify/status` · `GET /spotify/token` | `{connected,user}` · short-lived `{access_token, expires_at}` (Web Playback SDK in the browser) |
+| `GET /spotify/status` | `{connected,user}` |
 | `GET /playlists` · `GET /playlists/:id` | `PlaylistSummary[]` · `PlaylistDetail` (Liked Songs = `pl:sp:liked`) |
 | `GET /albums/:id/saved` · `POST/DELETE /albums/:id/save` | `{saved}` · save / unsave a Spotify album |
 | `POST /scan` | starts rescan |
@@ -72,7 +72,8 @@ Shuffle is a real reordering: the queue shown is the play order; turning it off 
   browser's localStorage, `web/src/lib/clientId.ts`). The page (`web/src/player/browser.ts`, `tabPlayer.ts`) holds NO queue:
   it shows the server's state and sends button presses, and the ONE tab of that browser that sounds the zone follows
   `PlayerState.tab` (which run to play, a new load, a new seek) with its audio engine and reports back (`TabReport`). Spotify
-  songs in the browser zone: the Web Playback SDK on a desktop, Soloist heard over a stream on a phone (`phoneSoloist.ts`).
+  songs in the browser zone: only Soloist heard over a stream on a phone (`phoneSoloist.ts`); a desktop browser plays none (rune has no
+  in-browser Spotify player), so such songs are kept out of its queue and the page offers the PC or a phone's Spotify instead.
   A quiet tab (locked phone) never pauses the zone: its position becomes unknown, the tab hands over to the next song of its run
   itself on audio `ended`, and on unlock/visibility/pagehide it sends what the server missed and re-reads the state. Only 30 min
   of silence releases the zone.

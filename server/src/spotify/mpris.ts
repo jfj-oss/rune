@@ -1,6 +1,6 @@
 // Phase 2 of the server-queue plan: the Spotify desktop app on this PC describes itself over MPRIS, for free. While
 // it owns its MPRIS name and reports a track, its Connect zone (this PC) is read from there instead of GET /me/player:
-// the answer is shaped like /me/player, as LocalPlaybackSource does for the browser SDK, so the zone logic is the
+// the answer is shaped like /me/player, so the zone logic is the
 // same. Commands still go through the Web API, and nothing here sends an MPRIS method: it reads properties only.
 //
 // Spotify is still asked, once, when MPRIS cannot be the whole truth: the app went away, its state makes no sense,

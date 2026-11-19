@@ -1,7 +1,7 @@
 // Does a request come from a browser on the very machine rune runs on?
 //
 // The page asks because of the "Linux PC speakers" zone: a tab on that PC needs no player of its own (the pc zone IS
-// its speakers), and a second player there (the Web Playback SDK in the tab) is a second Spotify Connect device
+// its speakers), and a second Spotify player in the tab would be a second Spotify Connect device
 // competing with Soloist for the one stream an account has.
 import { networkInterfaces } from 'node:os';
 

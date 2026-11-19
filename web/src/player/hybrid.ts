@@ -3,7 +3,7 @@ import type { Engine } from './engine';
 
 /**
  * The browser zone's engine: local files play through the <audio> engine, Spotify tracks through the
- * Web Playback SDK engine. LocalBackend keeps ONE queue spanning both; on every track change this
+ * Spotify engine (Soloist heard on a phone, or one that refuses them). The server queue spans both; on every track change this
  * engine switches to the right backend and silences the other one.
  */
 export class HybridEngine implements Engine {

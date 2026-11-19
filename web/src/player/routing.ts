@@ -2,14 +2,12 @@ import type { PlayItem, PlaySource, ZoneInfo } from '../lib/types';
 
 /** What this client can currently do beyond plain local playback. */
 export interface Caps {
-  /** Spotify is connected AND the Web Playback SDK can run here (desktop browser, premium). */
-  sdk: boolean;
   /** A phone that hears Spotify through Soloist on the PC (player/phoneSoloist.ts): Soloist can play right now. */
   soloist?: boolean;
 }
 
 /** Spotify plays inside this browser zone, by whichever way this device has. */
-const browserPlaysSpotify = (caps: Caps): boolean => caps.sdk || caps.soloist === true;
+const browserPlaysSpotify = (caps: Caps): boolean => caps.soloist === true;
 
 /** Does this zone state say Soloist's sound goes to the phone stream (server soloist/zone.ts signal path)? */
 export const soloistStreamsToPhone = (s: { signalPath?: string[] }): boolean => !!s.signalPath?.some((step) => /to the phone/i.test(step));
@@ -35,11 +33,11 @@ export function zoneCanPlay(zone: ZoneLike, source: PlaySource, caps: Caps): boo
 export function cantPlayMessage(zone: Pick<ZoneInfo, 'kind' | 'name'>, source: PlaySource, notice?: string | null): string {
   if (zone.kind === 'pc' && source === 'spotify') return 'rune starts Spotify on the PC for this';
   if (source === 'radio') return `${zone.name} can’t play internet radio — use the PC or this browser`;
-  // iPhones/iPads (and any browser without the Web Playback SDK) cannot play Spotify inside the page — unless Soloist on
+  // iPhones/iPads (and any browser) cannot play Spotify inside the page — unless Soloist on
   // the PC plays it for the phone, and then only its being down is a reason.
   if (zone.kind === 'browser' && source === 'spotify') {
     if (notice) return `Spotify can’t play on this phone right now: ${notice.replace(/ — using the Spotify app$/, '')}`;
-    return 'Spotify can’t play in this browser — open the Spotify app on this device, then pick it as the zone';
+    return 'Spotify songs play on the PC or your phone’s Spotify';
   }
   return `${zone.name} can’t play ${source === 'spotify' ? 'Spotify' : 'local'} tracks`;
 }
@@ -97,7 +95,7 @@ export function playableZones(zones: ZoneInfo[], source: PlaySource, caps: Caps)
   const out: ZoneOption[] = [];
   for (const z of zones) {
     if (!zoneCanPlay(z, source, caps)) continue;
-    out.push({ zone: z, label: z.kind === 'browser' && source === 'spotify' && caps.sdk ? `${z.name} (Spotify)` : z.name });
+    out.push({ zone: z, label: z.name });
   }
   // Soloist first among the Spotify zones: it needs no app anywhere and a phone can hear it.
   const rank = (z: ZoneInfo) => (z.kind === 'browser' ? 0 : z.soloist ? 1 : z.kind === 'spotify' ? 2 : 3);
@@ -125,11 +123,6 @@ export function withoutPcDevice(zones: ZoneInfo[]): ZoneInfo[] {
  */
 export function pageIsOnThePc(zones: Pick<ZoneInfo, 'kind' | 'playsForBrowser'>[], handheld: boolean): boolean {
   return !handheld && zones.some((z) => z.kind === 'pc' && z.playsForBrowser === true);
-}
-
-/** rune's own Web Playback SDK device also shows up in /api/zones as a Connect device: hide that duplicate. */
-export function withoutOwnDevice(zones: ZoneInfo[], own: { name: string; deviceId?: string | null }): ZoneInfo[] {
-  return zones.filter((z) => !(z.kind === 'spotify' && ((own.deviceId && z.id === `spotify:${own.deviceId}`) || z.name === own.name)));
 }
 
 /** Deep link that opens the item in the Spotify app (which then shows up as a Connect device). */

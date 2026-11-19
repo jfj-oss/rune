@@ -109,7 +109,6 @@ describe('a rune tab on the PC itself (Soloist plays there)', () => {
     expect(h.usePlayer.getState().zone).toBe('pc');
     expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc']);
     expect(h.sdkPlayers).toEqual([]);
-    expect(h.useSpotify.getState().sdk.phase).toBe('off');
 
     await h.usePlayer.getState().playItems([item('sp:tab1'), item('sp:tab2')], 0);
     await new Promise((r) => setTimeout(r, 20));
@@ -138,12 +137,12 @@ describe('a rune tab on the PC itself (Soloist plays there)', () => {
 });
 
 describe('a rune tab on another computer', () => {
-  it('keeps its own browser zone and Web Playback SDK player (it has speakers of its own)', async () => {
+  it('keeps its own browser zone (it has speakers of its own) and registers no Spotify player', async () => {
     const h = await setup({ playsForBrowser: false, savedZone: 'browser' });
     expect(h.usePlayer.getState().zone).toBe('browser:testclient1');
     expect(h.usePlayer.getState().zones.map((z) => z.id)).toEqual(['pc', 'browser:testclient1']);
-    expect(h.sdkPlayers).toHaveLength(1);
-    expect(h.useSpotify.getState().sdk).toMatchObject({ phase: 'ready', deviceId: 'tab-device' });
+    // no Spotify player of its own any more: Spotify songs go to the PC or a phone's Spotify
+    expect(h.sdkPlayers).toEqual([]);
   });
 });
 

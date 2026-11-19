@@ -874,7 +874,7 @@ describe('sharedPlaybackReads', () => {
     api.devicesData = [SIM_DEVICE];
     let t = 1000;
     let level: SpotifyBudgetLevel = 'normal';
-    const shared = sharedPlaybackReads(api, () => t, undefined, undefined, () => level);
+    const shared = sharedPlaybackReads(api, () => t, undefined, () => level);
 
     await shared.devices(); // seeds the cache at t=1000
     t += 2_000; // 5 s cache still warm, 1.5 s fresh window gone

@@ -26,8 +26,7 @@ export interface TabPlayerDeps {
 
 /**
  * The tab behind a browser zone. It holds NO queue: the server's queue says which song plays, whether it should sound
- * and where (PlayerState + `tab`), and this class only makes the engine (the <audio> element, the Spotify SDK, Soloist on
- * a phone) do that, then reports what the engine did. One thing it decides by itself: when a song ends it goes on to the
+ * and where (PlayerState + `tab`), and this class only makes the engine (the <audio> element, Soloist on a phone) do that, then reports what the engine did. One thing it decides by itself: when a song ends it goes on to the
  * next one of the server's `run` at once (gapless, no round trip), and says so.
  */
 export class TabPlayer {
@@ -202,7 +201,7 @@ export class TabPlayer {
     this.send({ type: 'failed', queueId: qid, message });
   }
 
-  /** The player behind the engine moved by itself (Spotify's SDK, changed from another Spotify app; Soloist on the phone). */
+  /** The player behind the engine moved by itself (Soloist on the phone). */
   private engineSync(positionMs: number, playing: boolean): void {
     const qid = this.loaded;
     // A player that is still starting (or was just told to play/pause) reports in-between states: not its own decision.

@@ -25,7 +25,7 @@ export interface ZoneInfo {
   spotifyNotice?: string;
   /**
    * pc zone only: this page runs on that very PC and Soloist is its Spotify player, so the pc zone is this page's
-   * player. The page then has no browser zone and starts no Web Playback SDK player: that would be a second Spotify
+   * player. The page then has no browser zone and starts no Spotify player of its own: that would be a second Spotify
    * Connect device on the same speakers, and an account plays on one device at a time.
    */
   playsForBrowser?: boolean;

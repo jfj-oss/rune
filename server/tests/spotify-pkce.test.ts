@@ -25,7 +25,7 @@ describe('PKCE (RFC 7636)', () => {
 
   it('declares exactly the scopes we request from Spotify', () => {
     expect(SPOTIFY_SCOPES).toBe(
-      'streaming user-read-email user-read-private user-library-read user-library-modify ' +
+      'user-read-email user-read-private user-library-read user-library-modify ' +
         'playlist-read-private playlist-read-collaborative playlist-modify-public playlist-modify-private ' +
         'user-read-playback-state ' +
         'user-modify-playback-state user-read-currently-playing user-read-recently-played user-top-read',

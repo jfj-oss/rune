@@ -2,7 +2,6 @@ import type { ClientEvent, PlayerState, ScanProgress, ServerEvent } from '@liner
 import { api } from '../api';
 import type { ExtCommand, PlayItem } from '../lib/types';
 import { matchBackendModes } from './modes';
-import { setSdkReporter } from './spotifySdk';
 import { emptyState, livePosition, type Backend, type PlayModes } from './types';
 import type { ZoneTransport } from './zoneEngine';
 
@@ -138,9 +137,6 @@ class Socket {
   }
 }
 export const socket = new Socket();
-
-// The Spotify SDK engine reports its local state through this socket (it never imports the socket).
-setSdkReporter((report) => socket.send(report));
 
 // Tabs in the background do not count as watching: tell the server whenever visibility changes.
 if (typeof document !== 'undefined') {
