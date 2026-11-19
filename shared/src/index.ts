@@ -145,14 +145,40 @@ export interface PlayerState {
   nowPlaying?: { title?: string; artist?: string; station?: string };
   /** A Spotify zone that stopped because playback moved to another device: the song did not end here. */
   elsewhere?: boolean;
-  /** Server-owned queue (pc zone, config spotify.serverQueue): bumped on every queue edit or move of the cursor. */
+  /** Server-owned queue (pc and browser zones): bumped on every queue edit or move of the cursor. */
   rev?: number;
-  /** Server-owned queue: which player sounds the current song (mpv or the Spotify app); null when none does. */
-  output?: 'mpv' | 'spotify' | null;
+  /** Server-owned queue: which player sounds the current song (mpv, the Spotify app or a browser tab); null when none does. */
+  output?: 'mpv' | 'spotify' | 'tab' | null;
   /** Server-owned queue: why it is not playing on its own (rate limit, another player took over, the app is missing). */
   hold?: PlayerHold;
+  /** Browser zone: what the tab that sounds it has to do (see TabPlan). */
+  tab?: TabPlan;
   updatedAt: number;
 }
+
+/**
+ * Browser zone: the server queue's instruction to the tab that sounds it. The tab plays `run[0]` (the current song) and,
+ * when it ends, goes on down `run` by itself, saying so with a report each time (gapless, like mpv's run). A new
+ * `loadV` means "load the current song now, at the state's position"; a new `seekV` means "seek to the state's
+ * position". `status` says whether it should be sounding. `token` goes back on every report.
+ */
+export interface TabPlan {
+  token: number;
+  loadV: number;
+  seekV: number;
+  /** Queue ids, the current song first. */
+  run: string[];
+}
+
+/** What the sounding tab tells the server about its own player (POST /api/player/:zone/report). */
+export type TabReport = { token: number; queueId: string; /** Is the page on screen? (A hidden or locked page may go quiet: that is never a reason to pause.) */ visible?: boolean } & (
+  | { type: 'started'; positionMs: number; durationMs?: number }
+  | { type: 'ended' }
+  | { type: 'paused'; positionMs: number }
+  | { type: 'resumed'; positionMs: number }
+  | { type: 'position'; positionMs: number }
+  | { type: 'failed'; message: string }
+);
 
 export interface PlayerHold {
   reason: 'rate-limited' | 'takeover' | 'spotify-unavailable' | 'output-failed';
@@ -163,8 +189,10 @@ export interface PlayerHold {
 }
 
 export type PlayerCommand =
-  /** positionMs/paused: start mid-track (used when handing playback to another zone). */
-  | { type: 'play'; trackIds: Id[]; startIndex?: number; positionMs?: number; paused?: boolean }
+  /** positionMs/paused: start mid-track (used when handing playback to another zone). `shuffle`: the Shuffle button:
+   *  turn shuffle on and mix the whole list, the first song included; otherwise, with shuffle on, the song at
+   *  `startIndex` plays first and the rest are mixed. */
+  | { type: 'play'; trackIds: Id[]; startIndex?: number; positionMs?: number; paused?: boolean; shuffle?: boolean }
   | { type: 'enqueue'; trackIds: Id[]; next?: boolean }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -186,9 +214,8 @@ export type ServerEvent =
   /** `queueRev` fingerprints `state.queue`. Clients that connect with `/api/ws?slim=1` get the queue only
    *  when it changed; otherwise `state.queue` is absent on the wire and the client reuses its copy. */
   | { type: 'player'; state: PlayerState; queueRev?: string }
-  /** First message on every connection: the web build the server serves now (a tab built from another one reloads)
-   *  and whether the pc zone's queue lives on the server. */
-  | { type: 'hello'; build: string | null; serverQueue: boolean }
+  /** First message on every connection: the web build the server serves now (a tab built from another one is told to reload). */
+  | { type: 'hello'; build: string | null }
   | { type: 'scan'; progress: ScanProgress }
   | { type: 'library-changed' };
 
@@ -239,3 +266,6 @@ export type { PlaylistDetail, PlaylistSummary, PlaylistTrack } from './playlists
 
 // ---------- Listening history ----------
 export * from './history.js';
+
+// ---------- The one queue (pure logic; used by the server's zones and the browser's mock mode) ----------
+export * from './queue.js';

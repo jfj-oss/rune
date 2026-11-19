@@ -1,4 +1,4 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, Zone } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, TabReport, Zone } from '@liner/shared';
 import type { RunePlaylistDetail, RunePlaylistSummary } from './lib/playlists';
 import { mockCover } from './mock/covers';
 import type { AlbumQuery, MatchCandidate, PlayItem, SearchResults, UpdateInstallResult, UpdateStatus, ZoneInfo } from './lib/types';
@@ -125,11 +125,6 @@ export const api = {
     if (isMock) return { running: false };
     return http('/pc/spotify/status');
   },
-  /** Start the Spotify app on the PC (the server debounces repeated calls). */
-  async pcSpotifyStart(): Promise<{ started: boolean; running: boolean }> {
-    if (isMock) return { started: false, running: false };
-    return http('/pc/spotify/start', { method: 'POST' });
-  },
   /** The Soloist zone's sound: the PC speakers, or the HLS stream this phone plays (/api/soloist/stream/live.m3u8). */
   async soloistOutput(output: 'pc' | 'phone'): Promise<{ output: 'pc' | 'phone'; problem: string | null }> {
     if (isMock) return { output, problem: null };
@@ -175,6 +170,10 @@ export const api = {
   },
   async playerSend(zone: Zone, cmd: PlayerCommand | { type: string }): Promise<PlayerState> {
     return http(`/player/${encodeURIComponent(zone)}`, { method: 'POST', body: JSON.stringify(cmd) });
+  },
+  /** The tab that sounds a browser zone tells the server what its player does. */
+  async tabReport(zone: Zone, report: TabReport): Promise<void> {
+    await http(`/player/${encodeURIComponent(zone)}/report`, { method: 'POST', body: JSON.stringify(report), keepalive: true });
   },
   // ---------- Spotify ----------
   /** `restingUntil`: epoch ms until which Spotify refuses rune's requests (its daily limit), null when it answers. */

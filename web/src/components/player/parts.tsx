@@ -6,7 +6,6 @@ import { usePosition } from '../../hooks/usePosition';
 import { usePeaks } from '../../hooks/usePeaks';
 import { isLiveTrack } from '../../lib/listenTypes';
 import type { ZoneInfo } from '../../lib/types';
-import { isMixedQueue } from '../../player/pc';
 import { usePlayer, useSignalPath } from '../../store/player';
 import { spotifyDeviceHint } from '../../player/routing';
 import { Popover } from '../Popover';
@@ -240,16 +239,14 @@ export function ZonePicker({ placement = 'top-end', compact = false }: { placeme
 }
 
 /** What a zone can play, as a one-line hint under its name. `phoneSoloist`: this phone hears Spotify through Soloist. */
-export function zoneHint(z: ZoneInfo, mixed: boolean, phoneSoloist = false): string | null {
+export function zoneHint(z: ZoneInfo, phoneSoloist = false): string | null {
   if (z.kind === 'spotify') return spotifyDeviceHint(z);
   if (z.kind === 'browser') return phoneSoloist ? 'Local files · Spotify through Soloist on the PC, heard here' : null;
   if (z.kind !== 'pc') return null;
   // Why the Spotify app stands in for Soloist, without the "using the Spotify app" half the line itself says.
   const why = z.spotifyNotice ? ` · ${z.spotifyNotice.replace(/ — using the Spotify app$/, '')}` : '';
-  if (z.spotifyEngine === 'soloist') return mixed && !z.serverQueue ? 'Local + Spotify (via Soloist, no app) · keep a rune tab open' : 'Local + Spotify (via Soloist, no app)';
-  if (z.serverQueue) return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)${why}` : `Local + Spotify (rune starts the Spotify app)${why}`;
-  if (z.spotifyDeviceId) return mixed ? `Local + Spotify (“${z.spotifyDeviceName ?? 'Spotify app'}”) · keep a rune tab open${why}` : `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)${why}`;
-  return `Local files · open the Spotify app on the PC for Spotify${why}`;
+  if (z.spotifyEngine === 'soloist') return 'Local + Spotify (via Soloist, no app)';
+  return z.spotifyDeviceId ? `Local + Spotify (via “${z.spotifyDeviceName ?? 'the Spotify app'}”)${why}` : `Local + Spotify (rune starts the Spotify app)${why}`;
 }
 
 function ZoneList({ close }: { close(): void }) {
@@ -257,7 +254,6 @@ function ZoneList({ close }: { close(): void }) {
   const zone = usePlayer((s) => s.zone);
   const setZone = usePlayer((s) => s.setZone);
   const refresh = usePlayer((s) => s.refreshZones);
-  const mixed = usePlayer((s) => isMixedQueue(s.state.queue));
   const [hidden, setHidden] = useState<string[]>([]);
   const [showHidden, setShowHidden] = useState(false);
   const phoneSoloist = isHandheld() && phoneSoloistRoute(zones).available;
@@ -273,7 +269,7 @@ function ZoneList({ close }: { close(): void }) {
       <div className="popover__title">Play on</div>
       {zones.map((z) => {
         const I = kindIcon[z.kind] ?? Monitor;
-        const hint = zoneHint(z, mixed && z.id === zone, phoneSoloist);
+        const hint = zoneHint(z, phoneSoloist);
         return (
           <div key={z.id} className="zonerow">
             <button

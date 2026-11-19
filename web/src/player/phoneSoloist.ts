@@ -10,11 +10,11 @@
 import type { PlayerCommand, PlayerState, Track } from '@liner/shared';
 import type { ZoneInfo } from '../lib/types';
 import type { Engine } from './engine';
-import { SOLOIST_ZONE } from './pc';
 import { soloistStreamsToPhone } from './routing';
 import { ZoneEngine, type ZoneEngineOptions, type ZoneTransport } from './zoneEngine';
 
-export { SOLOIST_ZONE };
+/** The Soloist zone's id on the server. */
+export const SOLOIST_ZONE = 'soloist';
 
 /** The Soloist zone's live stream, played by this phone (native HLS: it keeps going on the lock screen). */
 export const PHONE_STREAM_URL = '/api/soloist/stream/live.m3u8';

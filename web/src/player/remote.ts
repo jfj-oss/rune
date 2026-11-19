@@ -162,7 +162,7 @@ export class RemoteBackend implements Backend {
     this.state = emptyState(zone);
     this.unview = socket.view(zone);
     this.off = socket.on((e) => {
-      if (e.type === 'player' && e.state.zone === this.zone) this.apply(e.state);
+      if (e.type === 'player' && e.state.zone === this.zone) this.apply(e.state, true);
     });
     // Re-read the state (this also makes the server watch the zone again after a restart).
     this.offReconnect = socket.onReconnect(() => void this.refresh());
@@ -172,13 +172,20 @@ export class RemoteBackend implements Backend {
     this.subs.add(fn);
     return () => { this.subs.delete(fn); };
   }
-  private apply(s: PlayerState) {
+  /** The newest `updatedAt` the server itself sent: an older answer (a slow response overtaken by a broadcast) is dropped. */
+  private serverAt = 0;
+  private apply(s: PlayerState, fromServer = false) {
+    if (fromServer) {
+      // (a clock that went back by more than a minute is a restarted server, not an old answer)
+      if (s.rev !== undefined && s.updatedAt < this.serverAt && this.serverAt - s.updatedAt < 60_000) return;
+      this.serverAt = s.updatedAt;
+    }
     this.state = s;
     this.ready = true;
     for (const f of this.subs) f(s);
   }
   async refresh() {
-    try { this.apply(await api.playerState(this.zone)); } catch { /* server offline; keep last */ }
+    try { this.apply(await api.playerState(this.zone), true); } catch { /* server offline; keep last */ }
   }
   async matchModes(want: PlayModes) { await matchBackendModes(this, want); }
   dispose() { this.off(); this.offReconnect(); this.unview(); this.subs.clear(); }
@@ -194,7 +201,7 @@ export class RemoteBackend implements Backend {
     else if (cmd.type === 'shuffle') this.apply({ ...s, shuffle: cmd.on });
     else if (cmd.type === 'repeat') this.apply({ ...s, repeat: cmd.mode });
     try {
-      this.apply(await api.playerSend(this.zone, cmd));
+      this.apply(await api.playerSend(this.zone, cmd), true);
     } catch (e) {
       await this.refresh();
       throw e;

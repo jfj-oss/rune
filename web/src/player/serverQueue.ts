@@ -1,25 +1,11 @@
-// Phase 3 (server config spotify.serverQueue): the pc zone's queue lives on the server, and this page is a plain
-// remote for it. The server's websocket hello says which web build it serves and whether that mode is on.
 import type { PlayerState } from '@liner/shared';
-import type { ZoneInfo } from '../lib/types';
-
-/** Is this the pc zone with its queue on the server? */
-export const usesServerQueue = (z: Pick<ZoneInfo, 'kind' | 'serverQueue'> | undefined): boolean => !!z && z.kind === 'pc' && z.serverQueue === true;
 
 export const RELOAD_NOTICE = 'rune was updated — reload this page';
 
-export type HelloAction = 'none' | 'notice' | 'reload';
+export type HelloAction = 'none' | 'notice';
 
-/**
- * What this tab does with the server's hello. A tab that drives the pc zone the other way (its own mixed queue, or a
- * plain remote when the server no longer keeps the queue) must not go on: it reloads, unless music plays in this very
- * tab (then it is told to). A tab from another web build is told to reload.
- */
-export function helloAction(
-  hello: { build: string | null; serverQueue: boolean },
-  tab: { build: string; pcServerQueue: boolean | null; playingHere: boolean; dev?: boolean },
-): HelloAction {
-  if (tab.pcServerQueue !== null && tab.pcServerQueue !== hello.serverQueue) return tab.playingHere ? 'notice' : 'reload';
+/** What this tab does with the server's hello: a tab built from another web build is told to reload (never while it is the one making sound). */
+export function helloAction(hello: { build: string | null }, tab: { build: string; playingHere: boolean; dev?: boolean }): HelloAction {
   if (!tab.dev && hello.build && hello.build !== tab.build) return 'notice';
   return 'none';
 }

@@ -15,9 +15,6 @@ export interface ZoneInfo {
    */
   spotifyDeviceId?: string;
   spotifyDeviceName?: string;
-  /** pc zone only: its queue lives on the server (server config spotify.serverQueue), which also starts the Spotify
-   *  app when a Spotify song needs it. The page is then a plain remote, and a mixed queue needs no open tab. */
-  serverQueue?: boolean;
   /**
    * pc zone only: how its Spotify songs play. 'soloist' = Spotify Soloist on the PC (no app, no device polling, no
    * Web API); 'app' = the Spotify desktop app. `spotifyZone` is the zone that plays them ('soloist', or the app's

@@ -28,7 +28,7 @@ export interface Matcher {
 }
 export type CreateMatcher = (db: Db, cfg: Config) => Matcher;
 
-/** Worker C — src/play/index.ts exports `createPcZone` and `streamHandler`. */
+/** A playback zone the server serves under /api/player/:zone: the server queue (play/driver.ts), Soloist, a Spotify Connect device. */
 export interface PlaybackZone {
   readonly zone: Zone;
   state(): PlayerState;
@@ -36,4 +36,3 @@ export interface PlaybackZone {
   onChange(cb: (s: PlayerState) => void): () => void;
   close(): Promise<void>;
 }
-export type CreatePcZone = (db: Db, cfg: Config) => Promise<PlaybackZone>;

@@ -1,15 +1,14 @@
-// PC playback zone: one long-lived mpv process driven over its JSON IPC socket.
+// The PC speakers' player: one long-lived mpv process driven over its JSON IPC socket.
 //
-// The queue lives here (see ./queue.ts); mpv's playlist only ever holds the current
-// track plus the next two, loaded with `loadfile <path> append-play` so transitions
-// are gapless. Cue-sheet tracks pass per-file `start=`/`end=` options.
+// It holds no queue of its own: the server's queue (play/driver.ts) hands it a run of local songs (loadRun) and it
+// plays them in order, gaplessly: mpv's playlist only ever holds the current track plus the next two, loaded with
+// `loadfile <path> append-play`. Cue-sheet tracks pass per-file `start=`/`end=` options.
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PlayerCommand, PlayerState, QueueItem, Track } from '@liner/shared';
 import type { Config } from '../config.js';
 import type { Db } from '../db/index.js';
-import type { PlaybackZone } from '../modules.js';
 import { ensureLoudnessSchema, gainInfoForTrack } from '../loudness/index.js';
 import { buildFileOptions } from './file-options.js';
 import { markStationPlayed, resolveRadioStreamUrlForTrack } from '../iradio/playback.js';
@@ -17,27 +16,12 @@ import { StationUrlBlockedError, assertStationUrl } from '../iradio/guard.js';
 import { nowPlayingFromMetadata } from '../iradio/nowplaying.js';
 import { MpvIpc, type MpvArg, type MpvMessage } from './mpv-ipc.js';
 import { levelingLabel } from './signal-path.js';
-import {
-  clear as queueClear,
-  createQueue,
-  currentItem,
-  enqueue as queueEnqueue,
-  indexOfQueueId,
-  jump as queueJump,
-  move as queueMove,
-  next as queueNext,
-  play as queuePlay,
-  prev as queuePrev,
-  remove as queueRemove,
-  setRepeat as queueSetRepeat,
-  setShuffle as queueSetShuffle,
-  upcoming as queueUpcoming,
-  type QueueState,
-} from './queue.js';
-import { loadQueueItems, trackPath } from './rows.js';
+import { clear as queueClear, createQueue, currentItem, indexOfQueueId, jump as queueJump, play as queuePlay, upcoming as queueUpcoming, type QueueState } from './queue.js';
+import { trackPath } from './rows.js';
 
 /** Extra diagnostics exposed for the smoke script (not part of PlaybackZone). */
-export interface PcZone extends PlaybackZone, MpvRunZone {
+export interface PcZone extends MpvRunZone {
+  close(): Promise<void>;
   readonly socketPath: string;
   /** PID of the current mpv process, if running. */
   mpvPid(): number | undefined;
@@ -50,21 +34,21 @@ export interface PcZone extends PlaybackZone, MpvRunZone {
 export interface MpvRunZone {
   state(): PlayerState;
   onChange(cb: (s: PlayerState) => void): () => void;
-  command(cmd: PlayerCommand): Promise<PlayerState>;
+  command(cmd: RunCommand): Promise<PlayerState>;
   /** Play `items` from the first one, at `positionMs` (paused: loaded silent). */
   loadRun(items: QueueItem[], opts: { positionMs: number; paused: boolean }): Promise<PlayerState>;
   /** Keep the song now playing and replace everything after it (a queue edit): gapless preloads follow. */
   setUpcoming(items: QueueItem[]): Promise<PlayerState>;
 }
 
+/** What the driver asks of mpv besides loading a run: the transport, and silence (clear). */
+export type RunCommand = Extract<PlayerCommand, { type: 'pause' | 'resume' | 'seek' | 'volume' | 'clear' }>;
+
 export type CreatePcZone = (db: Db, cfg: Config, opts?: PcZoneOptions) => Promise<PcZone>;
 
 export interface PcZoneOptions {
-  /** Warning sink for a session that cannot be read back (defaults to console.warn). */
+  /** Warning sink (defaults to console.warn). */
   log?: (message: string, err?: unknown) => void;
-  /** Restore and save player.pc.session (default true). The server-owned queue keeps its own row instead, and
-   *  leaves this one as it was. */
-  session?: boolean;
 }
 
 interface MpvParams {
@@ -102,32 +86,6 @@ const POSITION_EMIT_INTERVAL_MS = 1_000;
 /** A track this close to its end has finished: Play starts it over rather than at its last moment. */
 const FINISHED_WITHIN_MS = 100;
 const MAX_RESPAWN_ATTEMPTS = 5;
-
-/** app_state row holding the PC zone session (same key/value table the settings use). */
-export const SESSION_KEY = 'player.pc.session';
-const SESSION_VERSION = 1;
-/** Queue/transport changes are written after a short pause; position ticks slower. */
-const SAVE_DEBOUNCE_MS = 1_000;
-const POSITION_SAVE_INTERVAL_MS = 5_000;
-/** A corrupt row claiming a million entries must not stall startup. */
-const MAX_SAVED_QUEUE = 20_000;
-
-export interface SavedQueueEntry {
-  queueId: string;
-  trackId: string;
-}
-
-export interface SavedSession {
-  v: typeof SESSION_VERSION;
-  queue: SavedQueueEntry[];
-  index: number;
-  positionMs: number;
-  shuffle: boolean;
-  repeat: PlayerState['repeat'];
-  order: number[];
-  volume: number;
-}
-
 export async function createPcZone(
   db: Db,
   cfg: Config,
@@ -136,7 +94,7 @@ export async function createPcZone(
   // The zone reads gains directly from track_loudness; make sure the table
   // exists even when the loudness worker has not been created yet.
   ensureLoudnessSchema(db);
-  const zone = new PcZoneImpl(db, cfg, opts.log ?? ((message, err) => console.warn(message, err)), opts.session !== false);
+  const zone = new PcZoneImpl(db, cfg, opts.log ?? ((message, err) => console.warn(message, err)));
   await zone.init();
   return zone;
 }
@@ -155,18 +113,6 @@ class PcZoneImpl implements PcZone {
   private positionMs = 0;
   private volume = 100;
   private readonly listeners = new Set<(s: PlayerState) => void>();
-
-  /** Session persistence: a short debounce for changes, a slower tick for position. */
-  private saveTimer: NodeJS.Timeout | null = null;
-  private saveDueAt = 0;
-  /** Fingerprint of the last written session (without position), to pick the save delay. */
-  private savedSessionKey = '';
-  /**
-   * A queue was restored from the DB and no sound has been loaded yet. mpv is idle
-   * in that state, so its idle/pause property events must not reset the saved
-   * position or make the zone look like it is playing.
-   */
-  private restorePending = false;
 
   private mpv: ChildProcess | null = null;
   private ipc: MpvIpc | null = null;
@@ -213,13 +159,11 @@ class PcZoneImpl implements PcZone {
     db: Db,
     cfg: Config,
     log: (message: string, err?: unknown) => void = () => undefined,
-    private readonly session = true,
   ) {
     this.db = db;
     this.cfg = cfg;
     this.log = log;
     this.socketPath = join(cfg.dataDir, 'mpv.sock');
-    if (session) this.restoreSession();
   }
 
   async init(): Promise<void> {
@@ -228,188 +172,6 @@ class PcZoneImpl implements PcZone {
     // Restored from the DB (or the 100 % default); mpv always spawns at 100 %.
     await this.setMpvVolume(this.volume);
     this.started = true;
-  }
-
-  // ------------------------------------------------------- session persistence
-
-  /**
-   * Rebuild the queue from the last saved session. This never talks to mpv or
-   * Spotify: the queue simply sits there, paused, until the user presses play.
-   */
-  private restoreSession(): void {
-    let raw: string | undefined;
-    try {
-      this.db.exec(
-        'CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-      );
-      raw = (
-        this.db.prepare('SELECT value FROM app_state WHERE key = ?').get(SESSION_KEY) as
-          | { value: string }
-          | undefined
-      )?.value;
-    } catch (err) {
-      this.log('could not read the saved PC player session', err);
-      return;
-    }
-    if (raw === undefined) return;
-    let session: SavedSession | undefined;
-    try {
-      session = parseSavedSession(JSON.parse(raw));
-    } catch (err) {
-      session = undefined;
-    }
-    if (!session) {
-      this.log('ignoring an unreadable saved PC player session');
-      return;
-    }
-    this.applySession(session);
-  }
-
-  private applySession(session: SavedSession): void {
-    // loadQueueItems keeps the requested order (duplicates included) and drops
-    // ids that no longer exist in the library.
-    const items = loadQueueItems(
-      this.db,
-      session.queue.map((entry) => entry.trackId),
-    );
-    // Walk the saved entries and the surviving items together to learn which
-    // saved positions survived, so the queue ids and the index can follow.
-    const keptOldPositions: number[] = [];
-    let cursor = 0;
-    for (let i = 0; i < session.queue.length && cursor < items.length; i++) {
-      if (items[cursor]!.track.id === session.queue[i]!.trackId) {
-        keptOldPositions.push(i);
-        cursor += 1;
-      }
-    }
-    if (keptOldPositions.length !== items.length) {
-      // Defensive: the two lists must agree; otherwise start from an empty queue.
-      this.log('saved PC player session does not match the library');
-      return;
-    }
-    const oldToNew = new Map<number, number>();
-    keptOldPositions.forEach((oldPos, newPos) => oldToNew.set(oldPos, newPos));
-    items.forEach((item, newPos) => {
-      item.queueId = session.queue[keptOldPositions[newPos]!]!.queueId;
-    });
-
-    let index = -1;
-    let positionMs = 0;
-    if (items.length > 0) {
-      const exact = oldToNew.get(session.index);
-      if (exact !== undefined) {
-        index = exact;
-        positionMs = session.positionMs;
-      } else {
-        // The saved current track is gone: continue from the next surviving
-        // entry (or the last one before it when the tail was removed).
-        const atOrAfter = keptOldPositions.find((oldPos) => oldPos >= session.index);
-        index = oldToNew.get(atOrAfter ?? keptOldPositions.at(-1)!) ?? -1;
-      }
-    }
-    const current = index >= 0 ? items[index] : undefined;
-    if (current && current.track.durationMs > 0) {
-      positionMs = Math.min(current.track.durationMs, Math.max(0, positionMs));
-      if (positionMs >= current.track.durationMs - FINISHED_WITHIN_MS) positionMs = 0;
-    } else if (!current) {
-      positionMs = 0;
-    }
-
-    let order: number[];
-    if (!session.shuffle) {
-      order = items.map((_, i) => i);
-    } else {
-      order = [];
-      const seen = new Set<number>();
-      for (const oldPos of session.order) {
-        const newPos = oldToNew.get(oldPos);
-        if (newPos !== undefined && !seen.has(newPos)) {
-          seen.add(newPos);
-          order.push(newPos);
-        }
-      }
-      // Keep the invariant that order is a permutation of the queue.
-      for (let i = 0; i < items.length; i++) {
-        if (!seen.has(i)) {
-          seen.add(i);
-          order.push(i);
-        }
-      }
-    }
-
-    this.q = {
-      items,
-      index,
-      shuffle: session.shuffle,
-      repeat: session.repeat,
-      order,
-    };
-    this.volume = Math.min(100, Math.max(0, session.volume));
-    this.positionMs = positionMs;
-    this.status = index >= 0 ? 'paused' : 'stopped';
-    this.restorePending = index >= 0;
-    this.savedSessionKey = this.sessionKey();
-  }
-
-  /** Everything the saved session covers except the (fast-moving) position. */
-  private sessionKey(): string {
-    return JSON.stringify([
-      this.q.items.map((item) => [item.queueId, item.track.id]),
-      this.q.index,
-      this.q.shuffle,
-      this.q.repeat,
-      this.q.order,
-      this.volume,
-      this.status,
-    ]);
-  }
-
-  /** Queue/transport changes save after a pause; position-only ticks at most every 5 s. */
-  private scheduleSessionSave(change: boolean): void {
-    if (this.closed || !this.session) return;
-    const delay = change ? SAVE_DEBOUNCE_MS : POSITION_SAVE_INTERVAL_MS;
-    const due = Date.now() + delay;
-    // Never postpone an already-scheduled earlier write, so bursts still land.
-    if (this.saveTimer && this.saveDueAt <= due) return;
-    if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveDueAt = due;
-    this.saveTimer = setTimeout(() => {
-      this.saveTimer = null;
-      this.persistSession();
-    }, delay);
-    this.saveTimer.unref?.();
-  }
-
-  /** Write the session now. Never throws: persistence must not break playback. */
-  private persistSession(): void {
-    if (!this.session) return;
-    try {
-      const session: SavedSession = {
-        v: SESSION_VERSION,
-        queue: this.q.items.map((item) => ({ queueId: item.queueId, trackId: item.track.id })),
-        index: this.q.index,
-        positionMs: Math.max(0, Math.round(this.positionMs)),
-        shuffle: this.q.shuffle,
-        repeat: this.q.repeat,
-        order: [...this.q.order],
-        volume: this.volume,
-      };
-      this.db
-        .prepare(
-          'INSERT INTO app_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-        )
-        .run(SESSION_KEY, JSON.stringify(session));
-      this.savedSessionKey = this.sessionKey();
-    } catch (err) {
-      this.log('could not save the PC player session', err);
-    }
-  }
-
-  private cancelSessionSave(): void {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
   }
 
   // ---------------------------------------------------------------- public API
@@ -461,14 +223,14 @@ class PcZoneImpl implements PcZone {
       if (this.q.index < 0) return this.state();
       const head = this.q.items.slice(0, this.q.index + 1);
       const all = [...head, ...this.playable(items)];
-      this.q = { ...this.q, items: all, order: all.map((_, i) => i), shuffle: false, repeat: 'off' };
+      this.q = { ...this.q, items: all, shuffle: false, repeat: 'off' };
       if (this.status === 'playing' || this.status === 'paused') await this.syncWindow();
       this.emitChange();
       return this.state();
     });
   }
 
-  command(cmd: PlayerCommand): Promise<PlayerState> {
+  command(cmd: RunCommand): Promise<PlayerState> {
     // Queued behind the load it would come too late: the load would report 'playing' first, and the speaker guard
     // takes that for a new start and pauses whatever the tab has moved on to.
     if (cmd.type === 'pause' && this.status === 'loading') this.pauseAfterLoad = true;
@@ -481,8 +243,6 @@ class PcZoneImpl implements PcZone {
   async close(): Promise<void> {
     if (this.closed) return;
     // Clean shutdown (SIGTERM) writes the latest position immediately.
-    this.cancelSessionSave();
-    this.persistSession();
     this.closed = true;
     if (this.positionTimer) {
       clearTimeout(this.positionTimer);
@@ -738,7 +498,7 @@ class PcZoneImpl implements PcZone {
   }
 
   private onPauseChanged(): void {
-    if (this.rebuilding || this.restorePending || this.closed) return;
+    if (this.rebuilding || this.closed) return;
     const pause = this.props.pause === true;
     if (this.q.index < 0 || this.status === 'loading' || this.status === 'stopped') return;
     const next = pause ? 'paused' : 'playing';
@@ -808,9 +568,6 @@ class PcZoneImpl implements PcZone {
   }
 
   private applyIdle(): void {
-    // A restored, paused queue leaves mpv idle on purpose; do not let that reset
-    // the saved position or turn the paused zone into "stopped".
-    if (this.restorePending) return;
     this.currentMpvPos = -1;
     this.window = [];
     this.props.timePos = undefined;
@@ -898,7 +655,6 @@ class PcZoneImpl implements PcZone {
   /** Load the current track and the next two, starting playback at `positionMs`. */
   private async startPlayback(opts: { positionMs?: number; paused?: boolean } = {}): Promise<void> {
     const item = currentItem(this.q);
-    this.restorePending = false;
     this.rebuilding = true;
     this.status = 'loading';
     const startPosition = Math.max(0, opts.positionMs ?? 0);
@@ -1005,7 +761,6 @@ class PcZoneImpl implements PcZone {
   }
 
   private async stopPlayback(): Promise<void> {
-    this.restorePending = false;
     const ipc = this.ipc;
     if (ipc) {
       await ipc.command(['stop']).catch(() => undefined);
@@ -1020,62 +775,22 @@ class PcZoneImpl implements PcZone {
 
   // --------------------------------------------------------------- commands
 
-  private applyCommand(cmd: PlayerCommand): Promise<void> {
+  private applyCommand(cmd: RunCommand): Promise<void> {
     switch (cmd.type) {
-      case 'play':
-        return this.cmdPlay(cmd.trackIds, cmd.startIndex, cmd.positionMs, cmd.paused);
-      case 'enqueue':
-        return this.cmdEnqueue(cmd.trackIds, cmd.next);
       case 'pause':
         return this.cmdPause();
       case 'resume':
         return this.cmdResume();
-      case 'next':
-        return this.cmdNext();
-      case 'prev':
-        return this.cmdPrev();
       case 'seek':
         return this.cmdSeek(cmd.positionMs);
-      case 'jump':
-        return this.cmdJump(cmd.index);
-      case 'remove':
-        return this.cmdRemove(cmd.queueId);
-      case 'move':
-        return this.cmdMove(cmd.queueId, cmd.toIndex);
       case 'clear':
         return this.cmdClear();
       case 'volume':
         return this.cmdVolume(cmd.volume);
-      case 'shuffle':
-        return this.cmdShuffle(cmd.on);
-      case 'repeat':
-        return this.cmdRepeat(cmd.mode);
       default: {
         const exhaustive: never = cmd;
-        throw new Error(`unknown player command ${JSON.stringify(exhaustive)}`);
+        throw new Error(`unknown run command ${JSON.stringify(exhaustive)}`);
       }
-    }
-  }
-
-  private async cmdPlay(trackIds: string[], startIndex?: number, positionMs = 0, paused = false): Promise<void> {
-    const items = this.playable(loadQueueItems(this.db, trackIds));
-    if (items.length === 0) return;
-    this.q = queuePlay(this.q, items, startIndex ?? 0);
-    await this.startPlayback({ positionMs: Math.max(0, Math.round(positionMs)), paused });
-  }
-
-  private async cmdEnqueue(trackIds: string[], isNext?: boolean): Promise<void> {
-    const items = this.playable(loadQueueItems(this.db, trackIds));
-    if (items.length === 0) return;
-    const wasEmpty = this.q.items.length === 0;
-    this.q = queueEnqueue(this.q, items, { next: isNext });
-    if (wasEmpty) {
-      await this.startPlayback({ positionMs: 0 });
-    } else if (this.status === 'playing' || this.status === 'paused') {
-      await this.syncWindow();
-      this.emitChange();
-    } else {
-      this.emitChange();
     }
   }
 
@@ -1089,9 +804,8 @@ class PcZoneImpl implements PcZone {
 
   private async cmdResume(): Promise<void> {
     if (this.status === 'paused') {
-      // Restored after a restart: mpv is idle, so there is nothing to unpause —
-      // load the current track at the saved position instead.
-      if (this.restorePending || this.window.length === 0) {
+      // mpv holds nothing (it was restarted): load the current track at the saved position instead.
+      if (this.window.length === 0) {
         await this.startPlayback({ positionMs: this.resumePosition() });
         return;
       }
@@ -1112,53 +826,6 @@ class PcZoneImpl implements PcZone {
     return duration > 0 && this.positionMs >= duration - FINISHED_WITHIN_MS ? 0 : this.positionMs;
   }
 
-  private async cmdNext(): Promise<void> {
-    const wasPaused = this.status === 'paused';
-    const wasActive =
-      this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
-    const result = queueNext(this.q, { auto: false });
-    if (result.ended) {
-      if (wasActive) await this.stopPlayback();
-      this.emitChange();
-      return;
-    }
-    const target = result.state.items[result.state.index];
-    if (wasActive) {
-      // Already loaded ahead by gapless 'append-play': switch in place, no reload.
-      if (await this.switchToLoaded(target?.queueId, { next: true, paused: wasPaused })) return;
-      this.q = result.state;
-      await this.startPlayback({ positionMs: 0, paused: wasPaused });
-    } else {
-      this.q = result.state;
-      this.positionMs = 0;
-      this.emitChange();
-    }
-  }
-
-  private async cmdPrev(): Promise<void> {
-    const wasPaused = this.status === 'paused';
-    const wasActive =
-      this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
-    const result = queuePrev(this.q, this.positionMs);
-    this.q = result.state;
-    if (result.restart) {
-      this.positionMs = 0;
-      if (wasActive) {
-        await this.seekTo(0);
-        this.emitChange();
-      } else {
-        this.emitChange();
-      }
-      return;
-    }
-    if (wasActive) {
-      await this.startPlayback({ positionMs: 0, paused: wasPaused });
-    } else {
-      this.positionMs = 0;
-      this.emitChange();
-    }
-  }
-
   private async cmdSeek(positionMs: number): Promise<void> {
     const item = currentItem(this.q);
     // Live radio (duration 0) is not seekable; drop the command silently.
@@ -1168,98 +835,6 @@ class PcZoneImpl implements PcZone {
     this.positionMs = pos;
     if (this.status === 'playing' || this.status === 'paused' || this.status === 'loading') {
       await this.seekTo(pos);
-    }
-    this.emitChange();
-  }
-
-  private async cmdJump(index: number): Promise<void> {
-    if (!Number.isInteger(index) || index < 0 || index >= this.q.items.length) return;
-    const wasPaused = this.status === 'paused';
-    const wasActive =
-      this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
-    const target = this.q.items[index];
-    if (wasActive && (await this.switchToLoaded(target?.queueId, { paused: wasPaused }))) return;
-    this.q = queueJump(this.q, index);
-    if (wasActive) {
-      await this.startPlayback({ positionMs: 0, paused: wasPaused });
-    } else {
-      this.positionMs = 0;
-      this.emitChange();
-    }
-  }
-
-  /**
-   * If `queueId` is already in mpv's playlist (the current entry or one of the
-   * preloaded ones), make it current in place. A gapless 'append-play' already
-   * decoded the file, so stopping and reloading it would cause an audible gap.
-   * Returns false when the target is not loaded, so callers fall back to
-   * startPlayback. The queue index follows from mpv's playlist-pos event.
-   */
-  private async switchToLoaded(
-    queueId: string | undefined,
-    opts: { next?: boolean; paused?: boolean } = {},
-  ): Promise<boolean> {
-    const ipc = this.ipc;
-    if (!queueId || !ipc || this.rebuilding || this.closed) return false;
-    if (this.status !== 'playing' && this.status !== 'paused') return false;
-    if (this.currentMpvPos < 0) return false;
-    const pos = this.window.findIndex(
-      (entry, i) => i !== this.currentMpvPos && entry.queueId === queueId,
-    );
-    if (pos < 0) return false;
-    try {
-      if (opts.next && pos === this.currentMpvPos + 1) await ipc.command(['playlist-next']);
-      else await ipc.command(['set_property', 'playlist-pos', pos]);
-    } catch {
-      return false;
-    }
-    // A paused Next must stay silent even on mpv builds where playlist-next resumes.
-    if (opts.paused) {
-      this.props.pause = true;
-      await ipc.command(['set_property', 'pause', true]).catch(() => undefined);
-    }
-    return true;
-  }
-
-  private async cmdRemove(queueId: string): Promise<void> {
-    const previousCurrent = currentItem(this.q)?.queueId;
-    this.q = queueRemove(this.q, queueId);
-    const currentAfter = currentItem(this.q)?.queueId;
-    const wasPaused = this.status === 'paused';
-    const wasActive =
-      this.status === 'playing' || this.status === 'paused' || this.status === 'loading';
-
-    if (this.q.items.length === 0) {
-      await this.stopPlayback();
-      this.emitChange();
-      return;
-    }
-    if (currentAfter !== previousCurrent) {
-      // The playing entry was removed.
-      if (wasActive) {
-        await this.startPlayback({ positionMs: 0, paused: wasPaused });
-      } else {
-        this.positionMs = 0;
-        this.emitChange();
-      }
-      return;
-    }
-    if (wasActive) {
-      await this.syncWindow();
-      this.emitChange();
-    } else {
-      this.emitChange();
-    }
-  }
-
-  /** Reorder the queue. The current track keeps playing; only its queue index moves. */
-  private async cmdMove(queueId: string, toIndex: number): Promise<void> {
-    const before = this.q;
-    this.q = queueMove(this.q, queueId, toIndex);
-    if (this.q === before) return; // no-op (same position): nothing to broadcast
-    if (this.status === 'playing' || this.status === 'paused') {
-      // Playback order is unchanged, but recompute the preloaded tail defensively.
-      await this.syncWindow();
     }
     this.emitChange();
   }
@@ -1275,22 +850,6 @@ class PcZoneImpl implements PcZone {
     const v = Math.round(Math.min(100, Math.max(0, volume)) * 2) / 2; // 0.5 % resolution
     this.volume = v;
     await this.setMpvVolume(v);
-    this.emitChange();
-  }
-
-  private async cmdShuffle(on: boolean): Promise<void> {
-    this.q = queueSetShuffle(this.q, on);
-    if (this.status === 'playing' || this.status === 'paused') {
-      await this.syncWindow();
-    }
-    this.emitChange();
-  }
-
-  private async cmdRepeat(mode: PlayerState['repeat']): Promise<void> {
-    this.q = queueSetRepeat(this.q, mode);
-    if (this.status === 'playing' || this.status === 'paused') {
-      await this.syncWindow();
-    }
     this.emitChange();
   }
 
@@ -1314,7 +873,6 @@ class PcZoneImpl implements PcZone {
     this.lastEmitAt = Date.now();
     // Persist queue/transport changes after a short pause; while only the
     // position moves, write at the slower position cadence.
-    this.scheduleSessionSave(this.sessionKey() !== this.savedSessionKey);
     if (this.positionTimer) {
       clearTimeout(this.positionTimer);
       this.positionTimer = null;
@@ -1523,69 +1081,6 @@ export function isRadioTrack(track: Track): boolean {
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-const REPEAT_MODES = new Set<PlayerState['repeat']>(['off', 'one', 'all']);
-
-function isId(value: unknown, max: number): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= max;
-}
-
-/**
- * Validate a row read back from app_state. Anything unexpected (old schema,
- * hand-edited JSON, a half-written value) is rejected so startup falls back to
- * an empty zone instead of crashing on it.
- */
-export function parseSavedSession(value: unknown): SavedSession | undefined {
-  if (!isStringRecord(value) || value.v !== SESSION_VERSION) return undefined;
-  const rawQueue = value.queue;
-  if (!Array.isArray(rawQueue) || rawQueue.length > MAX_SAVED_QUEUE) return undefined;
-  const queue: SavedQueueEntry[] = [];
-  for (const entry of rawQueue) {
-    if (!isStringRecord(entry)) return undefined;
-    if (!isId(entry.queueId, 200) || !isId(entry.trackId, 300)) return undefined;
-    queue.push({ queueId: entry.queueId, trackId: entry.trackId });
-  }
-
-  const index = value.index;
-  // -1 means "no current track"; an empty queue may only be -1.
-  if (!Number.isInteger(index) || (index as number) < -1 || (index as number) >= Math.max(queue.length, 1)) {
-    return undefined;
-  }
-  const positionMs = value.positionMs;
-  if (typeof positionMs !== 'number' || !Number.isFinite(positionMs) || positionMs < 0) {
-    return undefined;
-  }
-  const volume = value.volume;
-  if (typeof volume !== 'number' || !Number.isFinite(volume)) return undefined;
-  if (typeof value.shuffle !== 'boolean') return undefined;
-  const repeat = value.repeat;
-  if (typeof repeat !== 'string' || !REPEAT_MODES.has(repeat as PlayerState['repeat'])) {
-    return undefined;
-  }
-  const rawOrder = value.order;
-  if (!Array.isArray(rawOrder) || rawOrder.length > queue.length) return undefined;
-  const order: number[] = [];
-  for (const n of rawOrder) {
-    if (!Number.isInteger(n) || n < 0 || n >= queue.length) return undefined;
-    order.push(n as number);
-  }
-  // A shuffled session must describe a full playback order; otherwise keep the
-  // queue and fall back to identity order rather than trusting a partial one.
-  if (value.shuffle && queue.length > 0) {
-    if (order.length !== queue.length || new Set(order).size !== order.length) return undefined;
-  }
-
-  return {
-    v: SESSION_VERSION,
-    queue,
-    index: index as number,
-    positionMs,
-    shuffle: value.shuffle,
-    repeat: repeat as PlayerState['repeat'],
-    order,
-    volume,
-  };
 }
 
 function formatLabel(track: Track): string {

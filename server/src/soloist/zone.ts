@@ -224,7 +224,7 @@ export class SoloistZone implements PlaybackZone {
     if (!cur) return;
     const list = [cur, ...items.filter((i) => i.track.source === 'spotify' && uriOf(i))];
     // The driver orders the queue (shuffle included): this zone plays it straight.
-    this.q = { ...this.q, items: list, index: 0, shuffle: false, order: list.map((_, i) => i) };
+    this.q = { ...this.q, items: list, index: 0, shuffle: false };
     await this.syncNext();
   }
 
@@ -235,7 +235,7 @@ export class SoloistZone implements PlaybackZone {
       case 'play': {
         const items = this.playable(cmd.trackIds);
         if (!items.length) throw new Error('None of these songs is a Spotify song');
-        this.q = queuePlay(this.q, items, cmd.startIndex ?? 0);
+        this.q = queuePlay(this.q, items, cmd.startIndex ?? 0, Math.random, cmd.shuffle === true);
         await this.startCurrent({ positionMs: cmd.positionMs ?? 0, paused: cmd.paused === true });
         return;
       }

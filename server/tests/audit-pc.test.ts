@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { openDb, type Db } from '../src/db/index.js';
 import type { Config } from '../src/config.js';
 import { createPcZone, type PcZone } from '../src/play/zone.js';
+import { loadQueueItems } from '../src/play/rows.js';
 import {
   startFakeMpvSocket,
   type FakeMpvSocket,
@@ -85,39 +86,6 @@ describe('PcZone: mpv dying', () => {
   });
 
 
-  it('M1 mpv dying while the zone is STOPPED with a queue comes back silent; Play still works', async () => {
-    const children: FakeChild[] = [];
-    const dir = mkdtempSync(join(tmpdir(), 'audit-respawn-'));
-    dirs.push(dir);
-    const started: Promise<FakeMpvSocket>[] = [];
-    mocks.spawn.mockImplementation(() => {
-      started.push(startFakeMpvSocket(join(dir, 'mpv.sock')));
-      const c = fakeChild(); children.push(c); return c;
-    });
-    const cfg: Config = { libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 'test', normalize: 'album' };
-    const zone = await createPcZone(db, cfg);
-    zones.push(zone);
-    const f1 = await started[0]!; fakes.push(f1);
-    await zone.command({ type: 'play', trackIds: ['l:1', 'l:2'], startIndex: 1 });
-    await zone.command({ type: 'next' });          // past the end of the queue: stopPlayback, status stopped, index kept
-    const before = zone.state();
-    expect(before.status).toBe('stopped');
-    expect(before.index).toBeGreaterThanOrEqual(0);
-    children[0]!.exitCode = 1;
-    children[0]!.emit('exit', 1, null);            // mpv crashes, gets OOM-killed, or PipeWire takes it down
-    await waitFor(() => started.length === 2);
-    const f2 = await started[1]!; fakes.push(f2);
-    await waitFor(() => f2.received.some((r) => r.command?.[0] === 'set_property' && r.command?.[1] === 'volume'));
-    await new Promise((r) => setTimeout(r, 100));
-    const loads = () => f2.received.filter((r) => r.command?.[0] === 'loadfile');
-    expect(loads()).toHaveLength(0);
-    expect(zone.state().status).toBe('stopped');
-    expect(zone.state().queue).toHaveLength(2);
-    await zone.command({ type: 'resume' });
-    expect(loads().length).toBeGreaterThan(0);
-    expect(zone.state().status).toBe('playing');
-  });
-
   it('M1b mpv dying while playing still comes back playing', async () => {
     const children: FakeChild[] = [];
     const dir = mkdtempSync(join(tmpdir(), 'audit-respawn-'));
@@ -131,7 +99,7 @@ describe('PcZone: mpv dying', () => {
     const zone = await createPcZone(db, cfg);
     zones.push(zone);
     const f1 = await started[0]!; fakes.push(f1);
-    await zone.command({ type: 'play', trackIds: ['l:1', 'l:2'], startIndex: 0 });
+    await zone.loadRun(loadQueueItems(db, ['l:1', 'l:2']), { positionMs: 0, paused: false });
     children[0]!.exitCode = 1;
     children[0]!.emit('exit', 1, null);
     await waitFor(() => started.length === 2);

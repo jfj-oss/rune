@@ -71,48 +71,6 @@ export async function startRadio(from: RadioFrom, id: string): Promise<void> {
   }
 }
 
-let continuing = false;
-
-/**
- * The browser/mock queue stopped at its end and auto-radio is on: append a fresh
- * set of picks and start the first one, without discarding the visible history.
- */
-export async function continueRadio(): Promise<void> {
-  if (continuing) return;
-  const store = usePlayer.getState();
-  const s = store.state;
-  if (!useRadio.getState().autoRadio) return;
-  if (s.status !== 'stopped' || s.queue.length === 0 || s.index !== s.queue.length - 1) return;
-  const cur = s.queue[s.index];
-  if (!cur || isLiveTrack(cur.track) || cur.track.durationMs <= 0) return;
-
-  const recent = s.queue.map((q) => q.track.id);
-  const remembered = useRadio.getState().seeds;
-  const seeds = (remembered.length ? remembered : recent).slice(-10);
-  continuing = true;
-  try {
-    const res = await listenApi.radioNext(seeds, recent, 20);
-    const picks = res.picks.filter((p) => !recent.includes(p.trackId));
-    if (!picks.length) return;
-    // the user may have pressed play / picked something else while we were planning
-    const after = usePlayer.getState().state;
-    if (after.status !== 'stopped' || after.index !== after.queue.length - 1) return;
-    const items = await resolvePicks(picks);
-    if (!items.length) return;
-    const before = usePlayer.getState().state;
-    if (before.status !== 'stopped' || before.index !== before.queue.length - 1) return;
-    const appendAt = before.queue.length;
-    await store.enqueueItems(items, false, { quiet: true });
-    useRadio.getState().notePicks(picks);
-    await store.command({ type: 'jump', index: appendAt });
-    await store.command({ type: 'resume' });
-  } catch {
-    /* stay stopped — the next explicit play works normally */
-  } finally {
-    continuing = false;
-  }
-}
-
 /** A live station as a queue item (server queue rows use the same shape). */
 export function stationItem(station: RadioStation): PlayItem {
   const album = { id: station.id, title: station.name, coverUrl: station.logoUrl ?? station.favicon };

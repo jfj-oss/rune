@@ -6,7 +6,6 @@ import { PageSkeleton } from './components/PageSkeleton';
 import { FirstRunGate } from './components/FirstRunGate';
 import { Shell } from './components/Shell';
 import { ReviewPreviewHost } from './components/ReviewPreview';
-import { startHistoryReporter } from './lib/historyReporter';
 import { socket } from './player/remote';
 import { usePlayer } from './store/player';
 import { useRadio } from './store/radio';
@@ -41,7 +40,6 @@ const client = new QueryClient({
 export default function App() {
   useEffect(() => { void usePlayer.getState().init(); }, []);
   useEffect(() => { void useRadio.getState().loadAutoRadio(); }, []);
-  useEffect(() => startHistoryReporter(), []);
   // Any client that changed the Spotify library (a heart, adding to Liked Songs
   // from a playlist, an album save) makes every open view refetch: the heart and
   // the Liked Songs page agree without a reload.

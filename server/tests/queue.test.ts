@@ -40,10 +40,6 @@ function ids(q: QueueState): string[] {
   return q.items.map((it) => it.queueId);
 }
 
-function orderIds(q: QueueState): string[] {
-  return q.order.map((i) => q.items[i]!.queueId);
-}
-
 /** Deterministic rng for shuffle assertions. */
 function seeded(seed: number): () => number {
   let s = seed >>> 0;
@@ -56,7 +52,7 @@ function seeded(seed: number): () => number {
 describe('queue basics', () => {
   it('starts empty', () => {
     const q = createQueue();
-    expect(q).toEqual({ items: [], index: -1, shuffle: false, repeat: 'off', order: [] });
+    expect(q).toEqual({ items: [], index: -1, shuffle: false, repeat: 'off' });
     expect(currentItem(q)).toBeUndefined();
   });
 
@@ -64,7 +60,7 @@ describe('queue basics', () => {
     const q = play(createQueue(), items(4), 2);
     expect(q.index).toBe(2);
     expect(currentItem(q)?.queueId).toBe('q2');
-    expect(orderIds(q)).toEqual(['q0', 'q1', 'q2', 'q3']);
+    expect(ids(q)).toEqual(['q0', 'q1', 'q2', 'q3']);
   });
 
   it('play clamps the start index', () => {
@@ -76,7 +72,6 @@ describe('queue basics', () => {
     const q = play(play(createQueue(), items(2), 1), [], 0);
     expect(q.items).toEqual([]);
     expect(q.index).toBe(-1);
-    expect(q.order).toEqual([]);
   });
 
   it('jump changes index and ignores invalid indexes', () => {
@@ -94,7 +89,6 @@ describe('enqueue', () => {
     const extra = items(2).map((it, i) => ({ ...it, queueId: `x${i}` }));
     const next = enqueue(q, extra);
     expect(ids(next)).toEqual(['q0', 'q1', 'x0', 'x1']);
-    expect(orderIds(next)).toEqual(['q0', 'q1', 'x0', 'x1']);
     expect(next.index).toBe(0);
   });
 
@@ -103,22 +97,17 @@ describe('enqueue', () => {
     const extra = items(1).map((it) => ({ ...it, queueId: 'nx' }));
     const next = enqueue(q, extra, { next: true });
     expect(ids(next)).toEqual(['q0', 'q1', 'nx', 'q2']);
-    expect(orderIds(next)).toEqual(['q0', 'q1', 'nx', 'q2']);
     expect(next.index).toBe(1);
     expect(currentItem(next)?.queueId).toBe('q1');
   });
 
-  it('enqueues next after the current track in shuffled playback order', () => {
+  it('enqueues next right after the current track also while shuffled; what already played keeps its place', () => {
     const q = setShuffle(play(createQueue(), items(4), 2), true, seeded(7));
-    const before = orderIds(q);
-    const pos = q.order.indexOf(q.index);
     const extra = items(1).map((it) => ({ ...it, queueId: 'nx' }));
     const next = enqueue(q, extra, { next: true });
-    // nx is inserted at playback position right after the current track.
-    expect(next.order[next.order.indexOf(next.index) + 1]).toBe(3); // canonical index of nx
-    expect(orderIds(next)[pos + 1]).toBe('nx');
-    // Everything that played before the current track keeps its order.
-    expect(orderIds(next).slice(0, pos)).toEqual(before.slice(0, pos));
+    expect(ids(next)[q.index + 1]).toBe('nx');
+    expect(ids(next).slice(0, q.index + 1)).toEqual(ids(q).slice(0, q.index + 1));
+    expect(ids(next)).toHaveLength(5);
   });
 
   it('enqueue into an empty queue starts at the first added item', () => {
@@ -134,7 +123,6 @@ describe('remove', () => {
     const next = remove(q, 'q0');
     expect(ids(next)).toEqual(['q1', 'q2', 'q3']);
     expect(currentItem(next)?.queueId).toBe('q2');
-    expect(orderIds(next)).toEqual(['q1', 'q2', 'q3']);
   });
 
   it('removes an item after the current track without changing the index', () => {
@@ -144,28 +132,25 @@ describe('remove', () => {
     expect(ids(next)).toEqual(['q0', 'q1', 'q2']);
   });
 
-  it('removing the current track advances to the next in playback order', () => {
+  it('removing the current track moves on to the next one', () => {
     const q = play(createQueue(), items(4), 1);
     const next = remove(q, 'q1');
     expect(ids(next)).toEqual(['q0', 'q2', 'q3']);
     expect(currentItem(next)?.queueId).toBe('q2');
   });
 
-  it('removing the last current track wraps to the first', () => {
+  it('removing the current track when it was the last one stays on the new last', () => {
     const q = play(createQueue(), items(3), 2);
     const next = remove(q, 'q2');
-    expect(currentItem(next)?.queueId).toBe('q0');
-    expect(next.index).toBe(0);
+    expect(currentItem(next)?.queueId).toBe('q1');
+    expect(next.index).toBe(1);
   });
 
-  it('removing the current track in shuffled order advances along the shuffled order', () => {
-    const q = play(createQueue(), items(4), 0);
-    const shuffled = setShuffle(q, true, seeded(3));
-    const order = orderIds(shuffled);
-    const currentPos = order.indexOf(currentItem(shuffled)!.queueId);
-    const successorId = order[(currentPos + 1) % order.length]!;
-    const next = remove(shuffled, currentItem(shuffled)!.queueId);
-    expect(currentItem(next)?.queueId).toBe(successorId);
+  it('removing a track before the current one moves the index down', () => {
+    const q = setShuffle(play(createQueue(), items(5), 2), true, seeded(3));
+    const cur = currentItem(q)!.queueId;
+    const next = remove(q, ids(q)[0]!);
+    expect(currentItem(next)?.queueId).toBe(cur);
   });
 
   it('removing the only item empties the queue', () => {
@@ -173,7 +158,6 @@ describe('remove', () => {
     const next = remove(q, 'q0');
     expect(next.items).toEqual([]);
     expect(next.index).toBe(-1);
-    expect(next.order).toEqual([]);
   });
 
   it('ignores unknown queue ids', () => {
@@ -195,7 +179,6 @@ describe('move', () => {
     expect(ids(next)).toEqual(['q1', 'q2', 'q0', 'q3']);
     expect(currentItem(next)?.queueId).toBe('q1');
     expect(next.index).toBe(0);
-    expect(orderIds(next)).toEqual(ids(next)); // shuffle off: identity order
   });
 
   it('moves an item up across the current track and adjusts the index', () => {
@@ -243,16 +226,12 @@ describe('move', () => {
     expect(() => move(q, 'nope', 0)).toThrow(/unknown queue item nope/);
   });
 
-  it('keeps the shuffled playback sequence and the current track', () => {
+  it('moves within a shuffled queue exactly as in any other: the queue shown is the play order', () => {
     const q = setShuffle(play(createQueue(), items(5), 2), true, seeded(9));
-    const before = orderIds(q);
-    const next = move(q, 'q0', 4);
-    expect(ids(next)).toEqual(['q1', 'q2', 'q3', 'q4', 'q0']);
-    expect(currentItem(next)?.queueId).toBe('q2');
-    expect(next.index).toBe(1);
-    // The playback sequence is still the same entries in the same play order.
-    expect(orderIds(next)).toEqual(before);
-    expect(new Set(next.order)).toEqual(new Set([0, 1, 2, 3, 4]));
+    const first = ids(q)[0]!;
+    const next = move(q, first, 4);
+    expect(ids(next)).toEqual([...ids(q).slice(1), first]);
+    expect(currentItem(next)?.queueId).toBe(currentItem(q)?.queueId);
   });
 });
 
@@ -262,7 +241,6 @@ describe('clear', () => {
     const next = clear(q);
     expect(next.items).toEqual([]);
     expect(next.index).toBe(-1);
-    expect(next.order).toEqual([]);
     expect(next.shuffle).toBe(true);
     expect(next.repeat).toBe('all');
   });
@@ -300,16 +278,17 @@ describe('next / prev', () => {
     expect(next(q, { auto: false }).state.index).toBe(2);
   });
 
-  it('next follows shuffled order', () => {
+  it('next walks the shuffled queue to its end, each song once', () => {
     const q = setShuffle(play(createQueue(), items(5), 0), true, seeded(11));
-    const first = orderIds(q);
     let cur = q;
     const seen: string[] = [currentItem(cur)!.queueId];
     for (let i = 0; i < 4; i++) {
       cur = next(cur).state;
       seen.push(currentItem(cur)!.queueId);
     }
-    expect(seen).toEqual(first);
+    expect(seen).toEqual(ids(q));
+    expect(new Set(seen).size).toBe(5);
+    expect(next(cur).ended).toBe(true);
   });
 
   it('prev restarts the current track after 3 seconds', () => {
@@ -345,32 +324,54 @@ describe('next / prev', () => {
 });
 
 describe('shuffle / repeat', () => {
-  it('shuffle keeps the current track and shuffles the rest', () => {
-    const q = play(createQueue(), items(6), 3);
-    const shuffled = setShuffle(q, true, seeded(1));
-    expect(shuffled.shuffle).toBe(true);
-    expect(shuffled.index).toBe(3);
-    expect(new Set(orderIds(shuffled))).toEqual(new Set(ids(q)));
-    expect(orderIds(shuffled)[0]).toBe('q3');
-    expect(orderIds(shuffled)).not.toEqual(orderIds(q));
+  it('shuffle keeps the current track and what came before it, and mixes the rest', () => {
+    const q = play(createQueue(), items(8), 3);
+    const mixed = setShuffle(q, true, seeded(1));
+    expect(mixed.shuffle).toBe(true);
+    expect(mixed.index).toBe(3);
+    expect(ids(mixed).slice(0, 4)).toEqual(['q0', 'q1', 'q2', 'q3']);
+    expect(new Set(ids(mixed))).toEqual(new Set(ids(q)));
+    expect(ids(mixed)).not.toEqual(ids(q));
   });
 
-  it('unshuffle restores the original order and keeps the current track', () => {
+  it('shuffle off leaves the queue as it is, current track current', () => {
     const q = play(createQueue(), items(6), 4);
-    const shuffled = setShuffle(q, true, seeded(2));
-    const restored = setShuffle(shuffled, false);
-    expect(restored.shuffle).toBe(false);
-    expect(restored.index).toBe(4);
-    expect(currentItem(restored)?.queueId).toBe('q4');
-    expect(orderIds(restored)).toEqual(ids(restored));
-    expect(orderIds(restored)).toEqual(['q0', 'q1', 'q2', 'q3', 'q4', 'q5']);
+    const mixed = setShuffle(q, true, seeded(2));
+    const off = setShuffle(mixed, false);
+    expect(off.shuffle).toBe(false);
+    expect(ids(off)).toEqual(ids(mixed));
+    expect(currentItem(off)?.queueId).toBe('q4');
+  });
+
+  it('play with shuffle on mixes the rest and starts at the chosen song; mixAll mixes it too and turns shuffle on', () => {
+    const on = play(setShuffle(createQueue(), true), items(6), 3, seeded(4));
+    expect(ids(on)[0]).toBe('q3');
+    expect(on.index).toBe(0);
+    expect(new Set(ids(on))).toEqual(new Set(items(6).map((i) => i.queueId)));
+    const all = play(createQueue(), items(6), 0, seeded(4), true);
+    expect(all.shuffle).toBe(true);
+    expect(new Set(ids(all))).toEqual(new Set(items(6).map((i) => i.queueId)));
+    expect(all.index).toBe(0);
+  });
+
+  it('a shuffled queue is played through once: no song twice before all are heard', () => {
+    let q = play(createQueue(), items(12), 0, seeded(21), true);
+    const heard: string[] = [currentItem(q)!.queueId];
+    for (;;) {
+      const r = next(q);
+      if (r.ended) break;
+      q = r.state;
+      heard.push(currentItem(q)!.queueId);
+    }
+    expect(heard).toHaveLength(12);
+    expect(new Set(heard).size).toBe(12);
   });
 
   it('shuffle works for a single item and an empty queue', () => {
     const one = setShuffle(play(createQueue(), items(1), 0), true, seeded(1));
-    expect(orderIds(one)).toEqual(['q0']);
+    expect(ids(one)).toEqual(['q0']);
     const empty = setShuffle(createQueue(), true);
-    expect(empty.order).toEqual([]);
+    expect(empty.items).toEqual([]);
     expect(empty.index).toBe(-1);
   });
 
@@ -402,13 +403,6 @@ describe('upcoming window', () => {
     const q = setRepeat(play(createQueue(), items(3), 1), 'one');
     expect(upcoming(q, 2).map((e) => e.item.queueId)).toEqual(['q1', 'q1']);
     expect(upcoming(q, 2).map((e) => e.queueIndex)).toEqual([1, 1]);
-  });
-
-  it('follows shuffled order', () => {
-    const q = setShuffle(play(createQueue(), items(5), 2), true, seeded(5));
-    const order = orderIds(q);
-    const pos = order.indexOf('q2');
-    expect(upcoming(q, 2).map((e) => e.item.queueId)).toEqual(order.slice(pos + 1, pos + 3));
   });
 
   it('is empty for an empty queue or zero count', () => {
