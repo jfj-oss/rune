@@ -56,7 +56,6 @@ const makeChild = (): FakeChild => {
 };
 
 interface BootOptions {
-  serverQueue?: boolean;
   /** A Spotify account with the MYPC app as a device, over a fake Web API. */
   spotify?: boolean;
   /** A supervised fake process (for the expired / not-installed states) instead of a bare connection to the fake. */
@@ -89,7 +88,6 @@ async function boot(o: BootOptions = {}) {
   const spawned: FakeChild[] = [];
   const cfg: Config = {
     libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album', pcSpotifyDevice: 'MYPC',
-    spotify: { serverQueue: o.serverQueue === true },
     ...(o.spotify ? { spotifyClientId: 'client-abc' } : {}),
   };
   let devicesCalls = 0;
@@ -297,8 +295,8 @@ describe('falling back to the Spotify app, with the reason', () => {
 
 describe('the server-owned pc queue with Soloist', () => {
   it('plays Spotify songs on Soloist and local songs on mpv in one mixed queue, Soloist first', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
-    expect(await t.pcEntry()).toMatchObject({ serverQueue: true, spotifyEngine: 'soloist', spotifyZone: 'soloist' });
+    const t = await boot();
+    expect(await t.pcEntry()).toMatchObject({ spotifyEngine: 'soloist', spotifyZone: 'soloist' });
     const res = await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b', 'l:1'], startIndex: 0 });
     expect(res.statusCode).toBe(200);
     await until(() => t.fake.item === 'spotify:track:a');
@@ -328,7 +326,7 @@ describe('the server-owned pc queue with Soloist', () => {
   });
 
   it('autoplay after the run\'s last Spotify song: the queue goes on with its local song and Soloist is silenced, not followed', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
+    const t = await boot();
     t.fake.autoplay = ['spotify:track:x1'];
     await t.send('pc', { type: 'play', trackIds: ['sp:a', 'l:1'], startIndex: 0 });
     await until(() => t.fake.item === 'spotify:track:a');
@@ -346,7 +344,7 @@ describe('the server-owned pc queue with Soloist', () => {
   });
 
   it('a song a Spotify app starts mid-run parks the queue (takeover), and the Soloist zone shows that song', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
+    const t = await boot();
     await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
     await until(() => t.fake.item === 'spotify:track:a');
     await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify' }));
@@ -361,7 +359,7 @@ describe('the server-owned pc queue with Soloist', () => {
   });
 
   it('a phone starts a Spotify song through Soloist mid-run: the newest request wins, the queue parks and says the song moved to the phone', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
+    const t = await boot();
     await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
     await until(() => t.fake.item === 'spotify:track:a');
     await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify' }));
@@ -401,7 +399,7 @@ describe('the server-owned pc queue with Soloist', () => {
   });
 
   it('a Spotify song while Soloist streams to the phone: the sound comes back to the PC speakers', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
+    const t = await boot();
     await app(t).inject({ method: 'POST', url: '/api/soloist/output', payload: { output: 'phone' } });
     expect((await t.status()).output).toBe('phone');
     await t.send('pc', { type: 'play', trackIds: ['sp:a'], startIndex: 0 });
@@ -412,7 +410,7 @@ describe('the server-owned pc queue with Soloist', () => {
   });
 
   it('Soloist not signed in and no Spotify account: the song waits with the reason', { timeout: 20000 }, async () => {
-    const t = await boot({ serverQueue: true });
+    const t = await boot();
     t.fake.setLoggedIn(false);
     await vi.waitFor(async () => expect((await t.status()).loggedIn).toBe(false));
     await t.send('pc', { type: 'play', trackIds: ['sp:a', 'l:1'], startIndex: 0 });

@@ -3,7 +3,7 @@
 // The zone trusts its commands (it does arithmetic on volume, indexes the queue, …),
 // so nothing reaches it until it has the right shape: a JSON body is just `unknown`
 // until proven otherwise. Failures carry a short message the UI can show as a toast.
-import type { PlayerCommand, PlayerState } from '@liner/shared';
+import type { PlayerCommand, PlayerState, TabReport } from '@liner/shared';
 
 export type PlayerRequest = PlayerCommand;
 
@@ -59,6 +59,10 @@ export function parsePlayerCommand(body: unknown): ParsedPlayerCommand {
         if (typeof body.paused !== 'boolean') return fail('play paused must be true or false');
         command.paused = body.paused;
       }
+      if (body.shuffle !== undefined) {
+        if (typeof body.shuffle !== 'boolean') return fail('play shuffle must be true or false');
+        command.shuffle = body.shuffle;
+      }
       return { ok: true, command };
     }
     case 'enqueue': {
@@ -103,5 +107,33 @@ export function parsePlayerCommand(body: unknown): ParsedPlayerCommand {
       return { ok: true, command: { type: 'repeat', mode: body.mode } };
     default:
       return fail('unknown player command');
+  }
+}
+
+/** Parse a browser tab's report about its own player (POST /api/player/:zone/report). */
+export function parseTabReport(body: unknown): { ok: true; report: TabReport } | { ok: false; error: string } {
+  if (!isRecord(body)) return { ok: false, error: 'report must be a JSON object' };
+  const { type, token, queueId, positionMs } = body;
+  if (!isWholeAtLeast(token, 0) || !isQueueId(queueId) || queueId.length > 200) return { ok: false, error: 'report needs a token and a queueId' };
+  const base = { token, queueId };
+  const pos = isFiniteNumber(positionMs) && positionMs >= 0 ? Math.round(positionMs) : null;
+  switch (type) {
+    case 'ended':
+      return { ok: true, report: { ...base, type } };
+    case 'started':
+    case 'paused':
+    case 'resumed':
+    case 'position': {
+      if (pos === null) return { ok: false, error: `${type} needs positionMs` };
+      if (type === 'started') {
+        const d = isFiniteNumber(body.durationMs) && body.durationMs > 0 ? Math.round(body.durationMs) : undefined;
+        return { ok: true, report: { ...base, type, positionMs: pos, ...(d ? { durationMs: d } : {}) } };
+      }
+      return { ok: true, report: { ...base, type, positionMs: pos } };
+    }
+    case 'failed':
+      return { ok: true, report: { ...base, type, message: typeof body.message === 'string' ? body.message.slice(0, 300) : 'The browser could not play this song.' } };
+    default:
+      return { ok: false, error: 'unknown report type' };
   }
 }

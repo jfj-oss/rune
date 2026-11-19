@@ -224,7 +224,7 @@ export class SoloistZone implements PlaybackZone {
     if (!cur) return;
     const list = [cur, ...items.filter((i) => i.track.source === 'spotify' && uriOf(i))];
     // The driver orders the queue (shuffle included): this zone plays it straight.
-    this.q = { ...this.q, items: list, index: 0, shuffle: false, order: list.map((_, i) => i) };
+    this.q = { ...this.q, items: list, index: 0, shuffle: false };
     await this.syncNext();
   }
 

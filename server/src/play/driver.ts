@@ -1,7 +1,7 @@
-// Phase 3 of the server-queue plan: the pc zone's queue lives here, on the server, behind config
-// spotify.serverQueue (off by default). This driver is the only code that decides what plays next. It sends a run of
-// songs to one output at a time: local songs to mpv (gapless within the run), Spotify songs to this PC's Spotify app
-// as one PUT play of up to 100 URIs, so the app moves on by itself. Outputs report facts only (started, ended, paused,
+// The server-owned queue: this driver is the only code that decides what plays next, for the pc zone and for every
+// browser zone. It sends a run of songs to one output at a time: local songs to mpv (gapless within the run), Spotify
+// songs to this PC's Spotify app as one PUT play of up to 100 URIs (so the app moves on by itself), or, for a browser
+// zone, the run to the tab that sounds it (play/tabOutput.ts). Outputs report facts only (started, ended, paused,
 // resumed, failed, taken over) and the driver keeps the queue, the cursor (by queueId) and a revision number.
 //
 // What it never does: start sound at boot (a restored queue waits, paused), or skip a Spotify song to a local one
@@ -11,9 +11,10 @@ import type { PlaybackZone } from '../modules.js';
 import type { Db } from '../db/index.js';
 import { playThreshold, type RecordedPlay } from '../history/plays.js';
 import * as Q from './queue.js';
-import { isRadioTrack, parseSavedSession, SESSION_KEY, type SavedSession } from './zone.js';
+import { isRadioTrack } from './zone.js';
+import { parseSavedSession, restoreQueue, SESSION_KEY, type SavedSession } from './session.js';
 
-export type OutputKind = 'mpv' | 'spotify';
+export type OutputKind = 'mpv' | 'spotify' | 'tab';
 
 /** What an output saw happen. `token` names the run it belongs to: facts about an older run are ignored. */
 export type OutputFact =
@@ -44,7 +45,7 @@ export interface Output {
   position(): number | null;
   onFact(fn: (fact: OutputFact) => void): void;
   /** Extra details for the page (mpv's signal path, a radio stream's title). */
-  details?(): Pick<PlayerState, 'signalPath' | 'nowPlaying'>;
+  details?(): Pick<PlayerState, 'signalPath' | 'nowPlaying' | 'tab'>;
   onDetails?(fn: () => void): void;
   close(): void;
 }
@@ -75,8 +76,14 @@ export interface DriverStore {
 export interface DriverDeps {
   /** Queue items for ids, in order; unknown Spotify ids come back as placeholders, unknown local ids are dropped. */
   load(ids: string[]): QueueItem[];
-  outputs: { mpv: Output; spotify?: Output };
+  /** Which zone this queue is ('pc' by default; 'browser:<id>' for a browser). */
+  zone?: string;
+  outputs: Partial<Record<OutputKind, Output>>;
+  /** Which output plays a song (default: local songs on mpv, Spotify songs on the Spotify output). */
+  route?(track: Track): OutputKind;
   store?: DriverStore;
+  /** The app_state row the queue is saved in (default: the pc queue's). */
+  queueKey?: string;
   /** Spotify's rate limit: while this is in the future no Spotify song is started. */
   rateLimitedUntil?(): number | null;
   mirror?(): MirrorZone | undefined;
@@ -112,7 +119,7 @@ interface ActivePlay {
 }
 
 export class QueueDriver implements PlaybackZone {
-  readonly zone = 'pc';
+  readonly zone: string;
   private q: Q.QueueState = Q.createQueue();
   private rev = 0;
   private status: PlayerState['status'] = 'stopped';
@@ -139,12 +146,17 @@ export class QueueDriver implements PlaybackZone {
   private saveDueAt = 0;
   private savedKey = '';
   private closed = false;
+  private readonly queueKey: string;
+  private readonly route: (track: Track) => OutputKind;
   private readonly now: () => number;
 
   constructor(private readonly deps: DriverDeps) {
+    this.zone = deps.zone ?? 'pc';
     this.now = deps.now ?? Date.now;
     this.posAt = this.now();
-    for (const out of [deps.outputs.mpv, deps.outputs.spotify]) {
+    this.queueKey = deps.queueKey ?? QUEUE_KEY;
+    this.route = deps.route ?? kindOf;
+    for (const out of Object.values(deps.outputs)) {
       if (!out) continue;
       out.onFact((f) => this.onFact(out.kind, f));
       out.onDetails?.(() => {
@@ -162,12 +174,12 @@ export class QueueDriver implements PlaybackZone {
       const m = this.deps.mirror?.();
       if (m) {
         const s = m.state();
-        return { ...s, zone: 'pc', rev: this.rev, output: 'spotify', ...(this.hold ? { hold: this.hold } : {}), updatedAt: s.updatedAt };
+        return { ...s, zone: this.zone, rev: this.rev, output: 'spotify', ...(this.hold ? { hold: this.hold } : {}), updatedAt: s.updatedAt };
       }
     }
     const details = this.output ? this.deps.outputs[this.output]?.details?.() : undefined;
     return {
-      zone: 'pc',
+      zone: this.zone,
       status: this.status,
       queue: [...this.q.items],
       index: this.q.index,
@@ -177,6 +189,7 @@ export class QueueDriver implements PlaybackZone {
       repeat: this.q.repeat,
       ...(details?.signalPath ? { signalPath: details.signalPath } : {}),
       ...(details?.nowPlaying ? { nowPlaying: details.nowPlaying } : {}),
+      ...(details?.tab ? { tab: details.tab } : {}),
       rev: this.rev,
       output: this.output,
       ...(this.hold ? { hold: this.hold } : {}),
@@ -477,7 +490,7 @@ export class QueueDriver implements PlaybackZone {
   private async startRun(positionMs: number): Promise<void> {
     const item = Q.currentItem(this.q);
     if (!item) return;
-    const kind = kindOf(item.track);
+    const kind = this.route(item.track);
     const out = this.deps.outputs[kind];
     const token = ++this.token;
     const fail = (hold: PlayerHold) => {
@@ -499,9 +512,7 @@ export class QueueDriver implements PlaybackZone {
       }
     }
     // Only one player sounds: the other one stops first.
-    const other = kind === 'mpv' ? this.deps.outputs.spotify : this.deps.outputs.mpv;
-    if (this.output && this.output !== kind) await this.deps.outputs[this.output]?.stop().catch(() => undefined);
-    else await other?.stop().catch(() => undefined);
+    for (const [k, other] of Object.entries(this.deps.outputs)) if (k !== kind) await other?.stop().catch(() => undefined);
     const run = this.runFrom(kind);
     this.output = kind;
     this.hold = null;
@@ -534,7 +545,7 @@ export class QueueDriver implements PlaybackZone {
     const seen = new Set([cur.queueId]);
     const cap = kind === 'spotify' ? SPOTIFY_RUN : MPV_RUN;
     for (const e of Q.upcoming(this.q, cap)) {
-      if (out.length >= cap || kindOf(e.item.track) !== kind || seen.has(e.item.queueId)) break;
+      if (out.length >= cap || this.route(e.item.track) !== kind || seen.has(e.item.queueId)) break;
       out.push(e.item);
       seen.add(e.item.queueId);
       if (isRadioTrack(e.item.track)) break;
@@ -552,7 +563,7 @@ export class QueueDriver implements PlaybackZone {
   private async silence(): Promise<void> {
     this.token++;
     this.output = null;
-    await Promise.all([this.deps.outputs.mpv.stop(), this.deps.outputs.spotify?.stop()].map((p) => p?.catch(() => undefined)));
+    await Promise.all(Object.values(this.deps.outputs).map((o) => o?.stop().catch(() => undefined)));
   }
 
   // ---------------------------------------------------------------- facts
@@ -728,7 +739,7 @@ export class QueueDriver implements PlaybackZone {
     if (played < playThreshold(dur)) return;
     if (!this.deps.onPlay) return;
     try {
-      this.deps.onPlay({ trackId: a.trackId, albumId: a.albumId, zone: 'pc', startedAt: a.startedAt, playedMs: played, completed });
+      this.deps.onPlay({ trackId: a.trackId, albumId: a.albumId, zone: this.zone, startedAt: a.startedAt, playedMs: played, completed });
     } catch (err) {
       this.deps.log?.({ err }, 'driver: could not record a play');
     }
@@ -807,14 +818,15 @@ export class QueueDriver implements PlaybackZone {
       positionMs: Math.max(0, Math.round(this.livePosition(this.now()))),
       shuffle: this.q.shuffle,
       repeat: this.q.repeat,
-      order: [...this.q.order],
+      // Shuffle reorders the queue itself, so the play order is the queue order (the field stays for older builds).
+      order: this.q.items.map((_, i) => i),
       volume: this.userVolume(),
     };
   }
 
   private saveKey(): string {
     const s = this.saved();
-    return JSON.stringify([s.queue, s.index, s.shuffle, s.repeat, s.order, s.volume, this.status]);
+    return JSON.stringify([s.queue, s.index, s.shuffle, s.repeat, s.volume, this.status]);
   }
 
   private scheduleSave(changed: boolean): void {
@@ -835,7 +847,7 @@ export class QueueDriver implements PlaybackZone {
     const store = this.deps.store;
     if (!store || this.closed) return;
     try {
-      store.write(QUEUE_KEY, JSON.stringify(this.saved()));
+      store.write(this.queueKey, JSON.stringify(this.saved()));
       this.savedKey = this.saveKey();
     } catch (err) {
       this.deps.log?.({ err }, 'driver: could not save the queue');
@@ -849,8 +861,8 @@ export class QueueDriver implements PlaybackZone {
     let raw: string | undefined;
     let migrated = false;
     try {
-      raw = store.read(QUEUE_KEY);
-      if (raw === undefined) {
+      raw = store.read(this.queueKey);
+      if (raw === undefined && this.zone === 'pc') {
         raw = store.read(SESSION_KEY);
         migrated = raw !== undefined;
       }
@@ -878,57 +890,6 @@ export class QueueDriver implements PlaybackZone {
       this.persist();
     } else this.savedKey = this.saveKey();
   }
-}
-
-/**
- * Line saved entries up with the items that still exist (load drops vanished local songs and keeps the order), so
- * queue ids, the current song and a shuffled order survive.
- */
-export function restoreQueue(session: SavedSession, items: QueueItem[]): { q: Q.QueueState; positionMs: number } {
-  const kept: number[] = [];
-  let cursor = 0;
-  for (let i = 0; i < session.queue.length && cursor < items.length; i++) {
-    if (items[cursor]!.track.id === session.queue[i]!.trackId) {
-      kept.push(i);
-      cursor += 1;
-    }
-  }
-  if (kept.length !== items.length) return { q: Q.createQueue(), positionMs: 0 };
-  const oldToNew = new Map<number, number>();
-  kept.forEach((oldPos, newPos) => oldToNew.set(oldPos, newPos));
-  const queue = items.map((item, newPos) => ({ ...item, queueId: session.queue[kept[newPos]!]!.queueId }));
-  let index = -1;
-  let positionMs = 0;
-  if (queue.length > 0) {
-    const exact = oldToNew.get(session.index);
-    if (exact !== undefined) {
-      index = exact;
-      positionMs = session.positionMs;
-    } else {
-      const after = kept.find((oldPos) => oldPos >= session.index);
-      index = oldToNew.get(after ?? kept.at(-1)!) ?? -1;
-    }
-  }
-  const cur = index >= 0 ? queue[index] : undefined;
-  if (cur && cur.track.durationMs > 0) {
-    positionMs = Math.min(cur.track.durationMs, Math.max(0, positionMs));
-    if (positionMs >= cur.track.durationMs - 100) positionMs = 0;
-  } else if (!cur) positionMs = 0;
-  let order: number[];
-  if (!session.shuffle) order = queue.map((_, i) => i);
-  else {
-    order = [];
-    const seen = new Set<number>();
-    for (const oldPos of session.order) {
-      const n = oldToNew.get(oldPos);
-      if (n !== undefined && !seen.has(n)) {
-        seen.add(n);
-        order.push(n);
-      }
-    }
-    for (let i = 0; i < queue.length; i++) if (!seen.has(i)) order.push(i);
-  }
-  return { q: { items: queue, index, shuffle: session.shuffle, repeat: session.repeat, order }, positionMs };
 }
 
 /** app_state rows (the same key/value table the settings use). */

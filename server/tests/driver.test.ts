@@ -3,9 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlayerCommand, PlayerState, QueueItem } from '@liner/shared';
 import { placeholderItem, QUEUE_KEY, QueueDriver, type DriverStore, type MirrorZone } from '../src/play/driver.js';
+import { SESSION_KEY } from '../src/play/session.js';
 import { MpvOutput, SpotifyAppOutput } from '../src/play/outputs.js';
 import type { RecordedPlay } from '../src/history/plays.js';
-import { SESSION_KEY } from '../src/play/zone.js';
+
 import { DEV, World, sp } from './support/spotify-world.js';
 import { FakeRunMpv } from './support/fake-run-mpv.js';
 

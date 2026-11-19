@@ -38,6 +38,7 @@ import { createSpotifyWatch, type SpotifyWatchOptions } from '../play/spotifyWat
 import { createMprisBus, MprisPlaybackSource, type MprisBus, type MprisBusOptions } from '../spotify/mpris.js';
 import { loadQueueItems, makeQueueId } from '../play/rows.js';
 import { appStateStore, placeholderItem, QueueDriver } from '../play/driver.js';
+import { TabOutput } from '../play/tabOutput.js';
 import { MpvOutput, SpotifyAppOutput } from '../play/outputs.js';
 import { albumSummaryFromTrack, mapTrack } from '../spotify/map.js';
 import { createLocalTwins, normArtist, parseLocalIds, parseTwinQueries } from '../play/localTwins.js';
@@ -51,7 +52,7 @@ import { removeSpotifyPlaylistTracks } from './spotifyPlaylistWrite.js';
 import { registerFrameRoutes } from './frame.js';
 import { createHistory, ensureHistorySchema, registerHistoryRoutes } from '../history/index.js';
 import { albumsByIds, coverPath, getAlbum, getArtist, listAlbums, listArtists, publicTrack, type AlbumListQuery } from './library.js';
-import { parsePlayerCommand } from './playerCommand.js';
+import { parsePlayerCommand, parseTabReport } from './playerCommand.js';
 import { createLoudness, ensureLoudnessSchema, registerLoudnessRoutes } from '../loudness/index.js';
 import { albumNotHiddenSql, ensureDupesSchema, registerDupesRoutes } from '../library/dupes.js';
 import { createRadio, registerRadioRoutes } from '../radio/index.js';
@@ -126,7 +127,7 @@ export interface AppOptions {
   updateCaptureRunning?: boolean;
   /** Spotify Soloist zone + phone stream (main.ts enables; tests pass a fake Soloist's url and fake runners). */
   soloist?: boolean | Partial<SoloistOptions>;
-  /** Server-owned queue tests: mpv's run player instead of a real mpv (config spotify.serverQueue picks the mode). */
+  /** Tests: a fake mpv run player instead of a real mpv. */
   pcRunZone?: PcZone;
 }
 
@@ -151,6 +152,9 @@ const IMAGE_TYPES: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'im
 
 /** Client → server websocket messages larger than this are dropped unparsed. */
 const MAX_CLIENT_MESSAGE = 16 * 1024;
+/** A browser's own zone: "browser:" and the id that browser keeps (see web/src/lib/clientId.ts). */
+const BROWSER_ZONE_ID = /^browser:[A-Za-z0-9_-]{6,64}$/;
+
 /** Spotify Connect device ids are 40 hex characters; only such ids get an on-demand zone (see zoneFor). */
 const SPOTIFY_DEVICE_ID = /^[0-9a-f]{20,64}$/i;
 
@@ -287,18 +291,15 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   };
 
   // ---------- zones
-  // Phase 3 (config spotify.serverQueue, default off): the pc zone's queue lives in play/driver.ts and mpv only plays
-  // the runs of local songs it is given, so mpv keeps no session of its own (player.pc.session is left as it was).
-  const serverQueueWanted = cfg.spotify?.serverQueue === true;
+  // The server owns every queue (play/driver.ts): the pc zone's, and one per browser. mpv only plays the runs of local
+  // songs the pc queue hands it, so it keeps no session of its own.
   const pc: PcZone | undefined =
     opts.pcRunZone ??
     (opts.pcZone === false
       ? undefined
       : await createPcZone(db, cfg, {
           log: (message, err) => app.log.warn({ err }, message),
-          session: !serverQueueWanted,
         }));
-  const serverQueue = serverQueueWanted && !!pc;
   // "Linux PC speakers" can host Spotify by starting the desktop app on demand.
   // Creating it does nothing; the app only launches from POST /api/pc/spotify/start.
   const pcSpotify = createPcSpotify(cfg, {
@@ -317,25 +318,13 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     if (prev) history.recordFromState(prev, state);
     lastState.set(state.zone, state);
   };
-  // The Spotify app on this PC and mpv share the speakers: only one may sound (play/oneSpeaker.ts).
   let pcSpotifyDevice: { id: Zone; name: string } | null = null;
   /** Linked Spotify artist id -> until when not to ask for it again. */
   const artistFailedUntil = new Map<string, number>();
-  const speakers = createSpeakerGuard(
-    { pc: () => pc, spotify: () => (pcSpotifyDevice ? spotify?.zones.get(pcSpotifyDevice.id) : undefined) },
-    {
-      onError: (err) => app.log.warn({ err }, 'could not pause the other player on the PC speakers'),
-      // 'out' allows one background poll in ten minutes: mpv starting must not add to that (an MPRIS read is free).
-      canWake: () =>
-        spotify?.api.budgetLevel() !== 'out' || (!!pcSpotifyDevice && !!mpris?.readsFree(pcSpotifyDevice.id.slice('spotify:'.length))),
-      // warn: rune runs at LOG_LEVEL=warn, and this is how a silent song gets explained
-      onPause: (info) => app.log.warn(info, 'speaker guard paused a player'),
-    },
-  );
   // Phase 2: the Spotify app on this PC is read over MPRIS (free) instead of GET /me/player; commands stay on the Web API.
   // The server-owned queue reads the app's facts from the same bus.
   const mprisBus: MprisBus | undefined =
-    opts.mpris && cfg.spotifyClientId && (cfg.spotify?.mprisReads !== false || serverQueue)
+    opts.mpris && cfg.spotifyClientId && (cfg.spotify?.mprisReads !== false || !!pc)
       ? typeof opts.mpris === 'object' && 'bus' in opts.mpris
         ? opts.mpris.bus
         : createMprisBus({ logger: app.log, ...(typeof opts.mpris === 'object' ? opts.mpris : {}) })
@@ -357,14 +346,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     const match = list.find((z) => z.name.toLowerCase() === wanted) ?? (wanted ? list.find((z) => z.name.toLowerCase().includes(wanted)) : undefined);
     pcSpotifyDevice = match ? { id: match.id, name: match.name } : null;
   };
-  // With the server-owned queue, mpv's own states are the driver's business: the driver's states are the pc zone's.
-  if (!serverQueue) {
-    pc?.onChange((state) => speakers.changed('pc', state));
-    pc?.onChange((state) => {
-      recordHistory(state);
-      broadcast({ type: 'player', state: sanitize(state) });
-    });
-  }
   const spotify = cfg.spotifyClientId
     ? createSpotify(db, cfg, {
         ...opts.spotifyOptions,
@@ -416,10 +397,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     broadcast({ type: 'player', state: sanitize(state) });
   });
 
-  // ---------- the server-owned pc queue (phase 3, flag spotify.serverQueue)
+  // ---------- the server-owned queues
   const pcDeviceId = (): string | null => (pcSpotifyDevice ? pcSpotifyDevice.id.slice('spotify:'.length) : null);
   const appOut =
-    serverQueue && spotify && mprisBus
+    pc && spotify && mprisBus
       ? new SpotifyAppOutput({
           bus: mprisBus,
           api: spotify.zones.controlApi,
@@ -434,7 +415,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       : undefined;
   // Soloist first, the app when Soloist cannot play; the song waits with the reason when neither can.
   const spotifyOut =
-    serverQueue && (soloist || appOut)
+    pc && (soloist || appOut)
       ? new PcSpotifyOutput({
           ...(soloist
             ? {
@@ -450,7 +431,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         })
       : undefined;
   const driver: QueueDriver | undefined =
-    serverQueue && pc
+    pc
       ? new QueueDriver({
           load: (ids) => loadDriverItems(ids),
           outputs: { mpv: new MpvOutput(pc), spotify: spotifyOut },
@@ -641,7 +622,9 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   }
 
   async function zoneFor(id: Zone): Promise<PlaybackZone | undefined> {
-    if (id === 'pc') return driver ?? pc;
+    if (id === 'pc') return driver;
+    const browser = browserZone(id);
+    if (browser) return browser.queue;
     if (id === SOLOIST_ZONE) return soloist?.zone;
     if (id.startsWith('spotify:') && spotify) {
       // After a restart the Connect zones are unknown until the device list is read.
@@ -667,7 +650,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     let owned = false;
     const off = z.onChange((state) => {
       if (id === pcSpotifyDevice?.id) {
-        if (!driver) speakers.changed('spotify', state);
         spotifyWatch?.connect(state);
         driver?.mirrorChanged();
         // The server-owned queue writes its own plays from explicit ends: the app's zone counts only what rune did not
@@ -880,88 +862,74 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     backups.start();
   }
 
-  // ---------- auto-radio: continue the PC queue when it runs out
-  let autoPrev: PlayerState | undefined;
-  let autoRunning = false;
+  // ---------- auto-radio: continue a queue when it runs out
   const autoSeen = new Set<string>();
-  // The server-owned queue says when it ran out (an explicit event), and plays the radio songs itself.
-  driver?.onChange((state) => {
-    if (state.index >= 0 && !state.hold) peaks.prefetch(state.queue.slice(state.index + 1, state.index + 4).map((q) => q.track.id));
-  });
-  driver?.onQueueEnded((state) => {
-    if (autoRunning || !autoRadioEnabled()) return;
-    const seedIds = state.queue.map((q) => q.track.id);
-    let fresh: string[];
-    try {
-      fresh = radio
-        .planNext({ trackIds: seedIds.slice(-10), recentTrackIds: seedIds }, 20)
-        .map((p) => p.trackId)
-        .filter((id) => !seedIds.includes(id) && !autoSeen.has(id));
-    } catch (e) {
-      app.log.warn({ err: e }, 'auto-radio planning failed');
-      return;
-    }
-    if (fresh.length === 0) return;
-    for (const id of fresh) autoSeen.add(id);
-    autoRunning = true;
-    const appendAt = state.queue.length;
-    void (async () => {
+  const autoRunning = new Set<QueueDriver>();
+  /** The server-owned queue says when it ran out (an explicit event); with auto-radio on, radio songs continue it. */
+  function wireQueueEnd(q: QueueDriver): void {
+    q.onChange((state) => {
+      // Warm the waveform cache for the next few queue entries.
+      if (state.index >= 0 && !state.hold) peaks.prefetch(state.queue.slice(state.index + 1, state.index + 4).map((x) => x.track.id));
+    });
+    q.onQueueEnded((state) => {
+      if (autoRunning.has(q) || !autoRadioEnabled()) return;
+      const seedIds = state.queue.map((x) => x.track.id);
+      let fresh: string[];
       try {
-        await driver.command({ type: 'enqueue', trackIds: fresh });
-        await driver.command({ type: 'jump', index: appendAt });
-        await driver.command({ type: 'resume' });
-        app.log.warn({ reason: 'queue ran out', queueLength: appendAt, added: fresh.length, trackId: fresh[0] }, 'auto-radio started a song');
+        fresh = radio
+          .planNext({ trackIds: seedIds.slice(-10), recentTrackIds: seedIds }, 20)
+          .map((p) => p.trackId)
+          .filter((id) => !seedIds.includes(id) && !autoSeen.has(id));
       } catch (e) {
-        app.log.warn({ err: e }, 'auto-radio failed');
-      } finally {
-        autoRunning = false;
+        app.log.warn({ err: e }, 'auto-radio planning failed');
+        return;
       }
-    })();
-  });
-  if (!driver) pc?.onChange((state) => {
-    const prev = autoPrev;
-    autoPrev = state;
-    // Warm the waveform cache for the next few queue entries.
-    if (state.index >= 0) {
-      peaks.prefetch(state.queue.slice(state.index + 1, state.index + 4).map((q) => q.track.id));
-    }
-    if (!pc || autoRunning || !autoRadioEnabled()) return;
-    if (!prev || (prev.status !== 'playing' && prev.status !== 'loading')) return;
-    // A one-track queue is a tab driving mpv song by song (a mixed queue): that song ending is not the queue running out.
-    if (state.status !== 'stopped' || state.queue.length < 2) return;
-    const zone = pc;
-    const seedIds = state.queue.map((q) => q.track.id);
-    let fresh: string[];
-    try {
-      fresh = radio
-        .planNext({ trackIds: seedIds.slice(-10), recentTrackIds: seedIds }, 20)
-        .map((p) => p.trackId)
-        .filter((id) => !seedIds.includes(id) && !autoSeen.has(id));
-    } catch (e) {
-      app.log.warn({ err: e }, 'auto-radio planning failed');
-      return;
-    }
-    if (fresh.length === 0) return;
-    for (const id of fresh) autoSeen.add(id);
-    autoRunning = true;
-    const appendAt = state.queue.length;
-    void (async () => {
-      try {
-        // Append (the queue is stopped at its end), move to the first new entry
-        // and start it. Three serialized commands avoid replacing the queue, so
-        // the user's history stays visible in the UI.
-        await zone.command({ type: 'enqueue', trackIds: fresh });
-        await zone.command({ type: 'jump', index: appendAt });
-        await zone.command({ type: 'resume' });
-        // warn: rune runs at LOG_LEVEL=warn, and music that starts by itself has to be traceable
-        app.log.warn({ reason: 'queue ran out', queueLength: appendAt, added: fresh.length, trackId: fresh[0] }, 'auto-radio started a song');
-      } catch (e) {
-        app.log.warn({ err: e }, 'auto-radio failed');
-      } finally {
-        autoRunning = false;
-      }
-    })();
-  });
+      if (fresh.length === 0) return;
+      for (const id of fresh) autoSeen.add(id);
+      autoRunning.add(q);
+      const appendAt = state.queue.length;
+      void (async () => {
+        try {
+          await q.command({ type: 'enqueue', trackIds: fresh });
+          await q.command({ type: 'jump', index: appendAt });
+          await q.command({ type: 'resume' });
+          // warn: rune runs at LOG_LEVEL=warn, and music that starts by itself has to be traceable
+          app.log.warn({ zone: q.zone, reason: 'queue ran out', queueLength: appendAt, added: fresh.length, trackId: fresh[0] }, 'auto-radio started a song');
+        } catch (e) {
+          app.log.warn({ err: e }, 'auto-radio failed');
+        } finally {
+          autoRunning.delete(q);
+        }
+      })();
+    });
+  }
+  if (driver) wireQueueEnd(driver);
+
+  // ---------- browser zones: one server queue per browser ("browser:<id>"), made when a page first talks to it. The tab
+  // sounds it (play/tabOutput.ts) and reports back; nothing else about the queue lives in the page.
+  const browserZones = new Map<Zone, { queue: QueueDriver; tab: TabOutput }>();
+  function browserZone(id: Zone): { queue: QueueDriver; tab: TabOutput } | undefined {
+    if (!BROWSER_ZONE_ID.test(id)) return undefined;
+    const hit = browserZones.get(id);
+    if (hit) return hit;
+    const tab = new TabOutput();
+    const queue = new QueueDriver({
+      zone: id,
+      queueKey: `player.queue.${id}`,
+      load: (ids) => loadDriverItems(ids),
+      outputs: { tab },
+      route: () => 'tab',
+      store: appStateStore(db),
+      describe: (items) => describeSpotify(items),
+      onPlay: (play) => history.record(play),
+      log: (obj, msg) => app.log.warn(obj, msg),
+    });
+    queue.onChange((state) => broadcast({ type: 'player', state: sanitize(state) }));
+    wireQueueEnd(queue);
+    const z = { queue, tab };
+    browserZones.set(id, z);
+    return z;
+  }
 
   // ---------- local search (shared by /search and /search?local=1)
   /**
@@ -1012,8 +980,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     // block: waiting for it would wait for ever, and nothing is heard while it restarts.
     isPlayingOnPc: () => {
       const sounding = (status: string | undefined) => status === 'playing' || status === 'loading';
-      const zone = driver ?? pc;
-      return sounding(zone?.state().status) || sounding(soloist?.zone.state().status);
+      return sounding(driver?.state().status) || sounding(soloist?.zone.state().status) || [...browserZones.values()].some((z) => sounding(z.queue.state().status));
     },
     logger: { warn: (obj, msg) => app.log.warn(obj, msg), info: (obj, msg) => app.log.info(obj, msg) },
   });
@@ -1060,12 +1027,10 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             spotify?.reportLocalPlayback(msg);
           }
         });
-        // The server-owned queue says hello first: a tab built from another web build, or one that still drives a
-        // mixed queue itself, is told to reload.
-        if (driver) socket.send(JSON.stringify({ type: 'hello', build: webBuildId(), serverQueue: true } satisfies ServerEvent));
-        const pcZone = driver ?? pc;
-        if (pcZone) {
-          const state = sanitize(pcZone.state());
+        // The server says hello first: a tab built from another web build is told to reload.
+        socket.send(JSON.stringify({ type: 'hello', build: webBuildId() } satisfies ServerEvent));
+        if (driver) {
+          const state = sanitize(driver.state());
           socket.send(JSON.stringify({ type: 'player', state, queueRev: fingerprint(JSON.stringify(state.queue)) } satisfies ServerEvent));
         }
         socket.send(JSON.stringify({ type: 'scan', progress: last } satisfies ServerEvent));
@@ -1463,7 +1428,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           spotifyDeviceId?: string;
           spotifyDeviceName?: string;
           /** For 'pc': its queue lives on the server (phase 3); the page is a plain remote. */
-          serverQueue?: boolean;
           /** For 'pc': how its Spotify songs play (soloist/pcRoute.ts). `spotifyZone` is the zone that plays them
            *  ('soloist', or the app's Connect zone once the app runs); `spotifyNotice` says why the app stands in. */
           spotifyEngine?: PcSpotifyEngine;
@@ -1509,7 +1473,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           }
         }
         if (pc) {
-          const entry: (typeof zones)[number] = { id: 'pc', name: 'Linux PC speakers', kind: 'pc', ...(driver ? { serverQueue: true } : {}) };
+          const entry: (typeof zones)[number] = { id: 'pc', name: 'Linux PC speakers', kind: 'pc',  };
           // The device notePcSpotify matched (cfg.pcSpotifyDevice, default: this machine's hostname: the Spotify desktop app on this
           // machine). After a failed list it is still the last one known: an answer without it means "the app went
           // away" to the page, which then throws out a mixed queue.
@@ -1565,6 +1529,16 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       r.get<{ Params: { zone: string } }>('/player/:zone', async (req, reply) => {
         const z = await zoneFor(req.params.zone);
         return z ? sanitize(z.state()) : reply.code(404).send({ error: 'unknown zone' });
+      });
+
+      // The tab that sounds a browser zone reports what its player does (started, ended, paused, position, failed).
+      r.post<{ Params: { zone: string }; Body: unknown }>('/player/:zone/report', async (req, reply) => {
+        const parsed = parseTabReport(req.body);
+        if (!parsed.ok) return reply.code(400).send({ error: parsed.error });
+        const z = browserZone(req.params.zone);
+        if (!z) return reply.code(404).send({ error: 'not a browser zone' });
+        z.tab.report(parsed.report);
+        return { ok: true };
       });
 
       r.post<{ Params: { zone: string }; Body: unknown }>('/player/:zone', async (req, reply) => {
@@ -1734,6 +1708,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
     await settleJobs();
     spotifyWatch?.close();
     await driver?.close();
+    for (const z of browserZones.values()) await z.queue.close();
     spotifyOut?.close();
     mpris?.close();
     mprisBus?.close();
@@ -1758,6 +1733,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       await scanning?.catch(() => undefined);
       // The queue's last position is written before the database closes.
       await driver?.close();
+      for (const z of browserZones.values()) await z.queue.close();
     },
     mpv: pc,
     extra: [

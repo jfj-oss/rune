@@ -1,4 +1,4 @@
-// Phase 3 wired into the real app: config spotify.serverQueue on, the real PC zone, a fake mpv socket. Spotify is not
+// The server queue wired into the real app: the real PC zone, a fake mpv socket. Spotify is not
 // configured here (the driver tests cover the app); nothing sounds and nothing leaves the machine.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
@@ -32,7 +32,7 @@ function seedLibrary(file: string): Db {
   return db;
 }
 
-describe('server queue in the app (flag on)', () => {
+describe('server queue in the app', () => {
   const dirs: string[] = [];
   afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
@@ -50,7 +50,7 @@ describe('server queue in the app (flag on)', () => {
       return child();
     });
     mocks.execFile.mockImplementation((...a: unknown[]) => { const cb = a.at(-1); if (typeof cb === 'function') (cb as (e: Error) => void)(new Error('no')); });
-    const cfg: Config = { libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album', spotify: { serverQueue: true } };
+    const cfg: Config = { libraryRoots: [], dataDir: dir, port: 0, audioDevice: 'null', userAgent: 't', normalize: 'album' };
     const { app, shutdown } = await buildApp(db, cfg, { pcZone: true, scanOnStart: false, watch: false, backups: false, webDist: web });
     await app.ready();
     const mpv = await fake;
@@ -73,14 +73,12 @@ describe('server queue in the app (flag on)', () => {
   const setting = (db: Db, value: '0' | '1') => db.prepare("INSERT INTO app_state (key, value) VALUES ('settings.autoRadio', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(value);
   const row = (db: Db, key: string) => (db.prepare('SELECT value FROM app_state WHERE key = ?').get(key) as { value: string } | undefined)?.value;
 
-  it('the pc zone says its queue is on the server, and the socket says hello with the web build first', { timeout: 30000 }, async () => {
+  it('the socket says hello with the web build first, then the pc zone', { timeout: 30000 }, async () => {
     const t = await boot();
-    const zones = (await t.app.inject({ url: '/api/zones' })).json() as { id: string; serverQueue?: boolean }[];
-    expect(zones.find((z) => z.id === 'pc')?.serverQueue).toBe(true);
     const got: string[] = [];
     const ws = await t.app.injectWS('/api/ws', {}, { onInit: (w) => w.on('message', (m: Buffer) => got.push(String(m))) });
     await vi.waitFor(() => expect(got.length).toBeGreaterThanOrEqual(2));
-    expect(JSON.parse(got[0]!)).toEqual({ type: 'hello', build: 'build-42', serverQueue: true });
+    expect(JSON.parse(got[0]!)).toEqual({ type: 'hello', build: 'build-42' });
     expect(JSON.parse(got[1]!)).toMatchObject({ type: 'player', state: { zone: 'pc', output: null } });
     ws.terminate();
     await t.close();

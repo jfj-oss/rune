@@ -1,7 +1,7 @@
 // A mixed queue loads mpv ONE track at a time. Real buildApp + real PC zone; only the mpv process is a fake socket.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb, type Db } from '../src/db/index.js';
@@ -16,7 +16,6 @@ vi.mock('node:child_process', async (orig) => ({ ...(await orig<typeof import('n
 const child = () => { const c = new EventEmitter() as EventEmitter & Record<string, unknown>; Object.assign(c, { pid: 1, stderr: new EventEmitter(), exitCode: null, signalCode: null, kill: () => true }); return c; };
 
 /** A throwaway copy of the real library, made by hand. Without it the test below is skipped; the seeded ones always run. */
-const REAL_COPY = `${process.env.HOME}/data/agent-tmp/rune-audit/data/liner.db`;
 
 function seedLibrary(file: string): Db {
   const db = openDb(file);
@@ -68,34 +67,6 @@ describe('auto-radio and mixed queues', () => {
     return { app, db, loads, play, runOut, started, close };
   }
   const setting = (db: Db, value: '0' | '1') => db.prepare("INSERT INTO app_state (key, value) VALUES ('settings.autoRadio', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(value);
-
-  it('R1 the end of one local song in a mixed queue starts nothing on the server, even with auto-radio on', { timeout: 30000 }, async () => {
-    const t = await boot((dir) => seedLibrary(join(dir, 'liner.db')));
-    setting(t.db, '1');
-    await t.play(['l:1']);                 // exactly what ZoneEngine.load sends for the local song of a mixed queue
-    expect(t.loads()).toHaveLength(1);
-    await t.runOut();
-    expect(t.loads()).toHaveLength(1);
-    expect(t.started()).toEqual([]);
-    await t.close();
-  });
-
-  it('R1 on a copy of the real library', { timeout: 30000, skip: !existsSync(REAL_COPY) }, async () => {
-    const t = await boot((dir) => {
-      copyFileSync(REAL_COPY, join(dir, 'liner.db'));
-      const db = openDb(join(dir, 'liner.db'));
-      db.prepare("DELETE FROM app_state WHERE key='player.pc.session'").run();
-      return db;
-    });
-    setting(t.db, '1');
-    const seed = t.db.prepare("SELECT id FROM tracks WHERE source='local' AND path IS NOT NULL AND cue_start_ms IS NULL ORDER BY id LIMIT 1").get() as { id: string };
-    await t.play([seed.id]);
-    expect(t.loads()).toHaveLength(1);
-    await t.runOut();
-    expect(t.loads()).toHaveLength(1);
-    expect(t.started()).toEqual([]);
-    await t.close();
-  });
 
   it('auto-radio is off unless switched on: a queue running out starts nothing', { timeout: 30000 }, async () => {
     const t = await boot((dir) => seedLibrary(join(dir, 'liner.db')));
