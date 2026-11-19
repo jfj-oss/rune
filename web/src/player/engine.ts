@@ -342,7 +342,7 @@ export class AudioEngine implements Engine {
     const start = () => {
       if (gen !== this.loadGen || target !== this.el) return;
       if (!isLiveTrack(track) && !viaT) target.currentTime = startMs / 1000;
-      if (autoplay) void target.play().catch(() => this.errorFn('Tap play to start audio'));
+      if (autoplay) void target.play().catch((e) => this.playRefused(e));
     };
     if (reused && !isLiveTrack(track)) {
       // Its metadata came long ago, so waiting for loadedmetadata would wait for ever: move it now.
@@ -353,7 +353,7 @@ export class AudioEngine implements Engine {
     } else if (autoplay) {
       // A swapped-in preload (or a live t= reload) is already at its start.
       if (swap || viaT) this.el.currentTime = 0;
-      void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
+      void this.el.play().catch((e) => this.playRefused(e));
     }
     // Keep one song buffered ahead; release it when the queue now points elsewhere.
     this.setPreload(upcoming[0]);
@@ -361,10 +361,20 @@ export class AudioEngine implements Engine {
 
   setUpcoming(upcoming: Track[]) { this.setPreload(upcoming[0]); }
 
+  /**
+   * A play() that did not start. A play that a pause() or a newer load() interrupted (AbortError: a quick Pause right
+   * after Play, a Next while buffering) is not a failure and must not be told to the server as one; only a refusal by
+   * the browser (needs a tap) is.
+   */
+  private playRefused(e: unknown) {
+    if ((e as { name?: string } | null)?.name === 'AbortError') return;
+    this.errorFn('Tap play to start audio');
+  }
+
   play() {
     this.playing = true;
     this.resumeContext();
-    void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
+    void this.el.play().catch((e) => this.playRefused(e));
   }
   pause() {
     this.playing = false;
@@ -395,7 +405,7 @@ export class AudioEngine implements Engine {
     this.el.src = src;
     this.loadedId = track.id;
     if (!isLiveTrack(track)) this.readGain(src, this.el);
-    if (this.playing) void this.el.play().catch(() => this.errorFn('Tap play to start audio'));
+    if (this.playing) void this.el.play().catch((e) => this.playRefused(e));
   }
 
   setVolume(v: number) {

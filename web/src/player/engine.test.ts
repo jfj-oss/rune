@@ -71,6 +71,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('AudioEngine: an interrupted play is not a failure', () => {
+  it('a play() that a pause() interrupted (AbortError) says nothing; a refusal by the browser (NotAllowedError) asks for a tap', async () => {
+    const engine = new AudioEngine();
+    const errors: string[] = [];
+    engine.onError((m) => errors.push(m));
+    engine.load(local('l:1'), 0, true);
+    const el = elementFor('l:1')!;
+    el.play = () => Promise.reject(Object.assign(new Error('The play() request was interrupted by a call to pause()'), { name: 'AbortError' }));
+    engine.play();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(errors).toEqual([]);
+    el.play = () => Promise.reject(Object.assign(new Error('not allowed'), { name: 'NotAllowedError' }));
+    engine.play();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(errors).toEqual(['Tap play to start audio']);
+  });
+});
+
 describe('AudioEngine look-ahead', () => {
   it('preloads the next local track and swaps to it on ended without a new src', () => {
     const engine = new AudioEngine();

@@ -246,7 +246,7 @@ export class QueueDriver implements PlaybackZone {
         if (items.length === 0) return;
         this.unpark();
         this.closeActive(false);
-        this.q = Q.play(this.q, items, cmd.startIndex ?? 0);
+        this.q = Q.play(this.q, items, cmd.startIndex ?? 0, Math.random, cmd.shuffle === true);
         this.bump();
         this.describe(items);
         await this.startCurrent(Math.max(0, Math.round(cmd.positionMs ?? 0)), cmd.paused === true);

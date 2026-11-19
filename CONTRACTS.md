@@ -33,7 +33,8 @@ from the PC browser and an iPhone (installable web app).
 | `GET /stream/:trackId?fmt=orig\|opus\|aac&kbps=` | audio, supports Range for `orig` non-cue tracks |
 | `GET /player/:zone` | `PlayerState` |
 | `POST /player/:zone` body `PlayerCommand` | `PlayerState` |
-| `GET /zones` | `{ id: Zone, name: string, kind: 'pc'\|'browser'\|'spotify' }[]` |
+| `POST /player/browser:<id>/report` body `TabReport` | `{ ok }` (the tab that sounds a browser zone tells the server what its player did) |
+| `GET /zones` | `{ id: Zone, name: string, kind: 'pc'\|'browser'\|'spotify' }[]` (browser zones are not listed: each page names its own, `browser:<id>`) |
 | `GET /spotify/status` · `GET /spotify/token` | `{connected,user}` · short-lived `{access_token, expires_at}` (Web Playback SDK in the browser) |
 | `GET /playlists` · `GET /playlists/:id` | `PlaylistSummary[]` · `PlaylistDetail` (Liked Songs = `pl:sp:liked`) |
 | `GET /albums/:id/saved` · `POST/DELETE /albums/:id/save` | `{saved}` · save / unsave a Spotify album |
@@ -59,7 +60,20 @@ from the PC browser and an iPhone (installable web app).
 - Report ONCE at the end: what you built, files, test results, anything left undone. Kill your
   own background jobs first. No interim reports.
 
-## Browser zone is hybrid (Spotify Web Playback SDK)
-`web/src/player/hybrid.ts`: the browser zone keeps ONE queue; local tracks play through `<audio>`, Spotify tracks through the
-SDK player (`spotifySdk.ts`, device name `rune — <This Mac>`; desktop browsers only, not iOS). Spotify tracks on a zone that cannot
-play them (PC speakers, or the browser zone on iPhone) open the "Play on…" sheet (`routing.ts`, `PlayOnSheet.tsx`).
+## One queue (the server's)
+The server owns the queue of every zone (order, shuffle, repeat, next/prev, add, remove, move, play-from-here). The logic is
+one module, `shared/src/queue.ts` (pure functions; the pc zone, browser zones, Soloist and the web's mock mode all use it).
+Shuffle is a real reordering: the queue shown is the play order; turning it off leaves the order as it is.
+- `server/src/play/driver.ts` `QueueDriver` is the queue + cursor + saved state. It hands a run of songs to ONE output at a time
+  and the output reports facts back (started, ended, paused, resumed, failed, taken over). Outputs: `MpvOutput` (local files on
+  the PC speakers, gapless), `SpotifyAppOutput`/`SoloistRunOutput` (Spotify songs on the PC), `TabOutput` (a browser tab).
+- pc zone = one `QueueDriver` over mpv (`play/zone.ts` only plays the runs it is given: it has no queue of its own).
+- Browser zone = `browser:<id>`, one `QueueDriver` per browser, made when a page first talks to it (`<id>` is kept in the
+  browser's localStorage, `web/src/lib/clientId.ts`). The page (`web/src/player/browser.ts`, `tabPlayer.ts`) holds NO queue:
+  it shows the server's state and sends button presses, and the ONE tab of that browser that sounds the zone follows
+  `PlayerState.tab` (which run to play, a new load, a new seek) with its audio engine and reports back (`TabReport`). Spotify
+  songs in the browser zone: the Web Playback SDK on a desktop, Soloist heard over a stream on a phone (`phoneSoloist.ts`).
+- Spotify Connect devices (`spotify:<device>`) keep Spotify's own queue (`server/src/spotify/zones.ts`); only a Shuffle play
+  is mixed by rune before it is sent.
+- Tests: `server/tests/e2e/` plays real silent FLACs through a real server (mpv on a null output) and a muted headless Chromium;
+  it runs in `pnpm test`.
