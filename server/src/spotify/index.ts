@@ -20,8 +20,6 @@ import {
 import { syncSavedAlbums, type SyncResult } from './map.js';
 import {
   createSpotifyZones,
-  LocalPlaybackSource,
-  parseLocalPlaybackReport,
   type ConnectZoneOptions,
   type SpotifyZones,
 } from './zones.js';
@@ -74,8 +72,6 @@ export interface SpotifyModule {
   getPlaylist(id: string): PlaylistDetail | undefined;
   /** Register /api/spotify/* on the app given to us by the main session. */
   registerRoutes(app: FastifyInstance): SpotifyAuth;
-  /** A browser SDK's local playback report; false when it was malformed. */
-  reportLocalPlayback(report: unknown): boolean;
   /** Persist request counters + breaker and stop the usage timer (idempotent). */
   close(): void;
 }
@@ -150,8 +146,6 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     loadUsage: () => loadSpotifyUsage(db),
     saveUsage: (usage) => saveSpotifyUsage(db, usage),
   });
-  // The browser's Web Playback SDK reports its state over /ws: a free /me/player substitute.
-  const localPlayback = opts.localPlayback ?? new LocalPlaybackSource(opts.now ?? Date.now);
   // songs rune has stored (played, saved, in playlists) start with their titles + covers, no lookup
   const zones = createSpotifyZones(api, {
     knownTracks: (ids) => loadQueueItems(db, ids),
@@ -165,7 +159,6 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
       save: (devices) => saveSpotifyDevices(db, devices),
     },
     ...opts,
-    localPlayback,
   });
   const catalog = new SpotifyCatalog(api, { ttlMs: opts.catalogTtlMs, now: opts.now });
   const now = opts.now ?? Date.now;
@@ -206,12 +199,6 @@ export function createSpotify(db: Db, cfg: Config, opts: CreateSpotifyOptions = 
     },
     listPlaylists: () => listPlaylists(db),
     getPlaylist: (id) => getPlaylist(db, id),
-    reportLocalPlayback: (raw) => {
-      const report = parseLocalPlaybackReport(raw);
-      if (!report) return false;
-      localPlayback.accept(report);
-      return true;
-    },
     registerRoutes: (app: FastifyInstance) =>
       // /status also says until when Spotify is resting (its lockout), so every page can say so instead of failing.
       registerSpotifyRoutes(app, db, cfg, { ...opts, auth, restingUntil: () => api.blockedUntil() }),

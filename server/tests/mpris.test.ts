@@ -143,7 +143,7 @@ function setup(opts: { known?: (ids: string[]) => QueueItem[]; level?: () => 'no
   const source = new MprisPlaybackSource(bus, { deviceId: () => 'mypc', knownTracks: opts.known, budgetLevel: opts.level });
   const wake = vi.fn();
   source.setWake(wake);
-  const reads = sharedPlaybackReads(api as unknown as SpotifyZoneApi, Date.now, undefined, source);
+  const reads = sharedPlaybackReads(api as unknown as SpotifyZoneApi, Date.now, source);
   const read = () => reads.currentPlayback('mypc');
   return { bus, api, source, reads, read, wake };
 }

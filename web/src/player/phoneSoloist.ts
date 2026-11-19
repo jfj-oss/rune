@@ -1,6 +1,6 @@
 // Spotify on a phone, with no Spotify app: Soloist on the PC plays the song and the phone hears it over the HLS
 // stream (/api/soloist/stream/live.m3u8, server/src/soloist/audio.ts). This is the browser zone's Spotify half on a
-// handheld, where the Web Playback SDK cannot run: a ZoneEngine on the soloist zone (one song and its run at a time,
+// handheld (the only way a browser zone plays Spotify): a ZoneEngine on the soloist zone (one song and its run at a time,
 // like the pc zone's mixed mode drives mpv and Soloist) plus the one <audio> element that plays the stream.
 //
 // The element follows the zone's state: a new HLS program (`rev` bumps on play, skip and seek) reloads it, pause and

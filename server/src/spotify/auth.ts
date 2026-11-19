@@ -2,9 +2,7 @@
 //
 // Spotify only permits loopback redirect URIs over plain http, so the one-time
 // login must happen in a browser on the PC that runs the server. The server keeps
-// the refresh token; every other device (phone PWA included) asks this server for
-// short-lived access tokens via GET /api/spotify/token and never sees the refresh
-// token. There is deliberately no client secret: PKCE replaces it.
+// the refresh token and never hands a token to a page. There is deliberately no client secret: PKCE replaces it.
 import { randomBytes, createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Db } from '../db/index.js';
@@ -16,7 +14,6 @@ import { ensureSpotifySchema } from './schema.js';
 export { ensureSpotifySchema } from './schema.js';
 
 export const SPOTIFY_SCOPES = [
-  'streaming',
   'user-read-email',
   'user-read-private',
   'user-library-read',
@@ -220,13 +217,6 @@ export class SpotifyAuth {
     return name
       ? { connected: true, configured: true, user: { name, product: row.user_product ?? '' } }
       : { connected: true, configured: true };
-  }
-
-  /** Access token for the browser Web Playback SDK, refreshed when needed. */
-  async tokenPayload(): Promise<{ access_token: string; token_type: 'Bearer'; expires_at: number }> {
-    const accessToken = await this.getAccessToken();
-    const row = this.load();
-    return { access_token: accessToken, token_type: 'Bearer', expires_at: row?.expires_at ?? 0 };
   }
 
   async getAccessToken(force = false): Promise<string> {
@@ -436,17 +426,6 @@ export function registerSpotifyRoutes(
   app.post('/api/spotify/logout', async () => {
     auth.logout();
     return { ok: true };
-  });
-
-  app.get('/api/spotify/token', async (_req, reply) => {
-    try {
-      return await auth.tokenPayload();
-    } catch (err) {
-      if (err instanceof SpotifyAuthError && err.code === 'not_connected') {
-        return reply.code(401).send({ error: 'not_connected' });
-      }
-      return errorReply(reply, 502, err);
-    }
   });
 
   return auth;

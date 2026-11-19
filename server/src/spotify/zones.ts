@@ -63,8 +63,6 @@ export interface ConnectZoneOptions {
   /** Spotify's circuit breaker: while this is in the future, the loop must not call Spotify. */
   blockedUntil?: () => number | null;
   now?: () => number;
-  /** Latest playback report from a browser's Web Playback SDK (a free /me/player substitute). */
-  localPlayback?: LocalPlaybackSource;
   /** This PC's Spotify app over MPRIS: a free /me/player substitute for its own device (phase 2). */
   mpris?: MprisPlaybackSource;
   /** Gets one line per play: what the first poll after it found (track ids only). */
@@ -74,206 +72,6 @@ export interface ConnectZoneOptions {
    * network failure) the Connect zones and the picker keep these devices instead of vanishing.
    */
   deviceStore?: { load(): SpotifyDevice[] | undefined; save(devices: SpotifyDevice[]): void };
-}
-
-// ---------- local playback reports ----------
-
-/** The track as the browser's Web Playback SDK reports it. */
-export interface LocalPlaybackTrackReport {
-  id: string;
-  uri: string;
-  name: string;
-  durationMs: number;
-  artists: { name: string; uri: string }[];
-  album: { name: string; uri: string; images: { url: string; width: number | null; height: number | null }[] };
-}
-
-/** A validated report from the browser's Spotify device, stamped with the server receive time. */
-export interface LocalPlaybackReport {
-  deviceId: string;
-  active: boolean;
-  playing: boolean;
-  positionMs: number;
-  durationMs: number;
-  track: LocalPlaybackTrackReport | null;
-  shuffle: boolean;
-  repeat: 0 | 1 | 2;
-  /** 0..1 */
-  volume: number;
-}
-
-const MAX_MSG_STRING = 4000;
-const TWENTY_FOUR_HOURS = 86_400_000;
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-/** A bounded string; empty is allowed. */
-function text(v: unknown, max = MAX_MSG_STRING): string | null {
-  return typeof v === 'string' && v.length <= max ? v : null;
-}
-function requiredText(v: unknown, max = MAX_MSG_STRING): string | null {
-  return typeof v === 'string' && v.length > 0 && v.length <= max ? v : null;
-}
-function numberIn(v: unknown, min: number, max: number): number | null {
-  return typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : null;
-}
-
-function parseImages(v: unknown): { url: string; width: number | null; height: number | null }[] | null {
-  if (v === undefined) return [];
-  if (!Array.isArray(v) || v.length > 20) return null;
-  const out: { url: string; width: number | null; height: number | null }[] = [];
-  for (const raw of v) {
-    if (!isRecord(raw)) return null;
-    const url = requiredText(raw.url, 2000);
-    if (url === null) return null;
-    const width = raw.width === null || raw.width === undefined ? null : numberIn(raw.width, 0, 100_000);
-    const height = raw.height === null || raw.height === undefined ? null : numberIn(raw.height, 0, 100_000);
-    if ((raw.width !== null && raw.width !== undefined && width === null) || (raw.height !== null && raw.height !== undefined && height === null)) return null;
-    out.push({ url, width, height });
-  }
-  return out;
-}
-
-function parseLocalTrack(v: unknown): LocalPlaybackTrackReport | null {
-  if (!isRecord(v)) return null;
-  const id = requiredText(v.id, 500);
-  const uri = requiredText(v.uri, 2000);
-  const name = text(v.name, 2000);
-  const durationMs = numberIn(v.durationMs, 0, TWENTY_FOUR_HOURS);
-  if (id === null || uri === null || name === null || durationMs === null) return null;
-  if (!Array.isArray(v.artists) || v.artists.length > 100) return null;
-  const artists: { name: string; uri: string }[] = [];
-  for (const a of v.artists) {
-    if (!isRecord(a)) return null;
-    const an = text(a.name, 500);
-    const au = text(a.uri, 2000);
-    if (an === null || au === null) return null;
-    artists.push({ name: an, uri: au });
-  }
-  if (!isRecord(v.album)) return null;
-  const albumName = text(v.album.name, 2000);
-  const albumUri = text(v.album.uri, 2000);
-  const images = parseImages(v.album.images);
-  if (albumName === null || albumUri === null || images === null) return null;
-  return { id, uri, name, durationMs, artists, album: { name: albumName, uri: albumUri, images } };
-}
-
-/** Validate an untrusted `sdk-state` message; null when malformed (never trust the client). */
-export function parseLocalPlaybackReport(raw: unknown): LocalPlaybackReport | null {
-  if (!isRecord(raw)) return null;
-  const deviceId = requiredText(raw.deviceId, 500);
-  if (deviceId === null || typeof raw.active !== 'boolean') return null;
-  if (!raw.active) {
-    return {
-      deviceId,
-      active: false,
-      playing: false,
-      positionMs: 0,
-      durationMs: 0,
-      track: null,
-      shuffle: false,
-      repeat: 0,
-      volume: 0,
-    };
-  }
-  const playing = raw.playing;
-  const shuffle = raw.shuffle;
-  const repeat = raw.repeat;
-  const positionMs = numberIn(raw.positionMs, 0, TWENTY_FOUR_HOURS);
-  const durationMs = numberIn(raw.durationMs, 0, TWENTY_FOUR_HOURS);
-  const volume = numberIn(raw.volume, 0, 1);
-  const track = parseLocalTrack(raw.track);
-  if (
-    typeof playing !== 'boolean' ||
-    typeof shuffle !== 'boolean' ||
-    (repeat !== 0 && repeat !== 1 && repeat !== 2) ||
-    positionMs === null ||
-    durationMs === null ||
-    volume === null ||
-    track === null
-  ) {
-    return null;
-  }
-  return { deviceId, active: true, playing, positionMs, durationMs, track, shuffle, repeat, volume };
-}
-
-/** How long a local report is used as a synthetic /me/player answer. */
-const LOCAL_REPORT_FRESH_MS = 20_000;
-/** After a write command, wait for the device to report the change itself. */
-const LOCAL_COMMAND_HOLD_MS = 4_000;
-/** At most one wake in this window, however many reports arrive. */
-const LOCAL_WAKE_DEBOUNCE_MS = 500;
-
-/** The browser SDK's latest report plus the last command that went through the shared wrapper. */
-export class LocalPlaybackSource {
-  private latest: { report: LocalPlaybackReport; receivedAt: number } | null = null;
-  private lastCommand: { at: number; deviceId?: string } | null = null;
-  private wakeFn: () => void = () => {};
-  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
-  private wakePending = false;
-
-  constructor(private readonly now: () => number = Date.now) {}
-
-  /** Zones call this from their constructor so a report can make them poll at once. */
-  setWake(fn: () => void): void {
-    this.wakeFn = fn;
-  }
-
-  /** Record a validated report, stamped with the server's clock. */
-  accept(report: LocalPlaybackReport): void {
-    if (!report.active) {
-      // Playback moved off this device: forget the synthetic answer.
-      if (!this.latest || this.latest.report.deviceId === report.deviceId) this.latest = null;
-      return;
-    }
-    const prev = this.latest?.report ?? null;
-    this.latest = { report, receivedAt: this.now() };
-    if (wakeWorthy(prev, report)) this.scheduleWake();
-  }
-
-  /** A write went through the wrapper. A different device means playback is moving away. */
-  noteCommand(deviceId: string | undefined): void {
-    this.lastCommand = { at: this.now(), deviceId };
-    if (deviceId && this.latest && this.latest.report.deviceId !== deviceId) this.latest = null;
-  }
-
-  /** The report only if it may replace a real GET /me/player right now. */
-  usable(at: number): { report: LocalPlaybackReport; receivedAt: number } | null {
-    const latest = this.latest;
-    if (!latest || !latest.report.active) return null;
-    if (at - latest.receivedAt >= LOCAL_REPORT_FRESH_MS) return null;
-    const cmd = this.lastCommand;
-    // A just-sent command wins unless the device already reported after it.
-    if (cmd && at - cmd.at < LOCAL_COMMAND_HOLD_MS && latest.receivedAt <= cmd.at) return null;
-    return latest;
-  }
-
-  private scheduleWake(): void {
-    if (this.wakeTimer) {
-      this.wakePending = true;
-      return;
-    }
-    this.wakeFn();
-    this.wakeTimer = setTimeout(() => {
-      this.wakeTimer = null;
-      if (this.wakePending) {
-        this.wakePending = false;
-        this.scheduleWake();
-      }
-    }, LOCAL_WAKE_DEBOUNCE_MS);
-    this.wakeTimer.unref?.();
-  }
-}
-
-function wakeWorthy(prev: LocalPlaybackReport | null, next: LocalPlaybackReport): boolean {
-  if (!prev) return true;
-  return (
-    prev.track?.id !== next.track?.id ||
-    prev.playing !== next.playing ||
-    prev.shuffle !== next.shuffle ||
-    prev.repeat !== next.repeat
-  );
 }
 
 /** How long a just-played zone ignores /me/player still naming the previous device. */
@@ -1365,10 +1163,7 @@ export class SpotifyZones {
   ) {
     // /me/player describes the whole account, so every zone polling it can share one answer.
     this.now = opts.now ?? Date.now;
-    this.api = sharedPlaybackReads(api, this.now, opts.localPlayback, opts.mpris, opts.budgetLevel, opts.hasClients);
-    // A local report that changes what is playing wakes every zone: they update from the
-    // synthetic (free) answer immediately.
-    opts.localPlayback?.setWake(() => this.wake());
+    this.api = sharedPlaybackReads(api, this.now, opts.mpris, opts.budgetLevel, opts.hasClients);
     // An MPRIS signal wakes only this PC's own zone: every other zone would spend a real read on it.
     opts.mpris?.setWake(() => {
       const id = opts.mpris?.deviceId();
@@ -1471,62 +1266,13 @@ function spotifyIdFromUri(uri: string): string {
   return parts.length >= 3 ? parts[parts.length - 1]! : uri;
 }
 
-/** Build the /me/player shape from the browser's local report (no network). */
-function syntheticPlaybackState(
-  report: LocalPlaybackReport,
-  receivedAt: number,
-  now: number,
-  deviceName: string,
-): SpotifyPlaybackState {
-  const base = report.positionMs + (report.playing ? Math.max(0, now - receivedAt) : 0);
-  const progress = report.durationMs > 0 ? Math.min(report.durationMs, base) : base;
-  const t = report.track;
-  const item: SpotifyTrack | null = t
-    ? {
-        id: t.id,
-        name: t.name,
-        uri: t.uri,
-        duration_ms: t.durationMs,
-        disc_number: 0,
-        track_number: 0,
-        artists: t.artists.map((a) => ({ id: spotifyIdFromUri(a.uri), name: a.name })),
-        album: {
-          id: spotifyIdFromUri(t.album.uri),
-          name: t.album.name,
-          artists: [],
-          images: t.album.images.map((i) => ({ url: i.url, width: i.width, height: i.height })),
-        },
-      }
-    : null;
-  return {
-    device: {
-      id: report.deviceId,
-      is_active: true,
-      is_private_session: false,
-      is_restricted: false,
-      name: deviceName,
-      type: 'Computer',
-      volume_percent: Math.round(report.volume * 100),
-    },
-    repeat_state: report.repeat === 1 ? 'context' : report.repeat === 2 ? 'track' : 'off',
-    shuffle_state: report.shuffle,
-    timestamp: now,
-    progress_ms: progress,
-    is_playing: report.playing,
-    item,
-  };
-}
-
 /**
  * Wrap the API so concurrent zone polls share /me/player and /me/player/queue reads
  * (N watched devices cost about one poll), and any command drops the cached answer.
- * When the browser's SDK reported recently, currentPlayback() answers from that report
- * instead of calling Spotify (a synthetic answer never touches the usage counter).
  */
 export function sharedPlaybackReads(
   api: SpotifyZoneApi,
   now: () => number = Date.now,
-  local?: LocalPlaybackSource,
   mpris?: MprisPlaybackSource,
   budgetLevel?: () => SpotifyBudgetLevel,
   hasClients?: () => boolean,
@@ -1535,8 +1281,6 @@ export function sharedPlaybackReads(
   let playback: Slot<SpotifyPlaybackState | null> = null;
   let queue: Slot<SpotifyQueue> = null;
   let devices: Slot<SpotifyDevice[]> = null;
-  /** Names of the last device list read (the synthetic answer never fetches it itself). */
-  let deviceNames = new Map<string, string>();
   const read = <T>(
     slot: Slot<T>,
     set: (s: Slot<T>) => void,
@@ -1560,25 +1304,12 @@ export function sharedPlaybackReads(
     try {
       return await fn();
     } finally {
-      local?.noteCommand(deviceId);
       mpris?.noteCommand(deviceId, sentAt, signals);
       // Commands can add/remove/rename a device (and change playback/queue): drop everything.
       playback = null;
       queue = null;
       devices = null;
     }
-  };
-  const synthetic = (): SpotifyPlaybackState | null => {
-    if (!local) return null;
-    const at = now();
-    const found = local.usable(at);
-    if (!found) return null;
-    return syntheticPlaybackState(
-      found.report,
-      found.receivedAt,
-      at,
-      deviceNames.get(found.report.deviceId) ?? '',
-    );
   };
   return {
     devices: (fresh = false) => {
@@ -1591,13 +1322,7 @@ export function sharedPlaybackReads(
       return read(
         devices,
         (s) => (devices = s),
-        async () => {
-          const list = await api.devices();
-          deviceNames = new Map(
-            list.filter((d): d is SpotifyDevice & { id: string } => !!d.id).map((d) => [d.id, d.name]),
-          );
-          return list;
-        },
+        () => api.devices(),
         ttl,
       );
     },
@@ -1611,8 +1336,7 @@ export function sharedPlaybackReads(
           return answer;
         });
       if (mpris && forDevice && forDevice === mpris.deviceId()) return mpris.answer(real);
-      const localAnswer = synthetic();
-      return localAnswer ? Promise.resolve(localAnswer) : real();
+      return real();
     },
     readsFree: (deviceId) => mpris?.readsFree(deviceId) ?? false,
     queue: () => read(queue, (s) => (queue = s), () => api.queue()),

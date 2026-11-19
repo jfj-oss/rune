@@ -1,6 +1,6 @@
 import type { Backend, PlayModes } from './types';
 
-/** A queue rune drives one song at a time (mixed queue, Web Playback SDK): Spotify must not repeat or reorder it. */
+/** A queue rune drives one song at a time (Soloist on a phone): Spotify must not repeat or reorder it. */
 export const PLAIN_MODES: PlayModes = { shuffle: false, repeat: 'off' };
 
 /**

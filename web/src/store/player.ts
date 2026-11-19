@@ -7,7 +7,7 @@ import { isLiveTrack } from '../lib/listenTypes';
 import type { ExtCommand, PlayItem, PlaySource, ZoneInfo } from '../lib/types';
 import { clientLog } from '../clientLog';
 import { BrowserBackend } from '../player/browser';
-import { AudioEngine, unlockOnFirstTap } from '../player/engine';
+import { AudioEngine, NoSpotifyEngine, unlockOnFirstTap } from '../player/engine';
 import { HybridEngine } from '../player/hybrid';
 import { MockBackend } from '../player/mock';
 import { createTabChannel } from '../player/oneTab';
@@ -15,10 +15,10 @@ import { pcSpotifyFallbackNotice } from '../player/pcStart';
 import { PHONE_SOLOIST_PATH, PhoneSoloistEngine, phoneSoloistRoute, SOLOIST_ZONE } from '../player/phoneSoloist';
 import { fitForZone } from '../player/preferLocal';
 import { RemoteBackend, socket, zoneTransport } from '../player/remote';
-import { cantPlayMessage, followPcSpeakers, noteSounding, pageIsOnThePc, playableZones, routeItems, withoutOwnDevice, withoutPcDevice, zoneCanPlay, type Caps } from '../player/routing';
+import { cantPlayMessage, followPcSpeakers, noteSounding, pageIsOnThePc, playableZones, routeItems, withoutPcDevice, zoneCanPlay, type Caps } from '../player/routing';
 import { emptyState, livePosition, type Backend, type PlayModes } from '../player/types';
 import { helloAction, holdNotice, RELOAD_NOTICE } from '../player/serverQueue';
-import { capsFrom, getSdkEngine, sdkName, useSpotify, type ChooserRequest } from './spotify';
+import { useSpotify, type ChooserRequest } from './spotify';
 import { loadLocal, saveLocal, useUi } from './ui';
 
 const backends = new Map<Zone, Backend>();
@@ -61,7 +61,6 @@ function tidyZones(zones: ZoneInfo[]): ZoneInfo[] {
   // Spotify songs), and a second Spotify player in the tab would race it for the account's one stream.
   if (!isMock && pageIsOnThePc(out, isHandheld())) out = out.filter((z) => z.kind !== 'browser');
   else if (!isMock && !out.some((z) => z.kind === 'browser')) out = [...out, BROWSER_ZONE];
-  if (!isMock) out = withoutOwnDevice(out, { name: sdkName(), deviceId: useSpotify.getState().sdk.deviceId });
   return withoutPcDevice(out);
 }
 
@@ -126,9 +125,9 @@ function backendFor(z: ZoneInfo): Backend {
   const notice = (m: string) => useUi.getState().toast(m);
   let b: Backend;
   if (isMock) b = new MockBackend(z.id);
-  // The browser zone's queue is on the server like every other; this tab sounds it. Spotify in it: the Web Playback SDK on
-  // a desktop; on a phone (no SDK there) Soloist on the PC, heard here.
-  else if (z.kind === 'browser') b = new BrowserBackend(z.id, new HybridEngine(new AudioEngine(), isHandheld() ? phoneSoloistEngine() : getSdkEngine()), { notice, channel: createTabChannel() });
+  // The browser zone's queue is on the server like every other; this tab sounds it. Spotify in it: Soloist on the PC, heard
+  // on a phone; a desktop browser plays no Spotify (such songs are kept out of its queue by the routing).
+  else if (z.kind === 'browser') b = new BrowserBackend(z.id, new HybridEngine(new AudioEngine(), isHandheld() ? phoneSoloistEngine() : new NoSpotifyEngine()), { notice, channel: createTabChannel() });
   else b = new RemoteBackend(z.id);
   backends.set(z.id, b);
   return b;
@@ -173,9 +172,9 @@ async function startOn(b: Backend, z: ZoneInfo, items: PlayItem[], startIndex: n
   await b.matchModes?.(want);
 }
 
-/** What this tab can play beyond local files: the Web Playback SDK (a desktop), or Soloist heard on this phone. */
+/** What this tab can play beyond local files: Soloist heard on this phone (mock mode pretends it can, for the screenshots). */
 function caps(zones: ZoneInfo[] = usePlayer.getState().zones): Caps {
-  return { ...capsFrom(useSpotify.getState()), soloist: phoneSoloist(zones) };
+  return { soloist: isMock || phoneSoloist(zones) };
 }
 
 /** The current zone can't play this: use the remembered choice, or ask ("Play on…" sheet). */
@@ -255,10 +254,9 @@ export const usePlayer = create<PlayerStore>((set, get) => {
           if (follows && followPcSpeakers(e.state, was, { zone, status: state.status }, zones.find((z) => z.kind === 'pc'))) void setZone('pc', { handoff: false });
         });
       }
-      // The zones first: they say whether this page runs on the PC itself, and then it must not register a Spotify
-      // player of its own (the SDK does that as soon as the Spotify store starts).
+      // The zones first: they say whether this page runs on the PC itself (then it has the pc zone only).
       const zonesRes = await api.zones().catch(() => FALLBACK_ZONES);
-      await useSpotify.getState().init({ sdk: isMock || !pageIsOnThePc(zonesRes, isHandheld()) }).catch(() => undefined);
+      await useSpotify.getState().init().catch(() => undefined);
       const zones = tidyZones(zonesRes.length ? zonesRes : FALLBACK_ZONES);
       const mobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 899px)').matches;
       const saved = loadLocal<string | null>('rune.zone', null);
@@ -459,7 +457,7 @@ export function useSignalPath(): { steps: string[]; tone: 'ok' | 'warn' | 'off' 
   }
   if (cur?.source === 'spotify') {
     if (kind === 'browser' && phoneSoloist(zones)) return { steps: PHONE_SOLOIST_PATH, tone: 'off' };
-    return { steps: ['Spotify', 'Web Playback SDK', zones.find((z) => z.id === zone)?.name ?? 'This browser'], tone: 'off' };
+    return { steps: ['Spotify', 'Soloist on the PC', zones.find((z) => z.id === zone)?.name ?? 'This browser'], tone: 'off' };
   }
   if (isLiveTrack(cur)) {
     const fmt = [cur!.format && cur!.format !== 'other' ? cur!.format.toUpperCase() : 'Stream', cur!.bitrateKbps ? `${cur!.bitrateKbps} kbps` : ''].filter(Boolean).join(' ');

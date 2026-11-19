@@ -10,7 +10,7 @@
 // polling, and not one Web API request.
 //
 // Soloist is a Spotify Connect client, and only ONE device of an account plays at a time. While another device is the
-// active one (a rune browser tab's Web Playback SDK player, a Spotify app playing on its own speakers), Soloist's events
+// active one (a Spotify app playing on its own speakers), Soloist's events
 // describe THAT device's playback and its commands remote-control THAT device. None of it is this zone's: such events
 // are not followed and nothing is sent, or rune's queue here would be played into the other player's session (the song
 // shown there and the song heard then differ). The zone waits, paused, until rune starts a song on it again, which

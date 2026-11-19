@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '@liner/shared';
-import { AudioEngine, streamUrl } from './engine';
+import { AudioEngine, NO_SPOTIFY, NoSpotifyEngine, streamUrl } from './engine';
 import { mkTrack } from './testkit';
 
 /** Minimal <audio> double: records src assignments, play calls and events. */
@@ -343,5 +343,17 @@ describe('streamUrl capability negotiation', () => {
     const radio = mkTrack('rs:station-1', 'local'); // live tracks are recognised by their rs: id
     expect(streamUrl(radio, { fmt: 'orig', kbps: 256 }, { accept: 'mp3' }))
       .toBe('/api/radio/rs%3Astation-1/stream');
+  });
+});
+
+describe('NoSpotifyEngine', () => {
+  it('refuses a Spotify song with the one plain line, and is silent otherwise', () => {
+    const e = new NoSpotifyEngine();
+    const errors: string[] = [];
+    e.onError((m) => errors.push(m));
+    e.load();
+    e.play(); e.pause(); e.stop();
+    expect(errors).toEqual([NO_SPOTIFY]);
+    expect(NO_SPOTIFY).toBe('Spotify songs play on the PC or your phone’s Spotify');
   });
 });

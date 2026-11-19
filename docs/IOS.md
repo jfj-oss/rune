@@ -102,8 +102,7 @@ sandbox (`server.txt` in its config directory) and never written to this reposit
   (metadata, play/pause, previous/next, seek).
 - **The rest of the web app** is the same as in a browser: library, albums, reviews, radio, playlists,
   Discover, stats, settings.
-- **Spotify plays through Soloist on the PC.** The Spotify Web Playback SDK is not available in iOS
-  webviews, so with [Spotify Soloist](../README.md#spotify-soloist-optional-spotify-with-no-desktop-app-and-on-your-phone)
+- **Spotify plays through Soloist on the PC.** rune has no in-browser Spotify player, so with [Spotify Soloist](../README.md#spotify-soloist-optional-spotify-with-no-desktop-app-and-on-your-phone)
   set up on the PC, a Spotify song on the phone's own zone is played by Soloist and heard here over rune's HLS
   stream, in the same `<audio>` path as local files: it starts from your tap, keeps going on the lock screen
   (the same background-audio mode), and the lock-screen card and keys work. Without Soloist (or while it is

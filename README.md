@@ -54,7 +54,7 @@ Megatron filters Spotify tracks out of everything it plays.
 Each person uses **their own** Spotify app ID (free, two minutes):
 
 1. Go to https://developer.spotify.com/dashboard, log in, **Create app**.
-2. Redirect URI: `http://127.0.0.1:4545/api/spotify/callback`. Tick **Web API** and **Web Playback SDK**.
+2. Redirect URI: `http://127.0.0.1:4545/api/spotify/callback`. Tick **Web API**.
 3. Copy the **Client ID** (there is no secret: rune uses PKCE) into `server/config.json`:
    `"spotifyClientId": "your-client-id"`
 4. The setup page (Settings, Set up rune) does steps 2-4 for you. Otherwise restart rune, then in a browser on the same PC open **Settings** and press **Connect Spotify** next to "Spotify:
@@ -91,7 +91,7 @@ is started, no Connect device is polled, and no Web API request is made (local f
 only one of them sounds at a time). The Soloist zone is therefore folded into the PC speakers zone and never listed on
 its own while it can play.
 
-On a **phone** (iPhone, iPad, Android: no Web Playback SDK there), Spotify songs on the phone's own zone ("This iPhone")
+On a **phone** (iPhone, iPad, Android), Spotify songs on the phone's own zone ("This iPhone")
 play through Soloist by default: rune switches Soloist's sound to the stream and the phone plays it in one `<audio>`
 element, lock screen included, with no Spotify app involved. Local files keep playing in the phone's own player, and a
 mixed queue hands over between the two the way the PC does between mpv and Soloist. There is one Soloist, and the newest

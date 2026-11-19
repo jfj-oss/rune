@@ -999,8 +999,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
           clients.delete(socket);
           presence.remove(socket);
         });
-        // Client → server: tab visibility (hidden tabs do not count as watching) and the
-        // browser Spotify SDK's own playback reports (a free alternative to GET /me/player).
+        // Client → server: tab visibility (hidden tabs do not count as watching) and the zones a tab views.
         socket.on('message', (data: unknown) => {
           const text = clientMessageText(data);
           if (text === null || Buffer.byteLength(text, 'utf8') > MAX_CLIENT_MESSAGE) return;
@@ -1023,8 +1022,6 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
             // A tab showing a Connect device makes it worth a subscription (the list may not have been read since a restart).
             for (const z of m.zones as string[]) if (z.startsWith('spotify:')) watchSpotifyZone(z);
             for (const z of started) spotify?.zones.get(z)?.wake();
-          } else if (m.type === 'sdk-state') {
-            spotify?.reportLocalPlayback(msg);
           }
         });
         // The server says hello first: a tab built from another web build is told to reload.
@@ -1580,7 +1577,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
         }
       });
 
-      // Browsers report their errors here (e.g. the Spotify Web Playback SDK on the Mac)
+      // Browsers report their errors here (e.g. a browser's audio engine)
       // so problems on other devices show up in the server log.
       const clientLog: { at: number; ua?: string; level: string; msg: string; data?: unknown }[] = [];
       // Small by design: 300 entries are kept in memory and each is written to the log.

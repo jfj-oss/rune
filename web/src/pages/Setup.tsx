@@ -91,7 +91,7 @@ function SpotifyStep({ s, onSaved }: { s: SetupStatus; onSaved: () => void }) {
           {uris.map((u) => <CopyLine key={u} text={u} />)}
           <span className="muted">Spotify only accepts <span className="mono">127.0.0.1</span> over plain http, so the Connect button below must be pressed in a browser on this PC.</span>
         </li>
-        <li>Under <b>Which API/SDKs are you planning to use?</b> tick <b>Web API</b> and <b>Web Playback SDK</b>. Accept the terms and Save.</li>
+        <li>Under <b>Which API/SDKs are you planning to use?</b> tick <b>Web API</b>. Accept the terms and Save.</li>
         <li>Open the app’s <b>Settings</b> and copy the <b>Client ID</b> (there is no secret to copy) into the box below.</li>
       </ol>
       <p className="muted setup__note">A new app is in <b>development mode</b>. That works for you as its owner with no allowlist; you only need <b>User Management</b> to let other people log in with it.</p>

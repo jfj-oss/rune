@@ -29,24 +29,3 @@ export function isHandheld(ua = typeof navigator === 'undefined' ? '' : navigato
   if (/iPhone|iPod|iPad|Android|Mobile/i.test(ua)) return true;
   return /Macintosh/.test(ua) && touchPoints > 1;
 }
-
-/**
- * The Spotify Web Playback SDK does not run on phones/tablets (and needs EME + a secure context).
- * Pure so it can be unit-tested; `sdkSupported()` feeds it the real browser.
- */
-export function sdkSupportedFor(env: { ua: string; touchPoints: number; secure: boolean; hasEme: boolean }): boolean {
-  if (!env.secure || !env.hasEme) return false;
-  if (/iPhone|iPod|iPad|Android|Mobile/i.test(env.ua)) return false;
-  if (/Macintosh/.test(env.ua) && env.touchPoints > 1) return false; // iPadOS pretending to be a Mac
-  return true;
-}
-
-export function sdkSupported(): boolean {
-  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false;
-  return sdkSupportedFor({
-    ua: navigator.userAgent,
-    touchPoints: navigator.maxTouchPoints,
-    secure: window.isSecureContext,
-    hasEme: typeof navigator.requestMediaKeySystemAccess === 'function',
-  });
-}

@@ -204,7 +204,7 @@ describe('Spotify on this phone, through Soloist (the default)', () => {
     expect(h.posts).toEqual([]);
     // The sheet lists the phone's Spotify app and the PC, not the phone's own zone.
     const { playableZones } = await import('../player/routing');
-    expect(playableZones(h.usePlayer.getState().zones, 'spotify', { sdk: false, soloist: false }).map((o) => o.zone.id)).toEqual(['soloist', 'spotify:iphone', 'pc']);
+    expect(playableZones(h.usePlayer.getState().zones, 'spotify', { soloist: false }).map((o) => o.zone.id)).toEqual(['soloist', 'spotify:iphone', 'pc']);
   });
 
   it('no Soloist in this rune at all: the app route as before, and nothing to explain', async () => {

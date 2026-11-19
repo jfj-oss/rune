@@ -6,7 +6,7 @@ import type { PlaySource, ZoneInfo } from '../lib/types';
 import { phoneSoloistRoute } from '../player/phoneSoloist';
 import { playableZones, spotifyDeepLink, spotifyDeviceHint } from '../player/routing';
 import { usePlayer } from '../store/player';
-import { capsFrom, restingNotice, useSpotify } from '../store/spotify';
+import { restingNotice, useSpotify } from '../store/spotify';
 import { isHandheld } from '../lib/device';
 import { Dialog } from './Dialog';
 
@@ -30,8 +30,6 @@ export function PlayOnSheet() {
   const zones = usePlayer((s) => s.zones);
   const zone = usePlayer((s) => s.zone);
   const connected = useSpotify((s) => s.connected);
-  const supported = useSpotify((s) => s.supported);
-  const phase = useSpotify((s) => s.sdk.phase);
   const playOn = usePlayer((s) => s.playOn);
   const refresh = usePlayer((s) => s.refreshZones);
   const restingUntil = useSpotify((s) => s.restingUntil);
@@ -54,7 +52,7 @@ export function PlayOnSheet() {
   // A phone hears Spotify through Soloist on the PC when it can play; its being down is why the sheet is open at all.
   const phone = isHandheld();
   const soloist = phone ? phoneSoloistRoute(zones) : null;
-  const caps = { ...capsFrom({ connected, supported, sdk: { phase, deviceId: null } }), soloist: soloist?.available === true };
+  const caps = { soloist: soloist?.available === true };
   const options = playableZones(zones, req.need, caps);
   const cur = zones.find((z) => z.id === zone);
   const link = req.need === 'spotify' ? spotifyDeepLink(req.items, req.context) : null;
@@ -83,7 +81,7 @@ export function PlayOnSheet() {
               }}
             >
               <I size={20} />
-              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? (caps.sdk ? 'Spotify Web Player in this browser' : 'Spotify through Soloist on the PC, heard on this phone') : hintFor(z, req.need)}</small></span>
+              <span className="sheet__txt"><b>{label}</b><small>{z.kind === 'browser' && req.need === 'spotify' ? 'Spotify through Soloist on the PC, heard on this phone' : hintFor(z, req.need)}</small></span>
               {z.id === zone && <Check size={16} className="menu__check" />}
             </button>
           );
@@ -95,17 +93,15 @@ export function PlayOnSheet() {
           </a>
         )}
       </div>
-      {req.need === 'spotify' && !caps.sdk && !caps.soloist && (
+      {req.need === 'spotify' && !caps.soloist && (
         <p className="sheet__note">
           {soloist?.notice ? (
             <>{soloist.notice.replace(/ — using the Spotify app$/, '')}. Until then, pick the Spotify app on this phone above (open it first so it is awake), or the PC.</>
           ) : connected ? (
             ios ? (
               <>Spotify can’t play inside {ios === 'iPhone' ? 'an iPhone' : 'an iPad'}'s browser. Open the Spotify app on the phone, then pick it above (its Connect device appears here once it is awake).</>
-            ) : supported ? (
-              'Spotify Premium is needed to play inside the browser.'
             ) : (
-              'This browser can’t play Spotify itself. Open the Spotify app on this device, then pick it above.'
+              'Spotify songs play on the PC or your phone’s Spotify: pick the PC above, or open the Spotify app on this device and pick it.'
             )
           ) : (
             'Spotify is not connected.'

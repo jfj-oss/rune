@@ -18,10 +18,27 @@ export interface Engine {
   stop(): void;
   onEnded(fn: () => void): void;
   onError(fn: (msg: string) => void): void;
-  /** Engines that learn about playback from elsewhere (the Spotify SDK) report position/play state here. */
+  /** Engines that learn about playback from elsewhere (Soloist heard on a phone) report position/play state here. */
   onSync?(fn: (positionMs: number, playing: boolean) => void): void;
   /** Engines whose player keeps a level of its own (Soloist heard on the phone) report it here; the queue shows it. */
   onVolume?(fn: (volume: number) => void): void;
+}
+
+/** What a Spotify song in a browser that cannot play it is told (the routing keeps such songs out of its queue). */
+export const NO_SPOTIFY = 'Spotify songs play on the PC or your phone’s Spotify';
+
+/** The browser zone's Spotify half where nothing can play Spotify (a desktop browser): every Spotify song is refused, plainly. */
+export class NoSpotifyEngine implements Engine {
+  private errorFn: (m: string) => void = () => {};
+  load() { this.errorFn(NO_SPOTIFY); }
+  play() {}
+  pause() {}
+  seek() {}
+  setVolume() {}
+  position() { return null; }
+  stop() {}
+  onEnded() {}
+  onError(fn: (m: string) => void) { this.errorFn = fn; }
 }
 
 export class MockEngine implements Engine {
@@ -306,7 +323,7 @@ export class AudioEngine implements Engine {
     if (track.source === 'spotify') {
       this.el.pause();
       this.releasePreload();
-      this.errorFn('Spotify tracks play on a Spotify device — pick one from the zone menu');
+      this.errorFn(NO_SPOTIFY);
       return;
     }
     // A queue advance (ended / Next) to the preloaded track: swap and play without a new load.
