@@ -55,8 +55,14 @@ pub fn load(dir: &Path) -> Config {
 
 pub fn save(dir: &Path, c: &Config) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
+    // flushed to disk before the rename, so a crash or a full disk leaves the old file or the whole new one
     let tmp = dir.join("config.json.tmp");
-    fs::write(&tmp, serde_json::to_vec_pretty(c).unwrap_or_default())?;
+    {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(&serde_json::to_vec_pretty(c).unwrap_or_default())?;
+        f.sync_all()?;
+    }
     fs::rename(tmp, dir.join("config.json"))
 }
 
@@ -83,10 +89,16 @@ pub fn save_token(dir: &Path, token: &str) -> std::io::Result<()> {
     {
         use std::io::Write;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        let _ = fs::remove_file(&p);
-        let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&p)?;
-        f.write_all(token.trim().as_bytes())?;
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o600))
+        // a new file (mode 600 from the first byte), flushed, then renamed over the old token: never a moment with no token
+        let tmp = dir.join("token.tmp");
+        let _ = fs::remove_file(&tmp);
+        {
+            let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+            f.write_all(token.trim().as_bytes())?;
+            f.sync_all()?;
+        }
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+        fs::rename(tmp, p)
     }
     #[cfg(not(unix))]
     fs::write(p, token.trim())

@@ -47,7 +47,7 @@ impl Rune {
             let wrap = |inner: AnyElement| div().w_full().pl(px(PAD)).pr(px(PAD)).child(div().w(px(body_w)).max_w_full().mx_auto().child(inner)).into_any_element();
             match &rows[ix] {
                 R::Head => wrap(page_head("Duplicates", &sub, Some(div().id("dup-rescan").child(btn("Rescan", Some("refresh-cw"), false)).on_click(cx.listener(|this, _, _, cx| { this.forget_json("/library/duplicates"); cx.notify(); })).into_any_element())).into_any_element()),
-                R::State(s) => wrap(match *s { "error" => empty("Could not check for duplicates", "Is the rune server running?"), "empty" => empty("No duplicates found", "Every album in your library looks distinct. Rescan after adding new folders."), _ => div().h(px(120.)) }.into_any_element()),
+                R::State(s) => wrap(match *s { "error" => fail(cx, "Could not check for duplicates", "Is the rune server running?"), "empty" => empty("No duplicates found", "Every album in your library looks distinct. Rescan after adding new folders."), _ => div().h(px(120.)) }.into_any_element()),
                 R::Note => wrap(div().mb(px(18.)).max_w(px(720.)).text_size(px(13.5)).text_color(c(TEXT2)).child("These albums look like the same release stored more than once. rune compares folder names, tags and track lists; hiding a version keeps its files on disk but takes it out of the library views.").into_any_element()),
                 R::Group(gi) => {
                     let g = groups[*gi].clone();

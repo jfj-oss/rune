@@ -75,6 +75,7 @@ impl Rune {
         let mut rows = vec![];
         match (&res, q.is_empty()) {
             (_, true) => rows.push(Row::Empty("Search your library".into(), "Albums, artists and tracks \u{2014} local and Spotify together.".into())),
+            (None, _) if matches!(self.data.search.get(&q).map(|c| &c.slot), Some(Slot::Err(_))) => rows.push(Row::Empty("Search failed".into(), "The rune server did not answer. Check that it is running, then search again.".into())),
             (None, _) => {}
             (Some(r), _) if r.albums.is_empty() && r.artists.is_empty() && r.tracks.is_empty() => rows.push(Row::Empty(format!("No results for \u{201c}{q}\u{201d}"), "Try a different spelling or fewer words.".into())),
             (Some(r), _) => {
@@ -157,7 +158,7 @@ impl Rune {
                             .child(v_flex().flex_1().min_w_0().child(div().truncate().text_size(px(14.5)).font_weight(w(500.)).child(t.title.clone())).child(div().truncate().text_size(px(13.)).text_color(c(TEXT2)).child(t.artist_line())))
                             .children(fmt.map(|(x, sp)| badge(&x, sp)))
                             .child(div().w(px(52.)).text_right().text_size(px(13.)).text_color(c(TEXT3)).child(format_duration(t.duration_ms)))
-                            .child(div().id(SharedString::from(format!("srm-{i}"))).child(btn_icon("ellipsis", 18., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
+                            .child(div().id(SharedString::from(format!("srm-{i}"))).role(Role::Button).aria_label("More actions").child(btn_icon("ellipsis", 18., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
                             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
                             .on_click(cx.listener(move |this, _, _, cx| play_track(this, &alb, &tid, cx)))));
                     }

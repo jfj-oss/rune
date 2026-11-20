@@ -77,14 +77,14 @@ impl Rune {
                 .child(div().truncate().text_size(px(12.)).text_color(c(TEXT3)).child(it.reason.clone())))
             .child(div().text_size(px(13.)).text_color(c(TEXT3)).child(format_duration(it.track.duration_ms)))
             .child(h_flex().gap(px(0.)).opacity(0.).group_hover(group.clone(), |s| s.opacity(1.))
-                .child(div().id(SharedString::from(format!("drq-{key}"))).child(btn_icon("list-plus", 17., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.enqueue_ids(ids2.clone(), false, cx); })))
-                .child(div().id(SharedString::from(format!("drp-{key}"))).child(btn_icon("list-music", 17., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                .child(div().id(SharedString::from(format!("drq-{key}"))).role(Role::Button).aria_label("Add to playlist").child(btn_icon("list-plus", 17., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.enqueue_ids(ids2.clone(), false, cx); })))
+                .child(div().id(SharedString::from(format!("drp-{key}"))).role(Role::Button).aria_label("Add to queue").child(btn_icon("list-music", 17., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     cx.stop_propagation(); let p = ev.position();
                     let mut m = pop(f32::from(p.x) - 200., f32::from(p.y) + 20., vec![item("list-plus", "Add to playlist", MenuAct::AddToPlaylistToggle)]);
                     m.items[0].chevron = true; m.add_open = true; m.add_ids = ids3.clone(); m.add_label = "song".into(); this.open_menu(m, cx);
                 })))
-                .child(div().id(SharedString::from(format!("drx-{key}"))).child(btn_icon("x", 17., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.dismiss_song(&tid, cx); })))
-                .child(div().id(SharedString::from(format!("drm-{key}"))).child(btn_icon("ellipsis", 18., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = m2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); }))))
+                .child(div().id(SharedString::from(format!("drx-{key}"))).role(Role::Button).aria_label("Not for me").child(btn_icon("x", 17., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.dismiss_song(&tid, cx); })))
+                .child(div().id(SharedString::from(format!("drm-{key}"))).role(Role::Button).aria_label("More actions").child(btn_icon("ellipsis", 18., c(TEXT2), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = m2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); }))))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
             .on_click(cx.listener(move |this, _, _, cx| op1(this, cx)))
             .child(div().hidden().child(tid2))
@@ -132,7 +132,7 @@ impl Rune {
                 "limit" => v_flex().items_center().py(px(48.)).gap(px(8.)).child(icon("clock", 28., c(TEXT2))).child(div().text_size(px(17.)).font_weight(w(600.)).child("Spotify is taking a break")).child(div().max_w(px(520.)).text_color(c(TEXT2)).child(msg.clone().unwrap_or_else(|| "Spotify is rate-limiting rune \u{2014} try again later.".into()))).child(div().text_size(px(12.)).text_color(c(TEXT3)).child("Discover shares a small request budget, so a busy hour never locks the app out for a day.")),
                 "unavailable" => empty("Discover is unavailable", &msg.clone().unwrap_or_else(|| "Could not reach Spotify right now. Try again in a moment.".into())),
                 "empty" => empty("Nothing new right now", "Everything similar is already in your likes, playlists or library. Try again later, or open a song radio from any track."),
-                "error" => empty("Could not load Discover", "Check that the rune server is running, then try again."),
+                "error" => fail(cx, "Could not load Discover", "Check that the rune server is running, then try again."),
                 _ => v_flex().gap(px(12.)).children((0..4).map(|_| h_flex().h(px(60.)).gap(px(14.)).items_center().child(div().size(px(44.)).rounded(px(6.)).bg(surface())).child(div().h(px(13.)).w(px(260.)).rounded(px(6.)).bg(surface())))),
             }).into_any_element(),
             Row::Group(gi) => padded(h_flex().items_baseline().gap(px(14.)).pt(px(if *gi == 0 { 6. } else { 36. })).pb(px(10.)).child(div().text_size(px(19.)).font_weight(w(700.)).child(groups[*gi].title.clone())).child(div().text_size(px(13.)).text_color(c(TEXT3)).child(format!("{} you don\u{2019}t have", plural(groups[*gi].items.len(), "song"))))).into_any_element(),
@@ -156,7 +156,7 @@ impl Rune {
         let items: Vec<DItem> = feed.as_ref().map(|f| f.items.iter().filter(|i| !dismissed.contains(&i.track.id)).cloned().collect()).unwrap_or_default();
         let state = feed.as_ref().map(|f| feed_state(f, items.len())).unwrap_or("ok");
         let mut body = v_flex().id("sr-body").flex_1().min_h_0().overflow_y_scroll().px(px(10.)).py(px(8.));
-        if err { body = body.child(empty("Could not load song radio", "Check that the rune server is running.")); }
+        if err { body = body.child(fail(cx, "Could not load song radio", "Check that the rune server is running.")); }
         else if loading && feed.is_none() { body = body.children((0..6).map(|_| h_flex().h(px(60.)).gap(px(14.)).px(px(10.)).items_center().child(div().size(px(44.)).rounded(px(6.)).bg(surface())).child(div().h(px(13.)).w(px(200.)).rounded(px(6.)).bg(surface())))); }
         else if state == "limit" { body = body.child(empty("Spotify is taking a break", &feed.as_ref().and_then(|f| f.message.clone()).unwrap_or_default())); }
         else if state == "unavailable" { body = body.child(empty("Radio unavailable", &feed.as_ref().and_then(|f| f.message.clone()).unwrap_or_else(|| "Could not reach Spotify right now.".into()))); }
@@ -169,7 +169,7 @@ impl Rune {
                     .child(v_flex().min_w_0().gap(px(4.)).child(eyebrow("Song radio \u{b7} new to you")).child(div().truncate().text_size(px(20.)).font_weight(w(700.)).child(title)).child(div().truncate().text_size(px(13.)).text_color(c(TEXT3)).child(artist)))
                     .child(h_flex().gap(px(4.)).items_center()
                         .when(!all.is_empty(), |d| d.child(div().id("sr-all").child(btn("Play all", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_ditems(&all, 0, cx)))))
-                        .child(div().id("sr-close").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.song_radio = None; cx.notify(); }))))) 
+                        .child(div().id("sr-close").role(Role::Button).aria_label("Not for me").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.song_radio = None; cx.notify(); }))))) 
                 .child(body))
     }
 }

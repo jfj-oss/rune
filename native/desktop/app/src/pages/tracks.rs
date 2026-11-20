@@ -51,7 +51,7 @@ impl Rune {
                             .child(icon(if desc { "arrow-down" } else { "arrow-up" }, 17., c(TEXT2))).on_click(cx.listener(|this, _, _, cx| this.run_menu_act(MenuAct::TracksDir, cx))))).into_any_element()
                 }
                 2 => {
-                    if let Some(e) = &err { if !loaded { return padded(empty("Could not load tracks", &format!("Is the rune server running? ({e})"))).into_any_element(); } }
+                    if let Some(e) = &err { if !loaded { return padded(fail(cx, "Could not load tracks", &format!("Is the rune server running? ({e})"))).into_any_element(); } }
                     if loaded && total == 0 { return padded(empty("No tracks here", if q.is_empty() { "The library has no tracks yet." } else { "Nothing matches that filter." })).into_any_element(); }
                     let col = |label: &'static str, id: &'static str, right: bool, cx: &mut Context<Rune>| {
                         let on = sort == id;
@@ -101,7 +101,7 @@ impl Rune {
             .child(div().flex_grow(1.4).flex_basis(px(0.)).min_w_0().flex().child(div().id(SharedString::from(format!("tkb-{i}"))).min_w_0().truncate().text_size(px(13.5)).text_color(c(TEXT2)).hover(|s| s.text_color(c(TEXT)).underline()).child(album.title.clone())
                 .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.go(Route::Album(aid.clone()), cx); }))))
             .child(div().w(px(64.)).flex_none().text_right().text_size(px(13.)).text_color(c(TEXT3)).child(format_duration(t.duration_ms)))
-            .child(div().id(SharedString::from(format!("tkm-{i}"))).w(px(44.)).flex_none().flex().justify_center().opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(btn_icon("ellipsis", 18., c(TEXT2), false))
+            .child(div().id(SharedString::from(format!("tkm-{i}"))).role(Role::Button).aria_label("More actions").w(px(44.)).flex_none().flex().justify_center().opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(btn_icon("ellipsis", 18., c(TEXT2), false))
                 .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
             .on_click(cx.listener(move |this, _, _, cx| {

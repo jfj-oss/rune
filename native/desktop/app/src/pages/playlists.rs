@@ -3,8 +3,13 @@ use super::*;
 use crate::data::Slot;
 use rune_mini_core::library::*;
 
-pub fn playlist_cover(this: &mut Rune, p: &PlaylistSummary, size: f32, window: &mut Window) -> Div {
+pub fn playlist_cover(this: &mut Rune, p: &PlaylistSummary, size: f32, window: &mut Window, cx: &mut Context<Rune>) -> Div {
     let base = div().relative().size(px(size)).flex_none().rounded(px(R)).overflow_hidden();
+    // the two wave playlists wear the generative wave instead of a picture (animated at card size and up)
+    if let Some((kind, seed)) = crate::gen::playlist_art(&p.id).filter(|_| crate::gen::usable()) {
+        let art = this.art(&format!("plcover:{}:{}", p.id, size as i32), crate::gen::Mode::Cover { radius: R }, kind, seed, cx);
+        return base.bg(black()).child(div().absolute().top_0().left_0().size_full().child(art));
+    }
     if p.cover_album_ids.is_empty() {
         let (a, b) = tile_gradient(&p.id);
         let liked = p.id == LIKED_PLAYLIST_ID;
@@ -27,7 +32,7 @@ impl Rune {
         let id = p.id.clone();
         let (id2, id3) = (id.clone(), id.clone());
         let group = SharedString::from(format!("plc-{id}"));
-        let cover = playlist_cover(self, p, card_w, window);
+        let cover = playlist_cover(self, p, card_w, window, cx);
         let spotify = !p.is_rune();
         let sub = format!("{}{}", p.owner.as_ref().map(|o| format!("{o} \u{b7} ")).unwrap_or_default(), plural(p.track_count, "track"));
         v_flex().w(px(card_w)).flex_none().min_w_0()
@@ -85,7 +90,7 @@ impl Rune {
                 for p in list.iter().skip(r * cols).take(cols) { row = row.child(this.playlist_card(p, card_w, window, cx)); }
                 padded(row).into_any_element()
             }
-            R_::Empty => padded(if !find2.is_empty() { empty("No playlists match", &format!("Nothing is called \u{201c}{find2}\u{201d}.")) } else if err { empty("Could not load playlists", "Is the rune server running?") } else { empty("Make your first playlist", "Playlists in rune can mix local files and Spotify tracks. Create one here, or use \u{201c}Add to playlist\u{201d} on any track or album.") }).into_any_element(),
+            R_::Empty => padded(if !find2.is_empty() { empty("No playlists match", &format!("Nothing is called \u{201c}{find2}\u{201d}.")) } else if err { fail(cx, "Could not load playlists", "Is the rune server running?") } else { empty("Make your first playlist", "Playlists in rune can mix local files and Spotify tracks. Create one here, or use \u{201c}Add to playlist\u{201d} on any track or album.") }).into_any_element(),
             R_::Space => bottom_space(),
         });
         self.list_page("playlists".into(), (cols as u64) << 4, n, rowfn, cx)

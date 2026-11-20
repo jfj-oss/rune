@@ -132,7 +132,7 @@ impl Rune {
             Row::Favs => { let cards: Vec<AnyElement> = favs.iter().map(|s| this.station_card(s, 168., true, window, cx)).collect(); v_flex().pb(px(36.)).child(this.hscroll("radio-favs", cards, cx)).into_any_element() }
             Row::ResHead => padded(sec_head(&heading, if !loading { Some(div().text_size(px(12.5)).text_color(c(TEXT3)).child(format!("{} {}", count, if count == 1 { "station" } else { "stations" })).into_any_element()) } else { None })).into_any_element(),
             Row::State(s) => padded(match *s {
-                "error" => empty("Could not load radio stations", "The radio directory may be unreachable."),
+                "error" => fail(cx, "Could not load radio stations", "The radio directory may be unreachable."),
                 "empty" => empty("No stations found", "Try another name, tag or country."),
                 _ => h_flex().gap(px(22.)).children((0..cols).map(|_| skeleton_card(card_w))),
             }).into_any_element(),

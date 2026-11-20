@@ -55,7 +55,7 @@ impl Rune {
                     .child(icon("search", 15., c(TEXT3))).child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&find).appearance(false).cleanable(false))))).into_any_element();
             }
             if ix == n - 1 { return bottom_space(); }
-            if err { return padded(empty("Could not load genres", "Is the rune server running?")).into_any_element(); }
+            if err { return padded(fail(cx, "Could not load genres", "Is the rune server running?")).into_any_element(); }
             if !loaded { return padded(div().h(px(tile_w + 70.))).into_any_element(); }
             if list.is_empty() { return padded(empty("No genres here", if q.is_empty() { "Genres appear once albums have been tagged or matched." } else { "Nothing matches that filter." })).into_any_element(); }
             let start = (ix - 2) * cols;
@@ -98,7 +98,7 @@ impl Rune {
                     })))).into_any_element();
             }
             if ix == n - 1 { return bottom_space(); }
-            if let Some(e) = &err { if !loaded { return padded(empty("Could not load this genre", e)).into_any_element(); } }
+            if let Some(e) = &err { if !loaded { return padded(fail(cx, "Could not load this genre", e)).into_any_element(); } }
             if loaded && total == 0 { return padded(empty("No albums in this genre", "")).into_any_element(); }
             if !loaded { return padded(h_flex().gap(px(22.)).h(px(card_w + 86.)).children((0..cols).map(|_| skeleton_card(card_w)))).into_any_element(); }
             let r = ix - 2;

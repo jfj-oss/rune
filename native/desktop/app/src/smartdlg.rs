@@ -155,7 +155,7 @@ impl Rune {
                 else { row = row.child(box_(&r.a, 150.)); }
                 if opd.op == "between" { row = row.child(div().text_size(px(13.)).text_color(c(TEXT3)).child("and")).child(box_(&r.b, 110.)); }
             }
-            row = row.child(div().id(SharedString::from(format!("sx{i}"))).child(btn_icon("x", 16., c(TEXT2), false)).when(n_rules == 1, |d| d.opacity(0.35)).on_click(cx.listener(move |this, _, _, cx| { if let Some(Dialog::Smart(s)) = this.dialog.as_mut() { if s.rules.len() > 1 { s.rules.remove(i); cx.notify(); } } })));
+            row = row.child(div().id(SharedString::from(format!("sx{i}"))).role(Role::Button).aria_label("Remove").child(btn_icon("x", 16., c(TEXT2), false)).when(n_rules == 1, |d| d.opacity(0.35)).on_click(cx.listener(move |this, _, _, cx| { if let Some(Dialog::Smart(s)) = this.dialog.as_mut() { if s.rules.len() > 1 { s.rules.remove(i); cx.notify(); } } })));
             rules = rules.child(row);
         }
         rules = rules.child(h_flex().id("smart-add").gap(px(6.)).items_center().text_size(px(13.)).font_weight(w(600.)).text_color(c(ACCENT2)).cursor_pointer().child(icon("plus", 14., c(ACCENT2))).child("Add rule")

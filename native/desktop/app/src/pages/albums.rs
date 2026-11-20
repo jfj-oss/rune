@@ -46,7 +46,7 @@ impl Rune {
                 return bottom_space();
             }
             if !loaded {
-                if let Some(e) = &err { if ix == 1 { return padded(empty("Could not load the library", &format!("Is the rune server running? ({e})"))).into_any_element(); } return bottom_space(); }
+                if let Some(e) = &err { if ix == 1 { return padded(fail(cx, "Could not load the library", &format!("Is the rune server running? ({e})"))).into_any_element(); } return bottom_space(); }
                 if ix <= 3 { let (cols, cw_) = (cols, card_w); return padded(h_flex().gap(px(gap)).h(px(cw_ + 64. + gap)).children((0..cols).map(|_| skeleton_card(cw_)))).into_any_element(); }
                 return bottom_space();
             }
@@ -91,7 +91,7 @@ impl Rune {
                     .on_click(cx.listener(|this, _, _, cx| this.run_menu_act(MenuAct::SetView(false), cx))))
                 .child(div().id("v-list").w(px(34.)).h(px(30.)).flex().items_center().justify_center().rounded_full().cursor_pointer().when(list_view, |d| d.bg(surface3())).child(icon("list", 16., c(if list_view { TEXT } else { TEXT2 })))
                     .on_click(cx.listener(|this, _, _, cx| this.run_menu_act(MenuAct::SetView(true), cx)))))
-            .child(div().id("lib-more").child(btn_icon40("ellipsis")).on_click(cx.listener(|this, ev: &ClickEvent, window, cx| this.open_top_menu(ev, window, cx))))
+            .child(div().id("lib-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(|this, ev: &ClickEvent, window, cx| this.open_top_menu(ev, window, cx))))
     }
 
     /// A "Label" / "Year" chip: opens a scrolling list of the server's facets (`/labels`, `/years`).

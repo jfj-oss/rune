@@ -100,7 +100,7 @@ impl Rune {
             .shadow(vec![BoxShadow { inset: false, color: bk(0.5), offset: point(px(-24.), px(0.)), blur_radius: px(60.), spread_radius: px(0.) }])
             .child(h_flex().flex_none().items_start().justify_between().gap(px(12.)).pl(px(24.)).pr(px(14.)).pt(px(22.)).pb(px(14.)).border_b_1().border_color(line())
                 .child(v_flex().min_w_0().gap(px(4.)).child(eyebrow(&p.label)).child(div().text_size(px(21.)).font_weight(w(700.)).child(p.title.clone())))
-                .child(div().id("pv-close").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.preview = None; cx.notify(); }))))
+                .child(div().id("pv-close").role(Role::Button).aria_label("Close").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.preview = None; cx.notify(); }))))
             .child(div().id("pv-body").flex_1().min_h_0().overflow_y_scroll().px(px(24.)).py(px(20.)).child(body))
             .child(h_flex().flex_none().items_center().justify_between().gap(px(12.)).px(px(24.)).py(px(14.)).border_t_1().border_color(line())
                 .child(div().text_size(px(12.5)).text_color(c(TEXT3)).child(p.attribution.clone().map(|a| format!("From {a}")).unwrap_or(host.clone())))

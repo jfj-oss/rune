@@ -17,7 +17,7 @@ impl Rune {
         let slot = self.data.album.get(&id).map(|c| c.slot.clone());
         let album = match slot {
             Some(crate::data::Slot::Ready(a)) => a,
-            Some(crate::data::Slot::Err(_)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(empty("Album not found", "It may have been removed from the library.")).into_any_element(),
+            Some(crate::data::Slot::Err(e)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(if unreachable(&e) { fail(cx, "Could not load this album", "The rune server did not answer.") } else { empty("Album not found", "It may have been removed from the library.") }).into_any_element(),
             _ => return div().size_full().child(div().pt(px(44.)).px(px(PAD)).child(h_flex().gap(px(40.)).child(div().size(px(300.)).rounded(px(6.)).bg(surface()))
                 .child(v_flex().gap(px(12.)).child(div().h(px(14.)).w(px(80.)).rounded(px(6.)).bg(surface())).child(div().h(px(40.)).w(px(360.)).rounded(px(6.)).bg(surface()))))).into_any_element(),
         };
@@ -74,6 +74,14 @@ impl Rune {
         if !more.is_empty() { rows.push(Row::Sec("More by")); rows.push(Row::More(0)); }
         rows.push(Row::Space);
 
+        // the soft scrim behind each section (the web's `.asec::before`): which rows begin / end one
+        let starts = |r: &Row| matches!(r, Row::TracksHead | Row::Sec(_) | Row::ConnHead);
+        let outside = |r: &Row| matches!(r, Row::Banner | Row::Hero | Row::Tabs | Row::Space | Row::MoreHead);
+        let edges: Vec<Option<(bool, bool)>> = rows.iter().enumerate().map(|(i, r)| {
+            if outside(r) { return None; }
+            let next = rows.get(i + 1);
+            Some((starts(r), next.map_or(true, |n| starts(n) || outside(n))))
+        }).collect();
         let order: Vec<LibTrack> = tracks.into_iter().cloned().collect();
         let n = rows.len();
         let key = format!("album:{id}");
@@ -84,7 +92,8 @@ impl Rune {
         let rowfn: RowFn = Box::new(move |this, ix, window, cx| {
             let Some(r) = rows.get(ix).cloned() else { return div().into_any_element() };
             let album = album2.clone();
-            match r {
+            let edge = edges.get(ix).copied().flatten();
+            let el = match r {
                 Row::Banner => div().w_full().flex().items_center().gap(px(12.)).px(px(PAD)).py(px(12.)).bg(ca(WARN, 0.17)).border_b_1().border_color(ca(WARN, 0.4)).text_size(px(14.)).text_color(c(0xf3d38f))
                     .child(icon("triangle-alert", 18., c(WARN))).child("This album may be matched wrongly.")
                     .child({ let id = album.summary.id.clone(); div().id("fix-banner").ml(px(4.)).px(px(14.)).py(px(5.)).rounded_full().bg(c(WARN)).text_color(c(0x1a1306)).text_size(px(13.)).font_weight(w(700.)).cursor_pointer().child("Fix match").on_click(cx.listener(move |this, _, _, cx| this.run_menu_act(MenuAct::FixMatch(id.clone()), cx))) }).into_any_element(),
@@ -113,7 +122,8 @@ impl Rune {
                 }
                 Row::MoreHead => div().into_any_element(),
                 Row::Space => bottom_space(),
-            }
+            };
+            match edge { Some((first, last)) => scrim_row(el, first, last, body_w), None => el }
         });
         let list = self.list_page(key.clone(), ((cw as u64) << 8) | u64::from(ex.details.is_some()) | (n as u64) << 40, n, rowfn, cx);
         // the strip sticks to the top once the hero has scrolled past; scroll-spy follows the list position
@@ -157,7 +167,8 @@ impl Rune {
         let scores = details.filter(|d| !d.scores.is_empty()).map(|d| self.hero_scores(d, cx));
         let dot = || div().mx(px(9.)).text_color(c(TEXT3)).child("\u{b7}");
         let fmt = if s.source == "spotify" { Some(("Spotify".to_string(), true)) } else { s.format.clone().map(|f| (f, false)) };
-        let text = v_flex().flex_1().min_w_0().gap(px(12.)).pb(px(4.))
+        let text = v_flex().relative().flex_1().min_w_0().gap(px(12.)).pb(px(4.))
+            .child(hero_scrim())
             .child(eyebrow("Album").text_color(ca(TEXT, 0.62)))
             .child(div().font_family(SERIF).text_size(px(49.)).line_height(px(54.)).font_weight(w(600.)).child(s.title.clone()))
             .child(h_flex().flex_wrap().items_baseline().text_size(px(15.)).text_color(c(TEXT2))
@@ -177,15 +188,28 @@ impl Rune {
                 .child(div().id("a-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_album(&i1, false, 0, cx))))
                 .child(div().id("a-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| this.play_album(&i2, true, 0, cx))))
                 .child(div().id("a-queue").child(btn("Queue", Some("plus"), false)).on_click(cx.listener(move |this, _, _, cx| this.enqueue_album(&i3, false, cx))))
-                .child(div().id("a-more").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { let p = ev.position(); let mut m = menu.clone(); m.x = f32::from(p.x) - 20.; m.y = f32::from(p.y) + 24.; this.open_menu(m, cx); }))))
+                .child(div().id("a-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { let p = ev.position(); let mut m = menu.clone(); m.x = f32::from(p.x) - 20.; m.y = f32::from(p.y) + 24.; this.open_menu(m, cx); }))))
             .children(scores);
         let _ = cw;
-        div().w_full().pt(px(44.)).pb(px(30.)).pl(px(PAD)).pr(px(PAD + SCROLLBAR)).child(
+        // every album's header is an ASCII sea (wave, ripple, aurora or dunes, fixed by the album), as on the web
+        let bg = crate::gen::usable().then(|| {
+            let (kind, seed) = crate::gen::kind_for(&s.id);
+            let art = self.art("hero", crate::gen::Mode::Ascii, kind, seed, cx);
+            div().absolute().top_0().left_0().size_full().child(art)
+        });
+        // no artwork on the server: the album wears a generative cover, animated at this size
+        let cover = if img.is_none() && crate::covers::is_failed(&s.id) && crate::gen::usable() {
+            let (kind, seed) = crate::gen::kind_for(&s.id);
+            let art = self.art(&format!("cover:{}", s.id), crate::gen::Mode::Cover { radius: 6. }, kind, seed, cx);
+            div().relative().size(px(300.)).flex_none().rounded(px(6.)).overflow_hidden().bg(black()).child(div().absolute().top_0().left_0().size_full().child(art))
+        } else { cover_el(img, &s.id, &s.title, 300., 6.) };
+        let content = div().relative().w_full().pt(px(44.)).pb(px(30.)).pl(px(PAD)).pr(px(PAD + SCROLLBAR)).child(
             h_flex().w_full().max_w(px(BODY_MAX)).mx_auto().gap(px(40.)).items_end()
-                .child(div().w(px(300.)).flex_none().child(cover_el(img, &s.id, &s.title, 300., 6.).shadow(vec![
+                .child(div().w(px(300.)).flex_none().child(cover.shadow(vec![
                     BoxShadow { inset: false, color: bk(0.6), offset: point(px(0.), px(30.)), blur_radius: px(70.), spread_radius: px(-10.) },
                     BoxShadow { inset: false, color: bk(0.35), offset: point(px(0.), px(8.)), blur_radius: px(24.), spread_radius: px(0.) }])))
-                .child(text)).into_any_element()
+                .child(text));
+        div().relative().w_full().overflow_hidden().children(bg).child(content).into_any_element()
     }
 
     fn track_row(&mut self, album: &Album, t: &LibTrack, i: usize, ids: &[String], order: &[LibTrack], _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -218,6 +242,18 @@ impl Rune {
 }
 
 /// A row's content centred in the page's 1240 px body column.
+/// The soft scrim behind a hero's text (the web's `.ahero__txt::before`).
+pub fn hero_scrim() -> Div { div().absolute().top(px(-10.)).bottom(px(-6.)).left(px(-14.)).right(px(-14.)).rounded(px(16.)).bg(ca(0x040409, 0.5)) }
+
+/// A row of a section: the dark rounded scrim of the web's `.asec::before` (rgba(4,4,9,.58), 14 px wider each side, 16 px corners,
+/// starting 22 px into the section's first row), behind the row's content.
+fn scrim_row(el: AnyElement, first: bool, last: bool, body_w: f32) -> AnyElement {
+    div().relative().w_full()
+        .child(div().absolute().left_0().right_0().top(px(if first { 22. } else { 0. })).bottom_0().flex().justify_center()
+            .child(div().w(px(body_w + 28.)).flex_none().h_full().bg(ca(0x040409, 0.58)).when(first, |d| d.rounded_t(px(16.))).when(last, |d| d.rounded_b(px(16.)))))
+        .child(el).into_any_element()
+}
+
 fn full(inner: impl IntoElement, body_w: f32) -> AnyElement {
     div().w_full().pl(px(PAD)).pr(px(PAD + SCROLLBAR)).child(div().w(px(body_w)).max_w_full().mx_auto().child(inner)).into_any_element()
 }

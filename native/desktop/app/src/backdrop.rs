@@ -105,6 +105,7 @@ pub struct Backdrop {
 
 impl Backdrop {
     pub fn new(prefs: Prefs, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::gen::set_effects(prefs.on, prefs.reduce);
         let (tx, rx) = channel::<Job>();
         let (dtx, mut drx) = futures::channel::mpsc::unbounded::<Done>();
         std::thread::Builder::new().name("rune-foil".into()).spawn(move || {
@@ -133,6 +134,7 @@ impl Backdrop {
     }
 
     pub fn set_prefs(&mut self, p: Prefs, cx: &mut Context<Self>) {
+        crate::gen::set_effects(p.on, p.reduce);
         if p == self.prefs { return; }
         self.prefs = p;
         cx.notify();
@@ -245,6 +247,7 @@ impl Backdrop {
             match shader_status(FOIL_SHADER) {
                 ShaderStatus::Failed(e) => { if !a.failed { eprintln!("rune: the foil shader could not be built, drawing the backdrop on the CPU instead: {e}"); } a.failed = true }
                 ShaderStatus::Pending if now.duration_since(first) > Duration::from_millis(1500) => { if !a.failed { eprintln!("rune: this renderer does not run custom shaders, drawing the backdrop on the CPU instead"); } a.failed = true }
+                ShaderStatus::Ready => { static SAID: std::sync::Once = std::sync::Once::new(); SAID.call_once(|| eprintln!("rune: foil shader Ready (custom shader hook)")); }
                 _ => {}
             }
             let live = animating(prefs, window.is_window_active());

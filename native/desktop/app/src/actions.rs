@@ -82,6 +82,10 @@ impl Rune {
         let list = fit_for_zone(&items, start, can, true, &twins.0, &twins.1);
         match route_items(&kind, &list, start) {
             Routing::Start { need } => {
+                // a choice made earlier this session for this kind of song stands, while that zone can still play them
+                let again = self.play_on_choice.iter().find(|(n, _)| *n == need).map(|(_, z)| z.clone())
+                    .filter(|z| crate::playroute::playable_zones(&self.zone_list(), need).iter().any(|(id, _, _)| id == z));
+                if let Some(z) = again { self.play_on(&z, list, start, shuffle, need, cx); return; }
                 self.dialog = Some(Dialog::PlayOn { items: list, start, shuffle, need });
                 cx.notify();
             }
@@ -94,8 +98,10 @@ impl Rune {
     }
 
     /// Chosen on the "Play on" sheet: that zone, the copies it can play.
-    pub fn play_on(&mut self, zone: &str, items: Vec<Item>, start: usize, shuffle: bool, cx: &mut Context<Self>) {
+    pub fn play_on(&mut self, zone: &str, items: Vec<Item>, start: usize, shuffle: bool, need: Source, cx: &mut Context<Self>) {
         self.dialog = None;
+        self.play_on_choice.retain(|(n, _)| *n != need);
+        self.play_on_choice.push((need, zone.to_string()));
         self.play_items(items, start, shuffle, Some(zone.to_string()), cx);
     }
 

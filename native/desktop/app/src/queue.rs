@@ -85,7 +85,7 @@ impl Rune {
                 .child(h_flex().items_center().gap(px(2.))
                     .when(queue > 0, |d| d.child(div().id("q-clear").h(px(32.)).px(px(12.)).flex().items_center().rounded_full().cursor_pointer().text_size(px(13.)).font_weight(w(600.)).text_color(c(TEXT2)).hover(|s| s.bg(wh(0.08))).child("Clear")
                         .on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Clear, cx)))))
-                    .child(div().id("q-close").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = false; cx.notify(); })))))
+                    .child(div().id("q-close").role(Role::Button).aria_label("Close queue").child(btn_icon("x", 20., c(TEXT2), false)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = false; cx.notify(); })))))
             .child(body)
     }
 }

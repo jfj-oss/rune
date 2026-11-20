@@ -34,6 +34,7 @@ impl Rune {
         let red_ids = self.album_ids_row("/history/rediscover?limit=8&olderThanDays=90", cx);
         let played = if rec_ids.is_empty() { None } else { albums_of(&self.ensure_json(&format!("/library/albums?ids={}", rec_ids.join(",")), cx)) };
         let redis = if red_ids.is_empty() { None } else { albums_of(&self.ensure_json(&format!("/library/albums?ids={}", red_ids.join(",")), cx)) };
+        let added_err = matches!(added, crate::data::Slot::Err(_));
         let added = albums_of(&added);
         let spotify = albums_of(&spotify);
         let total = added.as_ref().map(|p| p.total);
@@ -48,6 +49,7 @@ impl Rune {
         let title = greeting();
         let row: RowFn = Box::new(move |this, ix, window, cx| match &secs[ix] {
             Sec::Head => padded(page_head(title, &total.map(|t| format!("{} in your library", plural(t, "album"))).unwrap_or_else(|| " ".into()), None)).into_any_element(),
+            Sec::Added if added_err => padded(fail(cx, "Could not load your library", "Is the rune server running?")).pb(px(44.)).into_any_element(),
             Sec::Added => {
                 let cards: Vec<AnyElement> = match &added { Some(p) => p.items.iter().map(|a| this.album_card(a, CARD, window, cx)).collect(), None => (0..8).map(|_| skeleton_card(CARD)).collect() };
                 let all = div().id("home-all-added").text_size(px(12.5)).font_weight(w(500.)).text_color(c(TEXT3)).cursor_pointer().hover(|s| s.text_color(c(ACCENT2))).child("See all").on_click(cx.listener(|this, _, _, cx| this.go(Route::Albums(AlbumsQ::default()), cx))).into_any_element();

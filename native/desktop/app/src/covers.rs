@@ -14,6 +14,17 @@ use std::sync::{Arc, Condvar, Mutex};
 
 pub type Key = (String, u16);
 
+fn failed_set() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// Test hook (`RUNE_DESKTOP_GEN_COVERS=1`): every album counts as having no picture, to look at the generative covers.
+pub fn force_gen() -> bool { static F: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *F.get_or_init(|| std::env::var_os("RUNE_DESKTOP_GEN_COVERS").is_some()) }
+
+/// Did the server have no picture for this album? Like the web's `onError`: it then wears a generative cover.
+pub fn is_failed(id: &str) -> bool { if force_gen() { return true; } failed_set().lock().map(|f| f.contains(id)).unwrap_or(false) }
+
 pub struct Done {
     pub key: Key,
     pub img: Option<Arc<RenderImage>>,
@@ -113,6 +124,7 @@ impl Covers {
             return;
         }
         self.fetched += 1;
+        if let Ok(mut f) = failed_set().lock() { if d.img.is_some() { f.remove(&d.key.0); } else { f.insert(d.key.0.clone()); } }
         let tick = self.tick;
         let e = self.map.entry(d.key).or_insert(Entry { state: State::Loading, bytes: 0, tick });
         self.bytes -= e.bytes;

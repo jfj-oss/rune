@@ -214,7 +214,7 @@ impl Rune {
                         .child(icon(ic, 20., c(TEXT)))
                         .child(v_flex().flex_1().min_w_0().child(div().text_size(px(14.5)).font_weight(w(700.)).child(name)).child(div().text_size(px(12.5)).text_color(c(TEXT3)).child(hint)))
                         .when(on, |d| d.child(icon("check", 16., c(ACCENT2))))
-                        .on_click(cx.listener(move |this, _, _, cx| this.play_on(&id2, items2.clone(), start, shuffle, cx))));
+                        .on_click(cx.listener(move |this, _, _, cx| this.play_on(&id2, items2.clone(), start, shuffle, need, cx))));
                 }
                 scrim.child(v_flex().w(px(460.)).p(px(24.)).gap(px(14.)).bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(16.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(div().text_size(px(20.)).font_weight(w(700.)).child("Play on\u{2026}"))

@@ -37,8 +37,8 @@ pub fn move_item<T: Clone>(list: &[T], from: usize, to: usize) -> Vec<T> {
 #[derive(Clone)]
 pub struct MiniDrag { pub from: usize, pub name: String }
 
-const MINI_COLORS: [u32; 8] = [0xe5736f, 0xe8b04a, 0x4fd18b, 0x5fb3e8, 0xb3a7ff, 0xd97fd9, 0xe8e06a, 0x7fd9c8];
-const MINI_MAX: usize = 9;
+pub const MINI_COLORS: [u32; 8] = [0xe5736f, 0xe8b04a, 0x4fd18b, 0x5fb3e8, 0xb3a7ff, 0xd97fd9, 0xe8e06a, 0x7fd9c8];
+pub const MINI_MAX: usize = 9;
 
 impl Rune {
     fn set_mini(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {
@@ -83,7 +83,7 @@ impl Rune {
             let (id1, id2, nm) = (id.clone(), id.clone(), name.clone());
             klist = klist.child(h_flex().gap(px(12.)).items_center().text_size(px(13.5)).child(div().min_w(px(44.)).px(px(8.)).py(px(1.)).rounded(px(5.)).border_1().border_color(line()).text_size(px(12.)).text_color(c(TEXT2)).child(k.to_uppercase()))
                 .child(div().id(SharedString::from(format!("kp-{k}"))).text_color(c(ACCENT2)).cursor_pointer().hover(|s| s.underline()).child(name.clone()).on_click(cx.listener(move |this, _, _, cx| this.go(Route::Playlist(id1.clone()), cx))))
-                .child(div().id(SharedString::from(format!("kx-{k}"))).child(btn_icon("x", 14., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| this.set_playlist_key(&id2, &nm, "", cx)))));
+                .child(div().id(SharedString::from(format!("kx-{k}"))).role(Role::Button).aria_label("Remove").child(btn_icon("x", 14., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| this.set_playlist_key(&id2, &nm, "", cx)))));
         }
         let keyboard = card("Keyboard", "keyboard").child(muted("Work anywhere in rune, except while typing. The album and playlist keys are shared by all your devices."))
             .child(h_flex().justify_between().items_center().child(v_flex().child(div().text_size(px(14.)).font_weight(w(600.)).child("Go to the playing album")).child(muted("Keys rune already uses are left out"))).child(sel_key(self, cx)))
@@ -102,9 +102,9 @@ impl Rune {
                 .child(div().id(SharedString::from(format!("mg-{i}"))).cursor(CursorStyle::ClosedHand).child(icon("grip-vertical", 16., c(TEXT3))).on_drag(MiniDrag { from: i, name: name.clone() }, |d, _o, _w, cx| { let t = d.name.clone(); cx.new(|_| crate::queue::DragGhost(t)) }))
                 .child(div().size(px(10.)).rounded_full().bg(c(MINI_COLORS[*color % MINI_COLORS.len()])))
                 .child(div().id(SharedString::from(format!("mn-{i}"))).flex_1().min_w_0().truncate().text_size(px(14.)).text_color(c(ACCENT2)).cursor_pointer().hover(|s| s.underline()).child(nm).on_click(cx.listener(move |this, _, _, cx| this.go(Route::Playlist(idc.clone()), cx))))
-                .child(div().id(SharedString::from(format!("mu-{i}"))).child(btn_icon("chevron-up", 14., c(TEXT2), false)).when(i == 0, |d| d.opacity(0.3)).on_click(cx.listener(move |this, _, _, cx| if i > 0 { this.set_mini(move_item(&ids1, i, i - 1), cx) })))
-                .child(div().id(SharedString::from(format!("md-{i}"))).child(btn_icon("chevron-down", 14., c(TEXT2), false)).when(i + 1 == n, |d| d.opacity(0.3)).on_click(cx.listener(move |this, _, _, cx| if i + 1 < n { this.set_mini(move_item(&ids2, i, i + 1), cx) })))
-                .child(div().id(SharedString::from(format!("mx-{i}"))).child(btn_icon("x", 14., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| this.set_mini(ids3.iter().filter(|x| **x != idc2(&ids3, i)).cloned().collect(), cx)))));
+                .child(div().id(SharedString::from(format!("mu-{i}"))).role(Role::Button).aria_label("Move up").child(btn_icon("chevron-up", 14., c(TEXT2), false)).when(i == 0, |d| d.opacity(0.3)).on_click(cx.listener(move |this, _, _, cx| if i > 0 { this.set_mini(move_item(&ids1, i, i - 1), cx) })))
+                .child(div().id(SharedString::from(format!("md-{i}"))).role(Role::Button).aria_label("Move down").child(btn_icon("chevron-down", 14., c(TEXT2), false)).when(i + 1 == n, |d| d.opacity(0.3)).on_click(cx.listener(move |this, _, _, cx| if i + 1 < n { this.set_mini(move_item(&ids2, i, i + 1), cx) })))
+                .child(div().id(SharedString::from(format!("mx-{i}"))).role(Role::Button).aria_label("Remove").child(btn_icon("x", 14., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| this.set_mini(ids3.iter().filter(|x| **x != idc2(&ids3, i)).cloned().collect(), cx)))));
         }
         let mini_card = card("rune mini", "panel-top").child(muted("Each playlist here is a coloured dot on the left of the rune mini. Click it to shuffle-play the playlist."))
             .child(if mini.is_empty() { muted("None yet. Open a playlist and choose \u{201c}Show in rune mini\u{201d}.").into_any_element() } else { minilist.into_any_element() })
@@ -116,7 +116,7 @@ impl Rune {
                 h_flex().id("st-norm").h(px(34.)).px(px(14.)).gap(px(8.)).items_center().rounded_full().bg(surface2()).border_1().border_color(line()).cursor_pointer().text_size(px(13.)).child(match norm2.as_str() { "track" => "Per track", "album" => "Per album", _ => "Off" }).child(icon("chevron-down", 12., c(TEXT2)))
                     .on_click(cx.listener(|this, ev: &ClickEvent, _, cx| { let p = ev.position(); this.open_menu(pop(f32::from(p.x) - 60., f32::from(p.y) + 22., vec![item("x", "Off", MenuAct::Normalize("off")), item("audio-lines", "Per track", MenuAct::Normalize("track")), item("disc-3", "Per album", MenuAct::Normalize("album"))]), cx); }))))
             .child(h_flex().justify_between().items_center().child(v_flex().child(div().text_size(px(14.)).font_weight(w(600.)).child("Auto-radio")).child(muted("When the queue ends, keep playing similar songs from your library"))).child(
-                div().id("st-auto").w(px(44.)).h(px(24.)).rounded_full().p(px(3.)).cursor_pointer().bg(if auto { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(auto, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)))
+                div().id("st-auto").role(Role::Switch).aria_label("Auto-radio").aria_toggled(if auto { Toggled::True } else { Toggled::False }).w(px(44.)).h(px(24.)).rounded_full().p(px(3.)).cursor_pointer().bg(if auto { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(auto, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)))
                     .on_click(cx.listener(move |this, _, _, cx| this.run_menu_act(MenuAct::AutoRadio(!auto), cx)))));
         // ---- server status
         let status: AnyElement = match (&h, err) {
@@ -150,12 +150,13 @@ impl Rune {
         };
         // ---- background (web: the Background picker, Reduce effects, Battery saver)
         let fp = self.foil;
-        let switch = |id: &'static str, on: bool| div().id(id).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
+        let switch = |id: &'static str, on: bool| div().id(id).role(Role::Switch).aria_label(match id { "st-foil" => "Foil waves", "st-reduce" => "Reduce effects", "st-saver" => "Battery saver", "st-notify" => "Notify on song change", other => other }).aria_toggled(if on { Toggled::True } else { Toggled::False }).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
         let row = |title: &str, sub: &str, sw: Stateful<Div>| h_flex().justify_between().items_center().gap(px(16.)).child(v_flex().min_w_0().child(div().text_size(px(14.)).font_weight(w(600.)).child(title.to_string())).child(muted(sub))).child(sw);
         let background = card("Background", "palette")
             .child(row("Foil waves", "Stippled wave lines over an icy-blue cloud, like printed foil. Off shows the plain dark page.", switch("st-foil", fp.on).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { on: !p.on, ..p }, cx); }))))
             .child(row("Reduce effects", "No moving decorations: one still frame. This device only.", switch("st-reduce", fp.reduce).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { reduce: !p.reduce, ..p }, cx); }))))
             .child(row("Battery saver", "The waves hold still while another window has focus, or this one is minimised. This device only.", switch("st-saver", fp.saver).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { saver: !p.saver, ..p }, cx); }))));
+        let playback = playback.child(row("Notify on song change", "A desktop notification when the song changes while rune is in the background. This device only.", switch("st-notify", self.notify_track).on_click(cx.listener(move |this, _, _, cx| { this.notify_track = !this.notify_track; this.save_state(); cx.notify(); }))));
         let top = if two { h_flex().gap(px(16.)).items_start().child(div().flex_1().min_w_0().child(keyboard)).child(v_flex().flex_1().min_w_0().gap(px(16.)).child(mini_card).child(playback).child(background)).into_any_element() } else { v_flex().gap(px(16.)).child(keyboard).child(mini_card).child(playback).child(background).into_any_element() };
         let page = v_flex().pb(px(40.)).gap(px(16.)).child(setup).child(top).child(status);
         div().id("settings-scroll").size_full().overflow_y_scroll()

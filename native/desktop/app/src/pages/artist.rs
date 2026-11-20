@@ -12,7 +12,7 @@ impl Rune {
         self.ensure_artist(&id, cx);
         let artist = match self.data.artist.get(&id).map(|c| c.slot.clone()) {
             Some(crate::data::Slot::Ready(a)) => a,
-            Some(crate::data::Slot::Err(_)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(empty("Artist not found", "")).into_any_element(),
+            Some(crate::data::Slot::Err(e)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(if unreachable(&e) { fail(cx, "Could not load this artist", "The rune server did not answer.") } else { empty("Artist not found", "") }).into_any_element(),
             _ => return div().size_full().pt(px(120.)).px(px(PAD)).child(div().h(px(40.)).w(px(300.)).rounded(px(6.)).bg(surface())).into_any_element(),
         };
         let body_w = cw.min(BODY_MAX);
@@ -69,7 +69,7 @@ impl Rune {
                     .when(!ids.is_empty(), |d| d.child(h_flex().flex_wrap().gap(px(10.)).mt(px(8.))
                         .child(div().id("ar-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_albums(i1.clone(), false, cx))))
                         .child(div().id("ar-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| this.play_albums(i2.clone(), true, cx))))
-                        .when(local, |d| d.child(div().id("ar-more").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                        .when(local, |d| d.child(div().id("ar-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                             let p = ev.position();
                             this.open_menu(PopMenu { x: f32::from(p.x) - 20., y: f32::from(p.y) + 24., items: vec![PopItem { icon: "waves", label: "Start radio".into(), act: MenuAct::Radio { from: "artist", id: aid.clone() }, danger: false, chevron: false, dot: false, sub: false }], add_ids: vec![], add_label: String::new(), add_open: false, right_aligned: false, up: false }, cx);
                         }))))))
