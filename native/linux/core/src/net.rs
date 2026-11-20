@@ -49,6 +49,17 @@ enum Ctl {
     Stop,
 }
 
+/// What `Client::open_stream` found.
+pub struct StreamReply {
+    pub reader: Box<dyn Read + Send + Sync + 'static>,
+    /// the whole file's length when the server knows it (a cached file; a live transcode has none)
+    pub total: Option<u64>,
+    pub live: bool,
+    pub gain_db: Option<f64>,
+    /// the byte the reader starts at
+    pub start: u64,
+}
+
 #[derive(Clone)]
 pub struct Client {
     pub base: String,
@@ -109,6 +120,32 @@ impl Client {
     pub fn command(&self, r: &Request) -> Result<WireState, String> {
         self.req("POST", &r.path()).send_json(r.body.clone()).map_err(Self::describe)?.into_json().map_err(|e| e.to_string())
     }
+    /// An audio stream (`/api/stream/..`) as a reader, from byte `from` on (a `Range` request when `from > 0`). Unlike the other
+    /// calls there is no overall timeout: a song takes as long as it takes, only a stalled connection (15 s) fails.
+    pub fn open_stream(&self, path: &str, from: u64) -> Result<StreamReply, String> {
+        let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(4)).timeout_read(Duration::from_secs(15)).user_agent("rune-desktop").build();
+        let mut r = agent.request("GET", &format!("{}{}", self.base, path));
+        if !self.token.is_empty() {
+            r = r.set("Authorization", &format!("Bearer {}", self.token));
+        }
+        if from > 0 {
+            r = r.set("Range", &format!("bytes={from}-"));
+        }
+        let res = r.call().map_err(Self::describe)?;
+        let status = res.status();
+        let header = |n: &str| res.header(n).map(|s| s.to_string());
+        let total = match (status, header("Content-Range"), header("Content-Length")) {
+            (206, Some(cr), _) => cr.rsplit('/').next().and_then(|t| t.parse::<u64>().ok()),
+            (200, _, Some(cl)) => cl.parse::<u64>().ok(),
+            _ => None,
+        };
+        let live = header("X-Rune-Live").as_deref() == Some("1") || (total.is_none() && header("Accept-Ranges").is_none());
+        let gain_db = header("X-Rune-Gain-Db").and_then(|g| g.parse::<f64>().ok()).filter(|g| g.is_finite());
+        // a server that ignores Range answers 200 with the whole file: the reader then starts at 0, not at `from`
+        let start = if from > 0 && status == 206 { from } else { 0 };
+        Ok(StreamReply { reader: res.into_reader(), total, live, gain_db, start })
+    }
+
     /// A cover (or any image) by server-relative path or absolute URL. Capped at 8 MB.
     pub fn image(&self, path_or_url: &str) -> Result<Vec<u8>, String> {
         let r = if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
