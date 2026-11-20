@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { startServer, until } from './rig.js';
 
 process.env.LOG_LEVEL = 'silent';
-const srv = await startServer();
+const srv = await startServer(process.env.RUNE_MINI_WEB ? { webDist: process.env.RUNE_MINI_WEB } : {});
 for (const [i, album] of ['Alpha', 'Bravo', 'Charlie'].entries()) {
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=600x600:r=1,hue=h=${i * 90}`, '-frames:v', '1', join(srv.library.root, 'E2E Artist', album, 'folder.jpg')]);
 }

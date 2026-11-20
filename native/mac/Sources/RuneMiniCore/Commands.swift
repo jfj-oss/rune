@@ -46,7 +46,7 @@ private func json(_ d: [String: Any]) -> String {
 }
 
 /// The request for `cmd` given what is shown now, or nil when there is nothing sensible to send.
-public func map(_ model: Model, _ cmd: UiCommand, now: Double) -> Request? {
+public func requestFor(_ model: Model, _ cmd: UiCommand, now: Double) -> Request? {
     let p = model.player
     func req(_ d: [String: Any]) -> Request { Request(zone: model.zone, body: json(d)) }
     switch cmd {

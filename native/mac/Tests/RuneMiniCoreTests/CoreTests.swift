@@ -74,7 +74,7 @@ final class CommandTests: XCTestCase {
         m.update(.fetched(st, rev: nil), now: 1000)
         return m
     }
-    func body(_ m: Model, _ c: UiCommand, now: Double = 0) -> String? { map(m, c, now: now)?.body }
+    func body(_ m: Model, _ c: UiCommand, now: Double = 0) -> String? { requestFor(m, c, now: now)?.body }
 
     func testPlayPauseFollowsTheStatus() {
         XCTAssertEqual(body(model(.playing), .playPause), #"{"type":"pause"}"#)
@@ -114,7 +114,7 @@ final class CommandTests: XCTestCase {
     }
 
     func testPathEncodesTheZone() {
-        XCTAssertEqual(map(model(.playing), .next, now: 0)?.path, "/api/player/pc")
+        XCTAssertEqual(requestFor(model(.playing), .next, now: 0)?.path, "/api/player/pc")
         XCTAssertEqual(Request(zone: "spotify:ab/c d", body: "{}").path, "/api/player/spotify%3Aab%2Fc%20d")
     }
 }

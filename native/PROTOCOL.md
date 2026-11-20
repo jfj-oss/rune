@@ -1,0 +1,82 @@
+# rune mini: the contract both apps use
+
+rune mini is a small panel (Linux: GPUI in `linux/`; Mac: Swift + AppKit in `mac/`) that talks to an existing rune server.
+It adds nothing to the server and has no queue of its own: the server owns the queue of every zone (CONTRACTS.md, "One
+queue"); the panel shows state and sends commands. Every type is in `shared/src/index.ts` (`PlayerState`, `PlayerCommand`,
+`ServerEvent`, `ClientEvent`) and the HTTP routes are in CONTRACTS.md. This file lists only what the panel uses.
+
+## Connection
+
+- Base URL: `http://host:port` or `https://host` (Tailscale serve gives https). Saved by the user; **nothing is built in**
+  (the Linux default is `http://localhost:4545`, the Mac asks on first run).
+- Auth: rune has none of its own. An optional token is sent as `Authorization: Bearer <token>` on every request and on the
+  websocket handshake, for a proxy in front of rune that wants one. It is stored in a file named `token`, mode 600, next to
+  `config.json` (`~/.config/rune-mini/` on Linux, `~/Library/Application Support/rune-mini/` on a Mac; `RUNE_MINI_CONFIG_DIR`
+  overrides). `config.json` = `{ "url", "zone", ... }`.
+
+## Reading
+
+- `GET /api/zones` -> `ZoneInfo[]`. The picker offers: kind `pc`, then Soloist (`soloist: true`), then Spotify Connect devices
+  (`kind: spotify`). `kind: browser` is left out, and so is the PC's own Spotify device (`spotifyDeviceId` of the pc zone, and
+  its `spotifyZone`), as the web does (`web/src/player/routing.ts` `withoutPcDevice`). Read on connect, and when the panel
+  is shown.
+- `GET /api/player/:zone` -> `PlayerState` (full, with the queue). Used on connect, on show, after a zone change, and when a
+  slim event arrives for a queue the panel never saw.
+- websocket `GET /api/ws?slim=1` -> `ServerEvent` frames. `hello` first (ignored), then `player { state, queueRev }` for every
+  zone. With `slim=1` an event whose queue did not change has no `state.queue`: the client keeps the last full queue per zone
+  with its `queueRev` and reuses it when the rev matches, else it reads `GET /api/player/:zone` once (and not again while
+  that read is out). `scan` and `library-changed` are ignored. Events of other zones are ignored.
+- Client -> server frames: `{type:'presence', visible}` (the panel is on screen or not) and `{type:'viewing', zones:[zone]}`
+  (so a Spotify Connect zone nobody looks at is not polled).
+- Cover: `album.coverUrl` as given (a server path such as `/api/cover/<albumId>?size=200`, or an absolute Spotify CDN URL,
+  fetched without the token), else `/api/cover/<albumId>?size=200`.
+- Position: `positionMs` is current at the time the event is received. The panel extrapolates it with its own monotonic clock
+  while `status == playing`, held to the song's `durationMs`. The server's `updatedAt` is never used (clock skew).
+
+## Reconnect
+
+500 ms, doubling, capped at 10 s, plus up to 20 % jitter; reset on the first frame after a connect (the web's policy in
+`web/src/player/remote.ts`). On disconnect the cached queues are forgotten (events were missed) and the panel says
+"offline". Idle cost: Linux wakes a read every 15 s hidden / 3 s shown and pings every 14 s; the Mac has no timer while
+connected (the OS wakes the websocket task) and pings only after wake or when shown.
+
+## Commands
+
+All commands are `POST /api/player/:zone` with one `PlayerCommand`; the answer is the new `PlayerState` (used to update the
+view at once; the websocket then confirms it).
+
+| UI | body |
+|---|---|
+| play/pause | `{type:'pause'}` while playing/loading, `{type:'resume'}` while paused, `{type:'jump', index}` (cursor or 0) when stopped with a queue |
+| next, previous | `{type:'next'}`, `{type:'prev'}` |
+| seek | `{type:'seek', positionMs}`; relative seeks use the extrapolated position, clamped to `[0, duration - 500 ms]` |
+| volume | `{type:'volume', volume}` 0..100, whole numbers, clamped |
+| shuffle | `{type:'shuffle', on}` |
+| repeat | `{type:'repeat', mode}` cycling off -> all -> one -> off |
+| click / Enter on a queue row | `{type:'jump', index}` (index in the full queue, not in the filtered list) |
+| remove | `{type:'remove', queueId}` |
+| drag to reorder | `{type:'move', queueId, toIndex}` |
+
+## Keys (the panel has the keyboard while shown)
+
+| | compact | queue open |
+|---|---|---|
+| Space | play/pause | play/pause with an empty filter, else a space in the filter |
+| Left / Right | previous / next | the same with an empty filter |
+| Shift+Left / Right | seek -/+ 10 s | the same with an empty filter |
+| Up / Down | volume -/+ 5 | pick the previous / next queue row |
+| S, R | shuffle, repeat | typed into the filter (Ctrl/Cmd+S, Ctrl/Cmd+R still toggle) |
+| Q or Tab | open the queue | Tab closes it (Ctrl/Cmd+Q toggles it either way; some desktops keep Tab for focus) |
+| typing | | filters the queue (every word must be in the title, an artist or the album) |
+| Enter / Delete | | play / remove the picked row |
+| Esc | hide | clear the filter, then close the queue, then hide |
+
+The table is `linux/core/src/keys.rs` and `mac/Sources/RuneMiniCore/Keys.swift`, tested in both.
+
+## Media keys
+
+- Linux: an MPRIS player `org.mpris.MediaPlayer2.rune` (PlayPause, Play, Pause, Stop, Next, Previous, Seek, SetPosition,
+  LoopStatus, Shuffle, Volume, Metadata with title, artists, album, art URL and length, Position). The rune server publishes
+  **no** MPRIS player of its own: `server/src/spotify/mpris.ts` only reads the Spotify app's, and mpv runs without an MPRIS
+  script. So there is no duplicate to fight with.
+- Mac: `MPRemoteCommandCenter` + `MPNowPlayingInfoCenter` (see `mac/README.md`, "Media keys").

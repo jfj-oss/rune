@@ -29,12 +29,12 @@ pub fn mmss(ms: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn dot_colours_are_stable() {
         assert_eq!(dot_color("pc"), dot_color("pc"));
         assert!(DOTS.contains(&dot_color("spotify:abc")));
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn times() {
         assert_eq!(mmss(0.), "0:00");
         assert_eq!(mmss(61_999.), "1:01");
