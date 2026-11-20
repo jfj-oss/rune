@@ -6,7 +6,7 @@ import { listenApi } from '../listenApi';
 import type { NormalizeMode } from '../lib/listenTypes';
 import { useSearchNav } from '../store/searchNav';
 import { useRadio } from '../store/radio';
-import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, useUi } from '../store/ui';
+import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, FOIL_AMBIENTS, useUi } from '../store/ui';
 import { MenuItem, Popover } from './Popover';
 import { UpdateChip } from './UpdateChip';
 
@@ -92,7 +92,7 @@ export function TopBar({ canBack, canForward }: { canBack: boolean; canForward: 
             <MenuItem icon={<Copy size={16} />} onClick={() => { close(); nav('/duplicates'); }}>Duplicates…</MenuItem>
             <MenuItem icon={<Activity size={16} />} onClick={() => { close(); nav('/settings'); }}>Server status…</MenuItem>
             <div className="popover__title">Background</div>
-            {[...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
+            {[...FOIL_AMBIENTS, ...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
               <button key={a} className={`menu__item${ambient === a ? ' is-current' : ''}`} role="menuitemradio" aria-checked={ambient === a} onClick={() => setAmbient(a)}>
                 <i className={`ambdot ambdot--${a}`} />
                 <span>{AMBIENT_LABEL[a]}</span>

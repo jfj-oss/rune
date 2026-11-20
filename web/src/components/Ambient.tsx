@@ -5,6 +5,7 @@ import { currentItem, usePlayer } from '../store/player';
 import { useUi, type Ambient as AmbientMode } from '../store/ui';
 import type { BackdropColour } from './DitherBackdrop';
 
+const FoilBackdrop = lazy(() => import('./FoilBackdrop').then((m) => ({ default: m.FoilBackdrop })));
 const DitherBackdrop = lazy(() => import('./DitherBackdrop').then((m) => ({ default: m.DitherBackdrop })));
 
 const ditherColour = (a: AmbientMode): DitherColour | 'album' | 'custom' | null =>
@@ -36,6 +37,13 @@ export function Ambient() {
   const colour = ditherColour(ambient);
   // an open album page tints every Dither mode with its own cover colour (the dots blend over there and back)
   const page = useUi((s) => s.pagePalette);
+  if (ambient === 'foil') {
+    return (
+      <div className="ambient" aria-hidden="true">
+        <Suspense fallback={null}><FoilBackdrop /></Suspense>
+      </div>
+    );
+  }
   return (
     <div className="ambient" aria-hidden="true">
       {colour ? (
