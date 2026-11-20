@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=rune
+GenericName=Music player
+Comment=Your music library on the rune server: browse, play and control it
+Exec=rune-desktop
+Icon=rune-desktop
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupWMClass=rune-desktop
+StartupNotify=true
+Keywords=music;player;library;flac;

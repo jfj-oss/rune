@@ -132,6 +132,22 @@ struct Saved {
     /// draw the backdrop on the CPU instead of the GPU shader (no switch in the UI; edit state.json, or set RUNE_DESKTOP_FOIL=software)
     #[serde(default)]
     foil_software: bool,
+    /// Settings -> Playback: a desktop notification when the song changes (off by default)
+    #[serde(default)]
+    notify_track: bool,
+    /// the window as it was left (size, and position where the system lets an app place a window)
+    #[serde(default)]
+    window: Option<SavedWindow>,
+}
+
+/// The window as it was left: logical pixels; `maximized` carries the restore size in the rest.
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SavedWindow { pub x: f32, pub y: f32, pub w: f32, pub h: f32, #[serde(default)] pub maximized: bool }
+
+/// The window state saved by the last run, if any.
+pub fn load_window(dir: &std::path::Path) -> Option<SavedWindow> {
+    let s: Saved = std::fs::read_to_string(state_path(dir)).ok().and_then(|s| serde_json::from_str(&s).ok())?;
+    s.window.filter(|w| w.w >= 200. && w.h >= 200. && w.w <= 20000. && w.h <= 20000. && w.x.is_finite() && w.y.is_finite())
 }
 
 pub struct Rune {
@@ -142,6 +158,13 @@ pub struct Rune {
     pub model: Model,
     pub data: Data,
     pub covers: Covers,
+    pub os: crate::os::Os,
+    pub win_active: bool,
+    pub notify_track: bool,
+    notified: String,
+    pub window_saved: Option<SavedWindow>,
+    window_seen: Option<SavedWindow>,
+    window_timer: Option<Task<()>>,
     /// the soft cover behind the open playlist's hero, and what it was made from
     pub hero_tint: Option<((String, usize), Arc<RenderImage>)>,
     /// animated generative art by key (album heroes, big wave covers): one small view each, with its own clock
@@ -305,7 +328,7 @@ impl Rune {
             None => Route::Home,
         };
         let mut saved = saved;
-        if saved.audio_id.is_empty() { saved.audio_id = crate::audio_zone::fresh_id(); let _ = std::fs::create_dir_all(&dir); if let Ok(j) = serde_json::to_string(&saved) { let _ = std::fs::write(state_path(&dir), j); } }
+        if saved.audio_id.is_empty() { saved.audio_id = crate::audio_zone::fresh_id(); if let Ok(j) = serde_json::to_string(&saved) { let _ = crate::util::write_atomic(&state_path(&dir), j.as_bytes()); } }
         let own_zone = format!("browser:{}", saved.audio_id);
         // this app sounds its own zone; on a Mac that is the default, since nothing else there plays
         let first_zone = saved.zone.clone().unwrap_or_else(|| if cfg!(target_os = "macos") { own_zone.clone() } else { cfg.zone.clone() });
@@ -321,9 +344,13 @@ impl Rune {
             cx.background_executor().timer(Duration::from_secs(1)).await;
             if this.update(cx, |m, _| { if let Some(a) = m.audio.as_mut() { a.tick(now_ms()); } }).is_err() { break; }
         }).detach();
+        let (os_tx, mut os_rx) = futures::channel::mpsc::unbounded();
+        cx.spawn_in(window, async move |this, cx| {
+            while let Some(ev) = os_rx.next().await { if this.update_in(cx, |m, window, cx| m.os_event(ev, window, cx)).is_err() { break; } }
+        }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
+            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -344,10 +371,53 @@ impl Rune {
         cx.notify();
     }
 
+    /// What the system asked for (media keys, tray, a second launch).
+    pub fn os_event(&mut self, ev: crate::os::OsEvent, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::os::OsEvent;
+        match ev {
+            OsEvent::Raise => { window.activate_window(); cx.notify(); }
+            OsEvent::Quit => { self.remember_window(window); cx.quit(); }
+            OsEvent::Cmd(c) => self.cmd(c, cx),
+            OsEvent::SetZone(z) => self.set_zone(&z, cx),
+            OsEvent::OpenConfig => { let d = self.dir.clone(); cx.open_url(&format!("file://{}", d.display())); }
+        }
+    }
+
+    /// Tell the system what plays (media keys / now playing), and, when the song changed and the setting is on, say so.
+    fn os_update(&mut self, window_active: bool) {
+        let now = now_ms();
+        let meta = rune_mini_core::mpris_meta::from_model(&self.model, &self.net.client.base, now);
+        if self.notify_track && !window_active && meta.playback_status == "Playing" && !meta.title.is_empty() {
+            let id = self.model.player.as_ref().and_then(|p| p.current().map(|c| c.queue_id.clone())).unwrap_or_default();
+            if id != self.notified {
+                let first = self.notified.is_empty();
+                self.notified = id;
+                // the first song seen after start-up is not a "change"
+                if !first { self.os.notify(meta.title.clone(), if meta.album.is_empty() { meta.artists.join(", ") } else { format!("{} \u{2014} {}", meta.artists.join(", "), meta.album) }); }
+            }
+        }
+        self.os.meta(meta);
+    }
+
+    /// Remember the window (size, and where it is) after it has stopped changing, and always when the app is left.
+    pub fn watch_window(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let now = current_window(window);
+        if self.window_seen == Some(now) { return; }
+        self.window_seen = Some(now);
+        self.window_timer = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(700)).await;
+            let _ = this.update(cx, |m, _| { if m.window_saved != m.window_seen { m.window_saved = m.window_seen; m.save_state(); } });
+        }));
+    }
+
+    pub fn remember_window(&mut self, window: &Window) {
+        let now = current_window(window);
+        if self.window_saved != Some(now) { self.window_saved = Some(now); self.save_state(); }
+    }
+
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software };
-        let _ = std::fs::create_dir_all(&self.dir);
-        if let Ok(j) = serde_json::to_string(&s) { let _ = std::fs::write(state_path(&self.dir), j); }
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software, notify_track: self.notify_track, window: self.window_saved };
+        if let Ok(j) = serde_json::to_string(&s) { let _ = crate::util::write_atomic(&state_path(&self.dir), j.as_bytes()); }
     }
 
     // ------------------------------------------------------------------ the network
@@ -412,6 +482,8 @@ impl Rune {
                 });
             }
         }
+        self.os_update(self.win_active);
+        self.os.zones(self.zone_list().into_iter().map(|(id, name, _)| (id, name)).collect(), self.model.zone.clone());
         self.manage_tick(cx);
         cx.notify();
     }
@@ -766,6 +838,12 @@ impl Rune {
     }
 }
 
+/// The window as GPUI reports it right now.
+fn current_window(window: &Window) -> SavedWindow {
+    let (b, maximized) = match window.window_bounds() { WindowBounds::Windowed(b) => (b, false), WindowBounds::Maximized(b) | WindowBounds::Fullscreen(b) => (b, true) };
+    SavedWindow { x: f32::from(b.origin.x), y: f32::from(b.origin.y), w: f32::from(b.size.width), h: f32::from(b.size.height), maximized }
+}
+
 pub fn pct_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -814,6 +892,26 @@ pub fn parse_route(s: &str) -> Route {
         ["settings"] => Route::Settings,
         ["duplicates"] => Route::Duplicates,
         _ => Route::Home,
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn a_saved_window_is_read_back_and_nonsense_is_refused() {
+        let d = std::env::temp_dir().join(format!("rune-win-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(load_window(&d), None, "no file, no window");
+        std::fs::write(d.join("state.json"), r#"{"window":{"x":100.0,"y":50.0,"w":1400.0,"h":900.0,"maximized":true}}"#).unwrap();
+        assert_eq!(load_window(&d), Some(SavedWindow { x: 100., y: 50., w: 1400., h: 900., maximized: true }));
+        std::fs::write(d.join("state.json"), r#"{"window":{"x":0.0,"y":0.0,"w":3.0,"h":900.0}}"#).unwrap();
+        assert_eq!(load_window(&d), None, "a 3 px wide window is not remembered");
+        std::fs::write(d.join("state.json"), "{ not json").unwrap();
+        assert_eq!(load_window(&d), None, "a broken file is ignored");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
 

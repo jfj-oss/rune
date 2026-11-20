@@ -23,6 +23,8 @@ pub fn vol_w(window_w: f32) -> f32 { (window_w * 0.22).clamp(240., 340.) }
 impl Render for Rune {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.frame += 1;
+        self.win_active = window.is_window_active();
+        self.watch_window(window, cx);
         if self.frame == 1 { self.start_hook_loop(cx); }
         self.note_frame();
         self.covers.begin_frame();

@@ -481,10 +481,10 @@ async fn run(events: Events, hotkey: String, portal_on: bool, mut ctl: Unbounded
             return;
         }
     };
-    // MPRIS: the name is requested without queueing; another "rune" player keeps it
-    if conn.request_name_with_flags(MPRIS_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into()).await.is_err() {
-        eprintln!("rune-mini: {MPRIS_NAME} is taken: no MPRIS");
-    }
+    // MPRIS: the name is requested without queueing; another "rune" player keeps it. While the rune desktop app is on the bus it is
+    // the one that answers the media keys (it also owns the zone it sounds), so this one steps aside and takes the name back when
+    // the desktop app goes away.
+    mpris_arbitrate(conn.clone());
     register_tray(&conn).await;
     if portal_on {
         let (ev, conn2) = (events.clone(), conn.clone());
@@ -546,6 +546,40 @@ async fn run(events: Events, hotkey: String, portal_on: bool, mut ctl: Unbounded
             }
         }
     }
+}
+
+/// The MPRIS name of the rune desktop app (native/desktop): while it is on the bus, rune mini has no player of its own.
+pub const DESKTOP_MPRIS_NAME: &str = "org.mpris.MediaPlayer2.rune_desktop";
+
+/// Should rune mini hold its MPRIS name, given whether the desktop app owns its own?
+pub fn should_hold_mpris(desktop_app_on_bus: bool) -> bool {
+    !desktop_app_on_bus
+}
+
+fn mpris_arbitrate(conn: Connection) {
+    tokio::spawn(async move {
+        let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else { return };
+        let want = |on: bool| should_hold_mpris(on);
+        let desktop = zbus::names::BusName::try_from(DESKTOP_MPRIS_NAME).expect("name");
+        let mut held = false;
+        let on = dbus.name_has_owner(desktop.clone()).await.unwrap_or(false);
+        if want(on) {
+            held = conn.request_name_with_flags(MPRIS_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into()).await.is_ok();
+            if !held { eprintln!("rune-mini: {MPRIS_NAME} is taken: no MPRIS"); }
+        }
+        let Ok(mut changes) = dbus.receive_name_owner_changed().await else { return };
+        while let Some(sig) = changes.next().await {
+            let Ok(args) = sig.args() else { continue };
+            if args.name().as_str() != DESKTOP_MPRIS_NAME { continue; }
+            let on = args.new_owner().is_some();
+            if want(on) && !held {
+                held = conn.request_name_with_flags(MPRIS_NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into()).await.is_ok();
+            } else if !want(on) && held {
+                let _ = conn.release_name(MPRIS_NAME).await;
+                held = false;
+            }
+        }
+    });
 }
 
 async fn register_tray(conn: &Connection) {
@@ -652,5 +686,17 @@ mod portal {
             }
         }
         Err("lost the desktop portal".into())
+    }
+}
+
+#[cfg(test)]
+mod arbitration_tests {
+    use super::*;
+
+    #[test]
+    fn rune_mini_yields_the_media_keys_to_the_desktop_app() {
+        assert!(should_hold_mpris(false), "alone on the bus it owns org.mpris.MediaPlayer2.rune");
+        assert!(!should_hold_mpris(true), "while the desktop app runs it steps aside");
+        assert_eq!(DESKTOP_MPRIS_NAME, "org.mpris.MediaPlayer2.rune_desktop");
     }
 }

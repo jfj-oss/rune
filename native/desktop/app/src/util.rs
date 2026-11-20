@@ -113,3 +113,54 @@ mod tests {
         assert_eq!(fold("  Café  "), "cafe");
     }
 }
+
+/// Writes `bytes` to `path` so that a crash or a full disk leaves either the old file or the new one, never half of one: a
+/// temporary file next to it, flushed to disk, then renamed over it (and the folder flushed, where that is possible).
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{}.{}.tmp", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), std::process::id()));
+    let r = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if r.is_err() { let _ = std::fs::remove_file(&tmp); return r; }
+    #[cfg(unix)]
+    if let Ok(d) = std::fs::File::open(dir) { let _ = d.sync_all(); }
+    Ok(())
+}
+
+#[cfg(test)]
+mod atomic_tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn writes_replaces_and_leaves_no_temp_files() {
+        let d = std::env::temp_dir().join(format!("rune-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let p = d.join("state.json");
+        write_atomic(&p, b"one").unwrap();
+        write_atomic(&p, b"two").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"two");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "only state.json is left");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[::core::prelude::v1::test]
+    fn a_failed_write_keeps_the_old_file() {
+        let d = std::env::temp_dir().join(format!("rune-atomic2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let p = d.join("state.json");
+        write_atomic(&p, b"keep").unwrap();
+        // the target is now a directory: the rename fails, the temp file is cleaned up
+        let q = d.join("sub");
+        std::fs::create_dir_all(&q).unwrap();
+        assert!(write_atomic(&q, b"x").is_err());
+        assert_eq!(std::fs::read(&p).unwrap(), b"keep");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 2, "state.json and sub, no stray temp file");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
