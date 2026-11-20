@@ -328,3 +328,18 @@ a.toprow__sub:hover { color: var(--text-2); text-decoration: underline; text-und
 .setup__foot { font-size: 12.5px; }
 .setupcard { margin-bottom: 18px; max-width: 1100px; }
 .setupcard p { margin: 0; font-size: 13.5px; }
+
+/* Settings: the playlists on the rune mini */
+.minipick { margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
+.minipick__list { list-style: none; margin: 0; padding: 12px 0 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.minipick__row { display: flex; align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px; font-size: 13.5px; border-top: 2px solid transparent; }
+.minipick__row[draggable="true"] { cursor: grab; }
+.minipick__row.is-drag { opacity: 0.45; }
+.minipick__row.is-over { border-top-color: var(--accent, currentColor); }
+.minipick__grip { flex: none; color: var(--text-3, var(--text-2)); }
+.minipick__dot { flex: none; width: 11px; height: 11px; border-radius: 50%; }
+.minipick__name { flex: 1; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.minipick__rm { opacity: 0.6; }
+.minipick__rm:hover { opacity: 1; }
+.minipick .btn-icon:disabled { opacity: 0.25; }
+.minipick__hint { font-size: 12.5px; margin: 0; }

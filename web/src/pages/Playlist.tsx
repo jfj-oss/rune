@@ -13,6 +13,7 @@ import { Dialog } from '../components/Dialog';
 import { Eq } from '../components/Eq';
 import { InlineText } from '../components/InlineText';
 import { MobileBack } from '../components/MobileBack';
+import { MiniButton, MiniMenuItem } from '../components/MiniToggle';
 import { PinMenuItem } from '../components/Pin';
 import { MenuItem, Popover } from '../components/Popover';
 import { isChosenImage, PlaylistCover } from '../components/PlaylistCover';
@@ -156,6 +157,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
               )}
               {!rune && <button className="btn" onClick={() => void duplicate()} title="Duplicate as rune playlist"><Copy size={16} /><span>Duplicate<span className="phone-hide"> as rune playlist</span></span></button>}
               <PlaylistHotkey id={d.id} name={d.name} />
+              <MiniButton id={d.id} name={d.name} />
               <Popover
                 placement="bottom-start"
                 trigger={({ toggle }) => <button className="btn btn--icon" aria-label="More actions" onClick={toggle}><MoreHorizontal size={20} /></button>}
@@ -164,6 +166,7 @@ function PlaylistView({ d: raw }: { d: RunePlaylistDetail }) {
                   <div role="menu" className="menu">
                     <MenuItem icon={<ListEnd size={16} />} onClick={() => { close(); void usePlayer.getState().enqueueItems(items, true); }}>Play next</MenuItem>
                     <PinMenuItem id={d.id} pinned={d.pinned} close={close} />
+                    <MiniMenuItem id={d.id} name={d.name} close={close} />
                     {rune && <MenuItem icon={<Copy size={16} />} onClick={() => { close(); void duplicate(); }}>Duplicate</MenuItem>}
                     {isChosenImage(d.imageUrl) && <MenuItem icon={<ImageOff size={16} />} onClick={() => { close(); void actions.clearImage(d.id); }}>Remove picture</MenuItem>}
                     <MenuItem icon={<Download size={16} />} onClick={() => { close(); void actions.exportM3u8(d.id, d.name); }}>Export .m3u8</MenuItem>

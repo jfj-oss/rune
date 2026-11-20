@@ -1,5 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Activity, Check, Database, HardDrive, Keyboard, Palette, Plug, RefreshCw, Server, Wrench } from 'lucide-react';
+import { Activity, Check, ChevronDown, ChevronUp, Database, GripVertical, HardDrive, Keyboard, Palette, PanelTop, Plug, RefreshCw, Server, Wrench } from 'lucide-react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { applyMini, useMiniPlaylists } from '../hooks/useMiniPlaylists';
+import { MINI_MAX, miniColor, moveMini } from '../lib/miniPlaylists';
 import { Empty } from '../components/Rows';
 import { UpdateCard } from '../components/UpdateCard';
 import { api, http, isMock } from '../api';
@@ -180,6 +184,47 @@ function KeyboardCard() {
   );
 }
 
+/** The playlists on the rune mini (the small desktop player): see them, drag to reorder, remove. */
+function MiniCard() {
+  const qc = useQueryClient();
+  const list = useMiniPlaylists().data ?? [];
+  const [drag, setDrag] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+  const save = (next: typeof list) => void applyMini(qc, next, () => api.setMiniPlaylists(next.map((p) => p.id)), 'Could not change the rune mini');
+  const drop = (to: number) => { if (drag !== null && drag !== to) save(moveMini(list, drag, to)); setDrag(null); setOver(null); };
+  return (
+    <section className="statuscard minipick">
+      <h2 className="statuscard__head"><PanelTop size={17} /> rune mini</h2>
+      <p className="muted">Each playlist here is a coloured dot on the left of the rune mini. Click it to shuffle-play the playlist.</p>
+      {list.length === 0 ? (
+        <p className="muted minipick__hint">None yet. Open a playlist and choose “Show in rune mini”.</p>
+      ) : (
+        <ol className="minipick__list">
+          {list.map((p, i) => (
+            <li
+              key={p.id}
+              className={`minipick__row${over === i && drag !== null && drag !== i ? ' is-over' : ''}${drag === i ? ' is-drag' : ''}`}
+              draggable
+              onDragStart={(e) => { setDrag(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p.id); }}
+              onDragOver={(e) => { e.preventDefault(); setOver(i); }}
+              onDrop={(e) => { e.preventDefault(); drop(i); }}
+              onDragEnd={() => { setDrag(null); setOver(null); }}
+            >
+              <GripVertical size={16} className="minipick__grip" aria-hidden />
+              <i className="minipick__dot" style={{ background: miniColor(p.color) }} aria-hidden />
+              <Link to={`/playlist/${encId(p.id)}`} className="link minipick__name">{p.name}</Link>
+              <button className="btn-icon" aria-label={`Move ${p.name} up`} title="Move up" disabled={i === 0} onClick={() => save(moveMini(list, i, i - 1))}><ChevronUp size={14} /></button>
+              <button className="btn-icon" aria-label={`Move ${p.name} down`} title="Move down" disabled={i === list.length - 1} onClick={() => save(moveMini(list, i, i + 1))}><ChevronDown size={14} /></button>
+              <button className="btn-icon minipick__rm" aria-label={`Remove ${p.name} from the rune mini`} title="Remove" onClick={() => save(list.filter((x) => x.id !== p.id))}><X size={14} /></button>
+            </li>
+          ))}
+        </ol>
+      )}
+      <p className="muted minipick__hint">Up to {MINI_MAX}. Drag to reorder; in the mini, keys 1–{MINI_MAX} play them in this order.</p>
+    </section>
+  );
+}
+
 const OPTIONAL_JOB_LABEL: Record<string, string> = { matching: 'Metadata matching', details: 'Album details', loudness: 'Loudness analysis' };
 
 /** Files the last scan could not read, collapsed so the Library card stays compact. */
@@ -229,6 +274,7 @@ export default function Settings() {
       </section>
       <AmbientPicker />
       <KeyboardCard />
+      <MiniCard />
       <UpdateCard />
 
       {q.isError ? (
