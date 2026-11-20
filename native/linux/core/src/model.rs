@@ -142,6 +142,8 @@ pub enum ServerEvent {
         #[serde(default, rename = "queueRev")]
         queue_rev: Option<String>,
     },
+    /// The library changed (a scan finished, a like, a playlist edit): lists the client holds may be stale.
+    LibraryChanged,
     #[serde(other)]
     Other,
 }

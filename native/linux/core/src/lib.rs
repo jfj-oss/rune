@@ -2,10 +2,12 @@
 //! mapping from a key or a button to a server command, the reconnect policy, settings, and the network threads.
 //! Both the GPUI app (../app) and the headless probe (src/bin/probe.rs, used by the e2e test) are built on it.
 //! The wire contract is native/PROTOCOL.md; the Swift app in native/mac implements the same one.
+pub mod client_ext;
 pub mod commands;
 pub mod config;
 pub mod filter;
 pub mod keys;
+pub mod library;
 pub mod model;
 pub mod mpris_meta;
 pub mod net;

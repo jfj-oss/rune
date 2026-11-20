@@ -54,7 +54,7 @@ impl Client {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(4)).timeout(Duration::from_secs(10)).user_agent("rune-mini").build();
         Client { base: normalize_url(base), token: token.to_string(), agent }
     }
-    fn req(&self, method: &str, path: &str) -> ureq::Request {
+    pub(crate) fn req(&self, method: &str, path: &str) -> ureq::Request {
         let r = self.agent.request(method, &format!("{}{}", self.base, path));
         if self.token.is_empty() {
             r
@@ -62,7 +62,7 @@ impl Client {
             r.set("Authorization", &format!("Bearer {}", self.token))
         }
     }
-    fn describe(e: ureq::Error) -> String {
+    pub(crate) fn describe(e: ureq::Error) -> String {
         match e {
             ureq::Error::Status(code, r) => {
                 let body = r.into_string().unwrap_or_default();
