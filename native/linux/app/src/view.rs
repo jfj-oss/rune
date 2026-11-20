@@ -16,6 +16,10 @@ pub struct Panel {
     mini: Entity<Mini>,
     focus: FocusHandle,
     bar: Rc<Cell<Bounds<Pixels>>>,
+    /// Scroll over "vol": wheel/trackpad travel not yet turned into a step, and the volume we last asked for (ms, value),
+    /// so quick notches build on each other instead of on a server echo that has not arrived yet.
+    vol_acc: f32,
+    vol_sent: Option<(u64, f64)>,
     _sub: Subscription,
 }
 
@@ -79,10 +83,15 @@ pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWind
     None
 }
 
+/// Pixels of trackpad travel (or one wheel notch) per volume step.
+const VOL_NOTCH: f32 = 24.;
+/// How long the panel trusts its own last volume over the server's echo.
+const VOL_HOLD_MS: u64 = 1500;
+
 impl Panel {
     fn new(mini: Entity<Mini>, _window: &mut Window, cx: &mut Context<Self>) -> Panel {
         let sub = cx.observe(&mini, |_, _, cx| cx.notify());
-        Panel { mini, focus: cx.focus_handle(), bar: Rc::new(Cell::new(Bounds::default())), _sub: sub }
+        Panel { mini, focus: cx.focus_handle(), bar: Rc::new(Cell::new(Bounds::default())), vol_acc: 0., vol_sent: None, _sub: sub }
     }
 }
 
@@ -214,7 +223,26 @@ impl Render for Panel {
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(if err { c(look::ERROR) } else { c(look::DIM) }).child(left_note))
             .child(tog("sh", "shuffle".into(), shuffle, UiCommand::ToggleShuffle, &me))
             .child(tog("rp", format!("repeat {}", repeat.as_str()), repeat != Repeat::Off, UiCommand::CycleRepeat, &me))
-            .child(div().text_color(c(look::DIM)).child(format!("vol {}", volume.round() as i64)));
+            .child({
+                let shown = match self.vol_sent { Some((t, v)) if now_ms().saturating_sub(t) < VOL_HOLD_MS => v, _ => volume };
+                div().id("vol").cursor_ns_resize().text_color(c(look::DIM)).hover(|s| s.text_color(c(look::INK))).child(format!("vol {}", shown.round() as i64))
+                    .on_scroll(lst(&me, move |this, ev: &ScrollEvent, _, cx| {
+                        // A wheel notch arrives as Lines(±1..3); a trackpad as pixels. One notch or ~24 px = one 5% step.
+                        let up = match ev.delta { ScrollDelta::Lines(l) => if l.y == 0. { 0. } else { l.y.signum() * VOL_NOTCH }, ScrollDelta::Pixels(p) => f32::from(p.y) };
+                        if up == 0. { return; }
+                        if this.vol_acc != 0. && this.vol_acc.signum() != up.signum() { this.vol_acc = 0.; }
+                        this.vol_acc += up;
+                        let steps = (this.vol_acc / VOL_NOTCH).trunc();
+                        if steps == 0. { return; }
+                        this.vol_acc -= steps * VOL_NOTCH;
+                        let now = now_ms();
+                        let base = match this.vol_sent { Some((t, v)) if now.saturating_sub(t) < VOL_HOLD_MS => v, _ => volume };
+                        let next = (base + steps as f64 * rune_mini_core::keys::VOLUME_STEP).clamp(0., 100.);
+                        this.vol_sent = Some((now, next));
+                        this.mini.update(cx, |m, cx| m.command(UiCommand::Volume(next), cx));
+                        cx.notify();
+                    }))
+            });
 
         let info = v_flex().flex_1().min_w_0().h(px(84.)).justify_between()
             .child(v_flex().gap(px(2.))
