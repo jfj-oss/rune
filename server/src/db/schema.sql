@@ -92,3 +92,12 @@ CREATE TABLE IF NOT EXISTS pins (
   kind TEXT NOT NULL CHECK (kind IN ('album', 'playlist')),
   pinned_at INTEGER NOT NULL
 );
+
+-- rune mini: the playlists shown as coloured dots on the mini player's left edge (a choice of its own, not the Library pins).
+-- position orders them; color is the dot colour index (0-7), kept for as long as the playlist stays on the list so it
+-- never changes shade when another is added or removed. No FK: a deleted playlist is just skipped when read.
+CREATE TABLE IF NOT EXISTS mini_playlists (
+  item_id TEXT PRIMARY KEY,
+  position INTEGER NOT NULL,
+  color INTEGER NOT NULL
+);

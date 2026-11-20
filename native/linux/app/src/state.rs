@@ -7,7 +7,7 @@ use rune_mini_core::commands::{self, UiCommand};
 use rune_mini_core::config::{self, Config};
 use rune_mini_core::filter;
 use rune_mini_core::keys::{self, Action, Key};
-use rune_mini_core::model::{pickable_zones, Effect, Model, Msg, Status};
+use rune_mini_core::model::{next_zone, pickable_zones, Effect, Model, Msg, ServerEvent, Status};
 use rune_mini_core::mpris_meta;
 use rune_mini_core::net::{Net, NetEvent};
 use rune_mini_core::now_ms;
@@ -95,13 +95,22 @@ impl Mini {
                 if online {
                     // events may have been missed: read the zone list and the state again
                     self.net.fetch_zones();
+                    self.net.fetch_minis();
                     self.net.fetch_state(&self.model.zone.clone(), None);
                     self.net.viewing(vec![self.model.zone.clone()]);
                     self.notice = None;
                 }
                 m
             }
-            NetEvent::Ws(e) => Msg::Ws(e),
+            NetEvent::Ws(e) => {
+                // the playlists on the left edge were changed in big rune: read them again
+                if matches!(e, ServerEvent::MiniPlaylists) {
+                    self.net.fetch_minis();
+                }
+                Msg::Ws(e)
+            }
+            NetEvent::Minis(l) => Msg::Minis(l),
+            NetEvent::Started { playlist, state } => Msg::Started { playlist, state },
             NetEvent::Fetched { state, rev } => Msg::Fetched { state, rev },
             NetEvent::Zones(z) => Msg::Zones(z),
             NetEvent::Failed(e) => {
@@ -209,6 +218,22 @@ impl Mini {
         cx.notify();
     }
 
+    /// A playlist dot (or key N): shuffle-play playlist `i` on the zone shown.
+    pub fn play_mini(&mut self, i: usize, cx: &mut Context<Self>) {
+        let Some(p) = self.model.minis.get(i) else { return };
+        self.notice = None;
+        self.net.shuffle_playlist(&self.model.zone.clone(), &p.id.clone());
+        cx.notify();
+    }
+
+    /// The zone name in the footer: the next zone, wrapping.
+    pub fn cycle_zone(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.zone_list().into_iter().map(|(id, _)| id).collect();
+        if let Some(z) = next_zone(&ids, &self.model.zone) {
+            self.set_zone(&z, cx);
+        }
+    }
+
     pub fn set_zone(&mut self, zone: &str, cx: &mut Context<Self>) {
         let fx = self.model.set_zone(zone);
         if fx.is_empty() {
@@ -259,6 +284,10 @@ impl Mini {
             Action::VolumeDown => self.command(UiCommand::VolumeBy(-keys::VOLUME_STEP), cx),
             Action::ToggleShuffle => self.command(UiCommand::ToggleShuffle, cx),
             Action::ToggleRepeat => self.command(UiCommand::CycleRepeat, cx),
+            Action::PrevSong => self.command(UiCommand::PrevSong, cx),
+            Action::Restart => self.command(UiCommand::Restart, cx),
+            Action::SkipFifth => self.command(UiCommand::SkipFraction(keys::SKIP_FRACTION), cx),
+            Action::PlayPlaylist(i) => self.play_mini(i, cx),
             Action::OpenQueue => self.set_queue_open(true, cx),
             Action::CloseQueue => self.set_queue_open(false, cx),
             Action::Type(t) => {
@@ -340,6 +369,7 @@ impl Mini {
         // the panel may have been hidden a long time: read the state and the zones fresh
         self.net.fetch_state(&self.model.zone.clone(), None);
         self.net.fetch_zones();
+        self.net.fetch_minis();
         self.open_window(cx);
         self.manage_tick(cx);
     }
@@ -422,6 +452,6 @@ pub fn status_word(s: &Status) -> &'static str {
     }
 }
 
-pub fn initial_dot(id: &str) -> Hsla {
-    look::c(look::dot_color(id))
+pub fn playlist_dot(key: u8) -> Hsla {
+    look::c(look::dot_color(key))
 }

@@ -67,8 +67,22 @@ public struct ZoneInfo: Equatable {
     }
 }
 
+/// A playlist chosen for the mini (GET /api/mini/playlists): a coloured dot that shuffle-plays it.
+public struct MiniPlaylist: Equatable {
+    public var id: String
+    public var name = ""
+    /// Dot colour index into the panel's eight-colour palette; the server keeps it stable and distinct.
+    public var color = 0
+    public init(id: String, name: String = "", color: Int = 0) { self.id = id; self.name = name; self.color = color }
+}
+
+/// The most dots (and shifted number keys) there are.
+public let miniMax = 8
+
 public enum ServerEvent {
     case hello(build: String?)
+    /// The chosen playlists changed: read them again (handled by the caller, not the reducer).
+    case miniPlaylists
     case player(state: WireState, queueRev: String?)
     case other
 }
@@ -110,6 +124,7 @@ public func decodeEvent(_ text: String) -> ServerEvent? {
     guard let data = text.data(using: .utf8), let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
     switch d["type"] as? String {
     case "hello": return .hello(build: d["build"] as? String)
+    case "mini-playlists": return .miniPlaylists
     case "player":
         guard let s = decodeState(d["state"]) else { return .other }
         return .player(state: s, queueRev: d["queueRev"] as? String)
@@ -124,6 +139,28 @@ public func decodeZones(_ data: Data) -> [ZoneInfo]? {
         return ZoneInfo(id: id, name: str(d, "name"), kind: str(d, "kind"), soloist: (d["soloist"] as? Bool) ?? false,
                         spotifyDeviceId: d["spotifyDeviceId"] as? String, spotifyZone: d["spotifyZone"] as? String)
     }
+}
+
+/// GET /api/mini/playlists -> { playlists: [{ id, name, color }] }
+public func decodeMinis(_ data: Data) -> [MiniPlaylist]? {
+    guard let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let arr = d["playlists"] as? [[String: Any]] else { return nil }
+    return arr.compactMap { p in
+        guard let id = p["id"] as? String else { return nil }
+        return MiniPlaylist(id: id, name: str(p, "name"), color: Int(num(p, "color")))
+    }
+}
+
+/// The track ids of GET /api/playlists/:id, in order.
+public func decodePlaylistTrackIds(_ data: Data) -> [String]? {
+    guard let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+    return (d["tracks"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+}
+
+/// The zone after `current` in `ids` (wrapping); the first one when `current` is not in the list.
+public func nextZone(_ ids: [String], current: String) -> String? {
+    if ids.isEmpty { return nil }
+    guard let at = ids.firstIndex(of: current) else { return ids[0] }
+    return ids[(at + 1) % ids.count]
 }
 
 /// The zones the picker offers: what the web offers (browser zones are not listed; the PC's own Spotify device is folded
@@ -177,6 +214,10 @@ public enum Msg {
     case fetched(WireState, rev: String?)
     case conn(Conn)
     case zones([ZoneInfo])
+    /// The chosen playlists, in order.
+    case minis([MiniPlaylist])
+    /// The answer to "shuffle-play this playlist": the new state of the zone, and which playlist made the queue.
+    case started(playlist: String, WireState)
 }
 
 public enum Effect: Equatable {
@@ -190,6 +231,17 @@ public struct Model {
     public var player: Player?
     private var queues: [String: (rev: String, queue: [QueueItem])] = [:]
     private var fetching: String?
+    /// The playlists on the left edge, in order (at most `miniMax`).
+    public var minis: [MiniPlaylist] = []
+    /// The queue a playlist dot made: (zone, playlist id, first queue id, length). It stops matching as soon as the queue is
+    /// replaced or edited, so the ring on a dot means "this queue came from it", not "it was clicked once".
+    private var origin: (zone: String, playlist: String, first: String, count: Int)?
+
+    /// The playlist whose shuffled play made the queue now shown, if the queue is still that one.
+    public var playingPlaylist: String? {
+        guard let o = origin, let p = player, o.zone == zone, p.queue.count == o.count, p.queue.first?.queueId == o.first else { return nil }
+        return o.playlist
+    }
 
     public init(zone: String) { self.zone = zone }
 
@@ -224,6 +276,16 @@ public struct Model {
             return []
         case .zones(let z):
             zones = z
+            return []
+        case .minis(let l):
+            minis = Array(l.prefix(miniMax))
+            return []
+        case .started(let playlist, let state):
+            if state.zone != zone { return [] }
+            let q = state.queue ?? []
+            origin = q.first.map { (zone: state.zone, playlist: playlist, first: $0.queueId, count: q.count) }
+            fetching = nil
+            apply(state, q, now)
             return []
         case .ws(.player(let state, let rev)):
             if state.zone != zone { return [] }

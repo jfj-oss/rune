@@ -145,10 +145,107 @@ final class KeyTests: XCTestCase {
         XCTAssertEqual(mapKey(k("q", cmd: true), queueOpen: true, filterEmpty: false), .closeQueue)
         XCTAssertEqual(mapKey(k("q", cmd: true), queueOpen: false, filterEmpty: true), .openQueue)
     }
+    func testNumberKeysAreTransportAndShiftedNumbersPlayPlaylists() {
+        let transport: [(String, Action)] = [("1", .prevSong), ("2", .restart), ("3", .next), ("4", .skipFifth)]
+        for (n, a) in transport {
+            XCTAssertEqual(mapKey(k(n), queueOpen: false, filterEmpty: true), a, n)
+            XCTAssertEqual(mapKey(k(n, cmd: true), queueOpen: true, filterEmpty: false), a, "Cmd+\(n) works with the queue open")
+        }
+        for n in ["5", "6", "7", "8", "9", "0"] { XCTAssertNil(mapKey(k(n), queueOpen: false, filterEmpty: true), n) }
+        for (n, i) in [("1", 0), ("2", 1), ("8", 7)] {
+            XCTAssertEqual(mapKey(k(n, shift: true), queueOpen: false, filterEmpty: true), .playPlaylist(i), "shift-\(n)")
+            XCTAssertEqual(mapKey(k(n, shift: true, cmd: true), queueOpen: true, filterEmpty: false), .playPlaylist(i))
+        }
+        for (s, i) in [("!", 0), ("@", 1), ("#", 2), ("$", 3), ("%", 4), ("^", 5), ("&", 6), ("*", 7)] {
+            XCTAssertEqual(mapKey(k(s, shift: true), queueOpen: false, filterEmpty: true), .playPlaylist(i), s)
+            XCTAssertEqual(mapKey(k(s), queueOpen: false, filterEmpty: true), .playPlaylist(i), "\(s) without the shift flag")
+        }
+        XCTAssertNil(mapKey(k("9", shift: true), queueOpen: false, filterEmpty: true))
+        XCTAssertEqual(mapKey(k("1"), queueOpen: true, filterEmpty: true), .type("1"), "the queue filter takes digits")
+        XCTAssertEqual(mapKey(k("!"), queueOpen: true, filterEmpty: true), .type("!"))
+    }
     func testEscapeGoesBackOneStepAtATime() {
         XCTAssertEqual(mapKey(k("escape"), queueOpen: true, filterEmpty: false), .clearFilter)
         XCTAssertEqual(mapKey(k("escape"), queueOpen: true, filterEmpty: true), .closeQueue)
         XCTAssertEqual(mapKey(k("escape"), queueOpen: false, filterEmpty: true), .hide)
+    }
+}
+
+final class MiniPlaylistTests: XCTestCase {
+    func started(_ zone: String, _ ids: [String]) -> WireState {
+        var w = WireState(); w.zone = zone; w.status = .playing; w.shuffle = true
+        w.queue = ids.map { QueueItem(queueId: $0, track: Track(title: $0, durationMs: 100_000)) }
+        return w
+    }
+
+    func testTheChosenPlaylistsDecodeAndAreCapped() {
+        let json = #"{"playlists":[{"id":"pl:a","name":"Alpha","color":3},{"id":"pl:b","name":"Beta","color":0}]}"#
+        let l = decodeMinis(Data(json.utf8))!
+        XCTAssertEqual(l, [MiniPlaylist(id: "pl:a", name: "Alpha", color: 3), MiniPlaylist(id: "pl:b", name: "Beta", color: 0)])
+        var m = Model(zone: "pc")
+        m.update(.minis(l), now: 0)
+        XCTAssertEqual(m.minis.map { $0.name }, ["Alpha", "Beta"])
+        m.update(.minis((0..<12).map { MiniPlaylist(id: "pl:\($0)") }), now: 0)
+        XCTAssertEqual(m.minis.count, miniMax)
+        XCTAssertEqual(decodePlaylistTrackIds(Data(#"{"id":"pl:a","tracks":[{"id":"t1"},{"id":"t2"}]}"#.utf8)), ["t1", "t2"])
+    }
+
+    func testTheServerPushIsRecognised() {
+        var m = Model(zone: "pc")
+        guard case .miniPlaylists = decodeEvent(#"{"type":"mini-playlists"}"#)! else { return XCTFail("not recognised") }
+        XCTAssertTrue(m.update(.ws(.miniPlaylists), now: 0).isEmpty)
+        guard case .other = decodeEvent(#"{"type":"library-changed"}"#)! else { return XCTFail("library-changed is other") }
+    }
+
+    func testADotRingsOnlyWhileTheQueueItMadeIsUnchanged() {
+        var m = Model(zone: "pc")
+        XCTAssertNil(m.playingPlaylist)
+        m.update(.started(playlist: "pl:a", started("pc", ["q1", "q2", "q3"])), now: 0)
+        XCTAssertEqual(m.playingPlaylist, "pl:a")
+        m.update(.fetched(started("pc", ["q1", "q2", "q3"]), rev: nil), now: 5)
+        XCTAssertEqual(m.playingPlaylist, "pl:a")
+        m.update(.fetched(started("pc", ["q1", "q3"]), rev: nil), now: 6)
+        XCTAssertNil(m.playingPlaylist, "a song removed: no longer the playlist's queue")
+        m.update(.started(playlist: "pl:b", started("pc", ["z1", "z2"])), now: 7)
+        XCTAssertEqual(m.playingPlaylist, "pl:b")
+        var n = Model(zone: "pc")
+        n.update(.started(playlist: "pl:a", started("pc", ["q1"])), now: 0)
+        _ = n.setZone("spotify:x")
+        XCTAssertNil(n.playingPlaylist)
+        n.update(.started(playlist: "pl:a", started("pc", ["q1"])), now: 1)
+        XCTAssertNil(n.playingPlaylist, "a Started for a zone not shown is ignored")
+    }
+
+    func testTheZoneNameCycles() {
+        let ids = ["pc", "soloist", "spotify:x"]
+        XCTAssertEqual(nextZone(ids, current: "pc"), "soloist")
+        XCTAssertEqual(nextZone(ids, current: "spotify:x"), "pc")
+        XCTAssertEqual(nextZone(ids, current: "gone"), "pc")
+        XCTAssertNil(nextZone([], current: "pc"))
+    }
+
+    func testThePlaylistPlayBodyIsTheWebsShuffle() {
+        XCTAssertEqual(playPlaylistBody(["a", "b"]), #"{"shuffle":true,"startIndex":0,"trackIds":["a","b"],"type":"play"}"#)
+    }
+}
+
+final class NumberKeyCommandTests: XCTestCase {
+    func model(position: Double = 10_000, status: Status = .playing) -> Model {
+        var m = Model(zone: "pc")
+        var w = WireState(); w.zone = "pc"; w.status = status; w.positionMs = position
+        w.queue = [QueueItem(queueId: "q1", track: Track(title: "A", durationMs: 200_000))]
+        m.update(.fetched(w, rev: nil), now: 1000)
+        return m
+    }
+    func testPrevSongForcesAndRestartSeeksToZero() {
+        XCTAssertEqual(requestFor(model(), .prevSong, now: 0)?.body, #"{"force":true,"type":"prev"}"#)
+        XCTAssertEqual(requestFor(model(), .restart, now: 0)?.body, #"{"positionMs":0,"type":"seek"}"#)
+    }
+    func testSkipAFifthAndPastTheEndTheNextSong() {
+        // 10 s reported at 1000 ms; at 3000 ms it is 12 s; +20 % of 200 s = 52 s
+        XCTAssertEqual(requestFor(model(), .skipFraction(0.2), now: 3000)?.body, #"{"positionMs":52000,"type":"seek"}"#)
+        XCTAssertEqual(requestFor(model(position: 170_000, status: .paused), .skipFraction(0.2), now: 9000)?.body, #"{"type":"next"}"#)
+        XCTAssertNil(requestFor(Model(zone: "pc"), .skipFraction(0.2), now: 0))
     }
 }
 

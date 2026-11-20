@@ -28,6 +28,11 @@ queue"); the panel shows state and sends commands. Every type is in `shared/src/
   that read is out). `scan` and `library-changed` are ignored. Events of other zones are ignored.
 - Client -> server frames: `{type:'presence', visible}` (the panel is on screen or not) and `{type:'viewing', zones:[zone]}`
   (so a Spotify Connect zone nobody looks at is not polled).
+- `GET /api/mini/playlists` -> `{ playlists: [{ id, name, color }] }`: the playlists chosen in big rune ("Show in rune mini" on a
+  playlist's page, or Settings -> rune mini), in order, at most 8, a playlist rune no longer has already left out. `color` is
+  0..7, an index into the panel's eight dot colours (`linux/app/src/look.rs` `DOTS`, `mac/Sources/RuneMini/Theme.swift`); the
+  server keeps it for as long as the playlist stays chosen and never gives two of them the same one. Read on connect, when the
+  panel is shown, and whenever the websocket says `{type:'mini-playlists'}` (no payload; a change made over HTTP).
 - Cover: `album.coverUrl` as given (a server path such as `/api/cover/<albumId>?size=200`, or an absolute Spotify CDN URL,
   fetched without the token), else `/api/cover/<albumId>?size=200`.
 - Position: `positionMs` is current at the time the event is received. The panel extrapolates it with its own monotonic clock
@@ -48,14 +53,29 @@ view at once; the websocket then confirms it).
 | UI | body |
 |---|---|
 | play/pause | `{type:'pause'}` while playing/loading, `{type:'resume'}` while paused, `{type:'jump', index}` (cursor or 0) when stopped with a queue |
-| next, previous | `{type:'next'}`, `{type:'prev'}` |
+| next, previous | `{type:'next'}`, `{type:'prev'}` (the server restarts the song instead when more than 3 s have played) |
+| key 1 | `{type:'prev', force:true}`: always the previous song (the server's `force` option; a Spotify Connect zone asks twice when past 3 s) |
+| key 2 | `{type:'seek', positionMs:0}` |
+| key 4 | `{type:'seek', positionMs: position + 0.2 * durationMs}`, or `{type:'next'}` when that passes the end |
 | seek | `{type:'seek', positionMs}`; relative seeks use the extrapolated position, clamped to `[0, duration - 500 ms]` |
 | volume | `{type:'volume', volume}` 0..100, whole numbers, clamped |
 | shuffle | `{type:'shuffle', on}` |
 | repeat | `{type:'repeat', mode}` cycling off -> all -> one -> off |
+| click a playlist dot, or Shift+1-8 | `GET /api/playlists/:id`, then `{type:'play', trackIds: <all of its track ids, in order>, startIndex: 0, shuffle: true}` on the zone shown (exactly what the web's Shuffle button sends). An empty playlist says so in the footer. |
 | click / Enter on a queue row | `{type:'jump', index}` (index in the full queue, not in the filtered list) |
 | remove | `{type:'remove', queueId}` |
 | drag to reorder | `{type:'move', queueId, toIndex}` |
+
+## The left edge: playlist dots
+
+One small coloured circle per chosen playlist (the panel has 22 px for them; more than six wrap into two columns). Hover shows
+the playlist's name and its key in the footer line; a click shuffle-plays it on the zone shown. The playlist whose shuffled
+play made the queue now shown gets a ring (the panel remembers the first queue id and the length of the queue the click
+returned; as soon as the queue is replaced or edited the ring goes, and a queue started elsewhere is not ringed). With
+nothing chosen there is one dim "+" whose hover says "choose playlists in rune -> Show in rune mini".
+
+The zones are not on the edge any more: the zone name in the footer ("playing · Linux PC speakers ›") is a button that
+cycles through the zones (the picker's order, wrapping) when there is more than one, and the tray menu still lists them.
 
 ## Keys (the panel has the keyboard while shown)
 
@@ -65,6 +85,11 @@ view at once; the websocket then confirms it).
 | Left / Right | previous / next | the same with an empty filter |
 | Shift+Left / Right | seek -/+ 10 s | the same with an empty filter |
 | Up / Down | volume -/+ 5 | pick the previous / next queue row |
+| 1 | previous song, always (never "restart this one") | typed into the filter (Ctrl/Cmd+1 still works) |
+| 2 | restart this song (seek to 0) | the same, Ctrl/Cmd+2 |
+| 3 | next song | the same, Ctrl/Cmd+3 |
+| 4 | skip forward 20 % of the song's length; past the end, the next song | the same, Ctrl/Cmd+4 |
+| Shift+1 - 8 | shuffle-play playlist N (dot N, left edge top to bottom); a US layout's `! @ # $ % ^ & *` count as Shift+1-8 | typed (Ctrl/Cmd+Shift+1-8 still play) |
 | S, R | shuffle, repeat | typed into the filter (Ctrl/Cmd+S, Ctrl/Cmd+R still toggle) |
 | Q or Tab | open the queue | Tab closes it (Ctrl/Cmd+Q toggles it either way; some desktops keep Tab for focus) |
 | typing | | filters the queue (every word must be in the title, an artist or the album) |

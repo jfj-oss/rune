@@ -4,7 +4,7 @@
 //!   {"cmd":"move","queue_id":"..","to":0}  {"cmd":"zone","zone":"pc"}  {"cmd":"quit"}
 //! and prints one JSON line per change of what the panel would show, plus `{"sent":..}` for each request it made.
 use rune_mini_core::commands::{map, UiCommand};
-use rune_mini_core::model::{Effect, Model, Msg, Repeat};
+use rune_mini_core::model::{Effect, Model, Msg, Repeat, ServerEvent};
 use rune_mini_core::net::{Net, NetEvent};
 use rune_mini_core::now_ms;
 use serde_json::{json, Value};
@@ -25,6 +25,7 @@ fn view(m: &Model) -> Value {
             "queue_ids": p.queue.iter().map(|q| q.queue_id.clone()).collect::<Vec<_>>(),
             "position_ms": p.position(now_ms()),
             "volume": p.volume, "shuffle": p.shuffle, "repeat": p.repeat.as_str(),
+            "playing_playlist": m.playing_playlist(),
         }}),
     }
 }
@@ -38,6 +39,7 @@ fn main() {
     let mut model = Model::new(&zone);
     net.viewing(vec![zone.clone()]);
     net.fetch_zones();
+    net.fetch_minis();
     net.fetch_state(&zone, None);
     let (cmd_tx, cmd_rx) = channel::<String>();
     std::thread::spawn(move || {
@@ -63,11 +65,13 @@ fn main() {
             let now = now_ms();
             let effects = match ev {
                 NetEvent::Conn(c) => model.update(Msg::Conn(c), now),
-                NetEvent::Ws(e) => model.update(Msg::Ws(e), now),
+                NetEvent::Ws(e) => { if matches!(e, ServerEvent::MiniPlaylists) { net.fetch_minis(); } model.update(Msg::Ws(e), now) }
                 NetEvent::Fetched { state, rev } => model.update(Msg::Fetched { state, rev }, now),
                 NetEvent::Zones(z) => { println!("{}", json!({"zones": z.iter().map(|z| z.id.clone()).collect::<Vec<_>>()})); model.update(Msg::Zones(z), now) }
                 NetEvent::Failed(e) => { println!("{}", json!({"failed": e})); vec![] }
                 NetEvent::Cover { .. } => vec![],
+                NetEvent::Minis(l) => { println!("{}", json!({"minis": l.iter().map(|p| json!({"id": p.id, "name": p.name, "color": p.color})).collect::<Vec<_>>()})); model.update(Msg::Minis(l), now) }
+                NetEvent::Started { playlist, state } => { println!("{}", json!({"started": playlist})); model.update(Msg::Started { playlist, state }, now) }
             };
             for e in effects { let Effect::Fetch { zone, rev } = e; net.fetch_state(&zone, rev); }
             emit(&model);
@@ -94,6 +98,38 @@ fn main() {
                     for e in model.set_zone(&s("zone")) { let Effect::Fetch { zone, rev } = e; net.fetch_state(&zone, rev); }
                     net.viewing(vec![model.zone.clone()]);
                     emit(&model);
+                    continue;
+                }
+                "key" => {
+                    // a key as the panel gets it: {"cmd":"key","name":"2","shift":true}: the mapped action, run as the panel runs it
+                    use rune_mini_core::keys::{map_key, Action, Key, SKIP_FRACTION};
+                    let k = Key { name: s("name"), shift: v.get("shift").and_then(|x| x.as_bool()).unwrap_or(false), text: Some(s("name")), ..Default::default() };
+                    let ui = match map_key(&k, false, true) {
+                        Some(Action::PrevSong) => Some(UiCommand::PrevSong),
+                        Some(Action::Restart) => Some(UiCommand::SeekTo(0.)),
+                        Some(Action::Next) => Some(UiCommand::Next),
+                        Some(Action::SkipFifth) => Some(UiCommand::SkipFraction(SKIP_FRACTION)),
+                        Some(Action::PlayPlaylist(i)) => {
+                            match model.minis.get(i) {
+                                Some(p) => { println!("{}", json!({"sent": {"playlist": p.id}})); net.shuffle_playlist(&model.zone, &p.id); }
+                                None => println!("{}", json!({"sent": null})),
+                            }
+                            continue;
+                        }
+                        _ => None,
+                    };
+                    match ui.and_then(|c| map(&model, &c, now_ms())) {
+                        Some(r) => { println!("{}", json!({"sent": r.body})); net.send(r); }
+                        None => println!("{}", json!({"sent": null})),
+                    }
+                    continue;
+                }
+                "playlist" => {
+                    // a click on dot N (0-based)
+                    match model.minis.get(f("index") as usize) {
+                        Some(p) => { println!("{}", json!({"sent": {"playlist": p.id}})); net.shuffle_playlist(&model.zone, &p.id); }
+                        None => println!("{}", json!({"sent": null})),
+                    }
                     continue;
                 }
                 "view" => { println!("{}", view(&model)); continue; }

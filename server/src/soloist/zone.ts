@@ -273,7 +273,7 @@ export class SoloistZone implements PlaybackZone {
         return;
       }
       case 'prev': {
-        const r = queuePrev(this.q, this.livePosition());
+        const r = queuePrev(this.q, this.livePosition(), cmd.force === true);
         this.q = r.state;
         if (r.restart) { await this.seekTo(0); return; }
         await this.startCurrent({ positionMs: 0, paused: this.status === 'paused' });

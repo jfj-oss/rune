@@ -44,7 +44,10 @@ export default function App() {
   // from a playlist, an album save) makes every open view refetch: the heart and
   // the Liked Songs page agree without a reload.
   useEffect(() => socket.on((e) => {
+    // another tab or the rune mini's chooser changed the mini's playlists
+    if (e.type === 'mini-playlists') void client.invalidateQueries({ queryKey: ['mini-playlists'] });
     if (e.type !== 'library-changed') return;
+    void client.invalidateQueries({ queryKey: ['mini-playlists'] });
     void client.invalidateQueries({ queryKey: ['liked'] });
     void client.invalidateQueries({ queryKey: ['playlist'] });
     void client.invalidateQueries({ queryKey: ['playlists'] });

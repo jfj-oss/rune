@@ -24,6 +24,12 @@ describe('parsePlayerCommand: commands the web client sends', () => {
     }
   });
 
+  it('accepts prev with force (always the previous song) and refuses a non-boolean', () => {
+    expect(accepted({ type: 'prev', force: true })).toEqual({ type: 'prev', force: true });
+    expect(accepted({ type: 'prev', force: false })).toEqual({ type: 'prev' });
+    rejected({ type: 'prev', force: 'yes' }, 'prev force must be true or false');
+  });
+
   it('accepts play with all its optional hand-over fields', () => {
     expect(accepted({ type: 'play', trackIds: ['l:a', 'sp:b'], startIndex: 2, positionMs: 74_000, paused: true })).toEqual({
       type: 'play',

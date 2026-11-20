@@ -17,7 +17,7 @@ process.env.LOG_LEVEL = 'silent';
 const probePath = process.env.RUNE_MINI_PROBE ?? join(homedir(), 'data/agent-tmp/rune-mini/target/debug/rune-mini-probe');
 const ready = haveAudioTools() && existsSync(probePath);
 
-interface View { conn: string; status?: string; index?: number; title?: string | null; queue?: string[]; queue_ids?: string[]; position_ms?: number; volume?: number; shuffle?: boolean; repeat?: string }
+interface View { conn: string; playing_playlist?: string | null; status?: string; index?: number; title?: string | null; queue?: string[]; queue_ids?: string[]; position_ms?: number; volume?: number; shuffle?: boolean; repeat?: string }
 
 class Probe {
   readonly lines: Record<string, unknown>[] = [];
@@ -27,6 +27,7 @@ class Probe {
     createInterface({ input: this.child.stdout }).on('line', (l) => { try { this.lines.push(JSON.parse(l)); } catch { /* not ours */ } });
   }
   view(): View | undefined { return [...this.lines].reverse().find((l) => 'view' in l)?.['view'] as View | undefined; }
+  minis(): { id: string; name: string; color: number }[] | undefined { return ([...this.lines].reverse().find((l) => 'minis' in l)?.['minis']) as { id: string; name: string; color: number }[] | undefined; }
   sent(): unknown[] { return this.lines.filter((l) => 'sent' in l).map((l) => l['sent']); }
   cmd(c: Record<string, unknown>) { this.child.stdin.write(`${JSON.stringify(c)}\n`); }
   waitView(what: string, pred: (v: View) => boolean, ms = 10_000) { return until(`the panel to show ${what}`, () => { const v = this.view(); return v && pred(v) ? v : undefined; }, ms); }
@@ -129,6 +130,84 @@ describe.skipIf(!ready)('rune mini (headless) against a real server', () => {
     await until('A2 removed', async () => !(await titles()).includes('A2'));
     await probe.waitView('A2 gone from the panel', (x) => !x.queue?.includes('A2') && x.queue?.length === 6);
     expect(probe.sent().length).toBeGreaterThan(5);
+  });
+
+  it('number keys: 1 previous song (always), 2 restart, 3 next, 4 skip 20 %', { timeout: 60_000 }, async () => {
+    // the library's only long song (12 s), three times over, so there is time to be well past the 3 s mark
+    const idx = async () => (await srv.state('pc')).index;
+    const pos = async () => (await srv.state('pc')).positionMs;
+    await srv.send('pc', { type: 'clear' });
+    await srv.send('pc', { type: 'play', trackIds: [...charlie, ...charlie, ...charlie], startIndex: 1 });
+    await probe.waitView('the 3-song queue playing', (x) => x.status === 'playing' && (x.queue?.length ?? 0) === 3 && x.index === 1);
+    const dur = (await srv.state('pc')).queue[1]!.track.durationMs;
+    expect(dur).toBeGreaterThan(10_000);
+    // key 1: well past 3 s, a plain "previous" would only restart this song; key 1 goes back a song
+    probe.cmd({ cmd: 'seek_to', ms: 6000 });
+    await until('6 s in', async () => ((await pos()) >= 5900 ? true : undefined));
+    probe.cmd({ cmd: 'key', name: '1' });
+    await until('the first song current', async () => ((await idx()) === 0 ? true : undefined));
+    expect(probe.sent().at(-1)).toEqual({ type: 'prev', force: true });
+    // key 2 starts it again
+    probe.cmd({ cmd: 'seek_to', ms: 6000 });
+    await until('6 s in again', async () => ((await pos()) >= 5900 ? true : undefined));
+    probe.cmd({ cmd: 'key', name: '2' });
+    await until('back at the start', async () => ((await idx()) === 0 && (await pos()) < 1500 ? true : undefined));
+    // key 4 skips a fifth of the song
+    probe.cmd({ cmd: 'key', name: '4' });
+    await until('about 20 % in', async () => { const p = await pos(); return (await idx()) === 0 && p >= 0.2 * dur - 1500 && p <= 0.2 * dur + 2500 ? true : undefined; });
+    // key 3 is the next song
+    probe.cmd({ cmd: 'key', name: '3' });
+    await until('the second song current', async () => ((await idx()) === 1 ? true : undefined));
+    // a skip that would pass the end goes to the next song
+    probe.cmd({ cmd: 'seek_to', ms: dur - 3000 });
+    await until('near the end', async () => ((await idx()) === 1 && (await pos()) >= dur - 3100 ? true : undefined));
+    probe.cmd({ cmd: 'key', name: '4' });
+    await until('the third song current', async () => ((await idx()) === 2 ? true : undefined));
+    await srv.send('pc', { type: 'pause' });
+  });
+
+  it('playlist dots: the choice reaches the panel live, a click shuffle-plays that playlist on the zone, the ring follows it', { timeout: 60_000 }, async () => {
+    const post = async (path: string, body: unknown) => (await (await fetch(`${srv.base}/api${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).json()) as { id: string };
+    const mine = await post('/playlists', { name: 'Mini Mix' });
+    const other = await post('/playlists', { name: 'Other Mix' });
+    await post(`/playlists/${encodeURIComponent(mine.id)}/tracks`, { trackIds: [...alpha, ...bravo] });
+    await post(`/playlists/${encodeURIComponent(other.id)}/tracks`, { trackIds: charlie });
+    expect(await probe.minis()).toEqual([]);
+
+    // choose two through the API: the probe is told by the websocket push and reads the list
+    for (const id of [mine.id, other.id]) expect((await fetch(`${srv.base}/api/mini/playlists/${encodeURIComponent(id)}`, { method: 'PUT' })).status).toBe(200);
+    await until('the panel to show both dots', () => (probe.minis()?.length === 2 ? true : undefined));
+    expect(probe.minis()!.map((p) => p.name)).toEqual(['Mini Mix', 'Other Mix']);
+    expect(new Set(probe.minis()!.map((p) => p.color)).size).toBe(2);
+
+    // a click on dot 0 starts that playlist shuffled
+    await srv.send('pc', { type: 'clear' });
+    probe.cmd({ cmd: 'playlist', index: 0 });
+    const s = await until('the server to have the shuffled queue', async () => { const st = await srv.state('pc'); return st.queue.length === 7 && st.shuffle ? st : undefined; });
+    expect(new Set(s.queue.map((q) => q.track.title))).toEqual(new Set(['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3']));
+    expect(s.status).toBe('playing');
+    const v = await probe.waitView('the ring on dot 0', (x) => x.playing_playlist === mine.id && (x.queue?.length ?? 0) === 7);
+    expect(v.shuffle).toBe(true);
+    expect(probe.sent()).toContainEqual({ playlist: mine.id });
+
+    // Shift+2 does the same for the second dot, and the ring moves
+    probe.cmd({ cmd: 'key', name: '2', shift: true });
+    await until('the other playlist queued', async () => (await srv.state('pc')).queue.length === charlie.length);
+    await probe.waitView('the ring on dot 1', (x) => x.playing_playlist === other.id);
+    // a key beyond the list sends nothing (and a bare 5 is not a key at all)
+    probe.cmd({ cmd: 'key', name: '5', shift: true });
+    await until('nothing sent for key 5', () => (probe.sent().at(-1) === null ? true : undefined));
+    // changing the queue by hand takes the ring away
+    await srv.send('pc', { type: 'clear' });
+    await probe.waitView('no ring after the queue changed', (x) => x.playing_playlist == null);
+
+    // removing one in big rune reaches the panel at once; a playlist deleted in rune is skipped
+    await fetch(`${srv.base}/api/mini/playlists/${encodeURIComponent(mine.id)}`, { method: 'DELETE' });
+    await until('one dot left', () => (probe.minis()?.length === 1 ? true : undefined));
+    expect(probe.minis()![0]!.id).toBe(other.id);
+    await fetch(`${srv.base}/api/playlists/${encodeURIComponent(other.id)}`, { method: 'DELETE' });
+    expect(((await (await fetch(`${srv.base}/api/mini/playlists`)).json()) as { playlists: unknown[] }).playlists).toEqual([]);
+    await srv.send('pc', { type: 'pause' });
   });
 
   it('a server restart: the panel shows offline, then reconnects by itself', { timeout: 60_000 }, async () => {

@@ -63,7 +63,7 @@ final class PanelView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        hits.removeAll(); rowRects.removeAll()
+        hits.removeAll(); rowRects.removeAll(); zoneRect = .zero
         let b = bounds
         let path = NSBezierPath(roundedRect: b.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10)
         Theme.paper.setFill(); path.fill()
@@ -77,16 +77,30 @@ final class PanelView: NSView {
         let playing = status == .playing || status == .loading
         let now = nowMs()
 
-        // the dots on the left edge: one per zone
-        var y: CGFloat = 21
-        for z in m.zoneList {
-            let on = z.id == m.model.zone
-            let d: CGFloat = on ? 9 : 7
-            Theme.dotColor(for: z.id).withAlphaComponent(on ? 1 : 0.7).setFill()
-            NSBezierPath(ovalIn: NSRect(x: 12 - d / 2, y: y - d / 2, width: d, height: d)).fill()
-            let id = z.id
-            hits.append((NSRect(x: 2, y: y - 8, width: 20, height: 16), { [weak self] in self?.mini.setZone(id) }))
-            y += 14
+        // the dots on the left edge: one per chosen playlist; a click shuffle-plays it on the zone shown
+        let ring = m.model.playingPlaylist
+        let minis = m.model.minis
+        let perCol = 6
+        dotSlots = []
+        if minis.isEmpty {
+            // nothing chosen yet: one dim "+" says where to choose
+            let r = NSRect(x: 5, y: 15, width: 14, height: 14)
+            Theme.rule.setStroke(); let o = NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5)); o.lineWidth = 1; o.stroke()
+            text("+", Theme.small, Theme.dim, in: NSRect(x: 5, y: 15, width: 14, height: 14), align: .center)
+            dotSlots.append((r, "choose playlists in rune \u{2192} Show in rune mini"))
+        }
+        for (i, pl) in minis.enumerated() {
+            // more than six wrap into a second column
+            let cx: CGFloat = minis.count > perCol ? 8 + CGFloat(i / perCol) * 16 : 12
+            let cy: CGFloat = 21 + CGFloat(i % perCol) * 19
+            let on = pl.id == ring
+            let d: CGFloat = on ? 7 : 9
+            if on { Theme.ink.setStroke(); let o = NSBezierPath(ovalIn: NSRect(x: cx - 7, y: cy - 7, width: 14, height: 14).insetBy(dx: 0.5, dy: 0.5)); o.lineWidth = 1; o.stroke() }
+            Theme.dotColor(key: pl.color).withAlphaComponent(on ? 1 : 0.75).setFill()
+            NSBezierPath(ovalIn: NSRect(x: cx - d / 2, y: cy - d / 2, width: d, height: d)).fill()
+            let r = NSRect(x: cx - 8, y: cy - 8, width: 16, height: 16)
+            hits.append((r, { [weak self] in self?.mini.playMini(i) }))
+            dotSlots.append((r, i < 8 ? "\(pl.name) \u{b7} shift+\(i + 1)" : pl.name))
         }
 
         // the cover
@@ -157,8 +171,20 @@ final class PanelView: NSView {
             if let c = cmd { hits.append((r.insetBy(dx: -4, dy: -2), { [weak self] in self?.mini.command(c) })) }
             rx -= w + 12
         }
-        let note = m.notice ?? hoverZoneName ?? "\(status.rawValue) \u{b7} \(m.zoneName)"
-        text(note, Theme.small, m.notice != nil ? Theme.error : Theme.dim, in: NSRect(x: x0, y: fy, width: max(0, rx - x0 - 4), height: 14))
+        if let note = m.notice ?? hoverNote {
+            text(note, Theme.small, m.notice != nil ? Theme.error : Theme.dim, in: NSRect(x: x0, y: fy, width: max(0, rx - x0 - 4), height: 14))
+        } else {
+            // "playing · Linux PC speakers ›": the zone name cycles through the zones when there are several
+            let lead = "\(status.rawValue) \u{b7} "
+            let multi = m.zoneList.count > 1
+            let zn = multi ? "\(m.zoneName) \u{203a}" : m.zoneName
+            let lw = width(lead, Theme.small)
+            text(lead, Theme.small, Theme.dim, in: NSRect(x: x0, y: fy, width: lw, height: 14))
+            let zr = NSRect(x: x0 + lw, y: fy, width: max(0, min(width(zn, Theme.small), rx - x0 - lw - 4)), height: 14)
+            text(zn, Theme.small, hoverZoneName ? Theme.ink : Theme.dim, in: zr)
+            zoneRect = zr
+            if multi { hits.append((zr.insetBy(dx: -2, dy: -2), { [weak self] in self?.mini.cycleZone() })) }
+        }
 
         guard m.queueOpen else { return }
 
@@ -194,10 +220,12 @@ final class PanelView: NSView {
         }
     }
 
-    // MARK: hover on dots (the zone's name in the footer)
+    // MARK: hover on dots (the playlist's name in the footer) and on the zone name
 
-    private var hoverZone: String?
-    private var hoverZoneName: String? { hoverZone.flatMap { id in mini.zoneList.first { $0.id == id }?.name } }
+    private var dotSlots: [(rect: NSRect, label: String)] = []
+    private var zoneRect = NSRect.zero
+    private var hoverNote: String?
+    private var hoverZoneName = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -207,15 +235,11 @@ final class PanelView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        var z: String?
-        if p.x < 24 {
-            let i = Int(((p.y - 21) / 14).rounded())
-            let list = mini.zoneList
-            if i >= 0 && i < list.count { z = list[i].id }
-        }
-        if z != hoverZone { hoverZone = z; needsDisplay = true }
+        let note = dotSlots.first { $0.rect.contains(p) }?.label
+        let onZone = mini.zoneList.count > 1 && zoneRect.insetBy(dx: -2, dy: -2).contains(p)
+        if note != hoverNote || onZone != hoverZoneName { hoverNote = note; hoverZoneName = onZone; needsDisplay = true }
     }
-    override func mouseExited(with event: NSEvent) { if hoverZone != nil { hoverZone = nil; needsDisplay = true } }
+    override func mouseExited(with event: NSEvent) { if hoverNote != nil || hoverZoneName { hoverNote = nil; hoverZoneName = false; needsDisplay = true } }
 
     // MARK: mouse
 

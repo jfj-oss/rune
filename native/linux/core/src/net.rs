@@ -6,7 +6,8 @@
 //! the websocket handshake, for such a proxy. Nothing else is sent.
 use crate::commands::{encode, Request};
 use crate::config::{normalize_url, ws_url};
-use crate::model::{Conn, ServerEvent, WireState, ZoneInfo};
+use crate::commands::play_playlist_body;
+use crate::model::{Conn, MiniPlaylist, ServerEvent, WireState, ZoneInfo};
 use crate::reconnect;
 use std::io::Read;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -25,6 +26,9 @@ pub enum NetEvent {
     /// A command or a read failed (HTTP error or no answer); the text is for a one-line notice.
     Failed(String),
     Cover { key: String, bytes: Vec<u8> },
+    Minis(Vec<MiniPlaylist>),
+    /// A playlist dot was used: the zone's new state, and which playlist made it.
+    Started { playlist: String, state: WireState },
 }
 
 pub type Sink = Arc<dyn Fn(NetEvent) + Send + Sync>;
@@ -33,6 +37,9 @@ enum Job {
     Command(Request),
     State { zone: String, rev: Option<String> },
     Zones,
+    Minis,
+    /// Shuffle-play this playlist on this zone.
+    Playlist { zone: String, id: String },
     Stop,
 }
 
@@ -77,6 +84,27 @@ impl Client {
     }
     pub fn zones(&self) -> Result<Vec<ZoneInfo>, String> {
         self.req("GET", "/api/zones").call().map_err(Self::describe)?.into_json().map_err(|e| e.to_string())
+    }
+    pub fn minis(&self) -> Result<Vec<MiniPlaylist>, String> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            playlists: Vec<MiniPlaylist>,
+        }
+        Ok(self.req("GET", "/api/mini/playlists").call().map_err(Self::describe)?.into_json::<Reply>().map_err(|e| e.to_string())?.playlists)
+    }
+    /// The track ids of a playlist, in its order (GET /api/playlists/:id, the page the web's Shuffle button plays from).
+    pub fn playlist_track_ids(&self, id: &str) -> Result<Vec<String>, String> {
+        #[derive(serde::Deserialize)]
+        struct T {
+            id: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Detail {
+            #[serde(default)]
+            tracks: Vec<T>,
+        }
+        let d: Detail = self.req("GET", &format!("/api/playlists/{}", encode(id))).call().map_err(Self::describe)?.into_json().map_err(|e| e.to_string())?;
+        Ok(d.tracks.into_iter().map(|t| t.id).collect())
     }
     pub fn command(&self, r: &Request) -> Result<WireState, String> {
         self.req("POST", &r.path()).send_json(r.body.clone()).map_err(Self::describe)?.into_json().map_err(|e| e.to_string())
@@ -128,6 +156,14 @@ impl Net {
     pub fn fetch_zones(&self) {
         let _ = self.jobs.send(Job::Zones);
     }
+    pub fn fetch_minis(&self) {
+        let _ = self.jobs.send(Job::Minis);
+    }
+    /// A playlist dot: read the playlist, then start it shuffled on `zone` (the web's Shuffle button: `play` with the
+    /// track ids and `shuffle: true`). Comes back as `NetEvent::Started`.
+    pub fn shuffle_playlist(&self, zone: &str, id: &str) {
+        let _ = self.jobs.send(Job::Playlist { zone: zone.to_string(), id: id.to_string() });
+    }
     /// Tell the server which zone is looked at (Spotify Connect zones nobody views are not polled).
     pub fn viewing(&self, zones: Vec<String>) {
         let _ = self.ctl.send(Ctl::Viewing(zones));
@@ -165,6 +201,18 @@ fn worker(c: Client, rx: Receiver<Job>, sink: Sink) {
             },
             Job::State { zone, rev } => match c.get_state(&zone) {
                 Ok(state) => sink(NetEvent::Fetched { state, rev }),
+                Err(e) => sink(NetEvent::Failed(e)),
+            },
+            Job::Minis => match c.minis() {
+                Ok(l) => sink(NetEvent::Minis(l)),
+                Err(e) => sink(NetEvent::Failed(e)),
+            },
+            Job::Playlist { zone, id } => match c.playlist_track_ids(&id) {
+                Ok(ids) if ids.is_empty() => sink(NetEvent::Failed("that playlist is empty".into())),
+                Ok(ids) => match c.command(&Request { zone, body: play_playlist_body(&ids) }) {
+                    Ok(state) => sink(NetEvent::Started { playlist: id, state }),
+                    Err(e) => sink(NetEvent::Failed(e)),
+                },
                 Err(e) => sink(NetEvent::Failed(e)),
             },
             Job::Zones => match c.zones() {

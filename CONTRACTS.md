@@ -37,6 +37,7 @@ from the PC browser and an iPhone (installable web app).
 | `GET /zones` | `{ id: Zone, name: string, kind: 'pc'\|'browser'\|'spotify' }[]` (browser zones are not listed: each page names its own, `browser:<id>`) |
 | `GET /spotify/status` | `{connected,user}` |
 | `GET /playlists` · `GET /playlists/:id` | `PlaylistSummary[]` · `PlaylistDetail` (Liked Songs = `pl:sp:liked`) |
+| `GET /mini/playlists` · `PUT /mini/playlists` body `{ ids }` · `PUT/DELETE /mini/playlists/:id` | `{ playlists: MiniPlaylist[] }`: the playlists shown as dots on the rune mini, in order, at most 8 (own `mini_playlists` table, not the pins); a change is announced as the `mini-playlists` event |
 | `GET /albums/:id/saved` · `POST/DELETE /albums/:id/save` | `{saved}` · save / unsave a Spotify album |
 | `POST /scan` | starts rescan |
 | `POST /albums/:id/match` body `{ musicbrainzReleaseId }` | manual fix match |

@@ -47,6 +47,7 @@ import { registerCors } from './cors.js';
 import { createClientPresence } from './presence.js';
 import { registerSavedRoute } from './saved.js';
 import { registerPinRoutes } from './pins.js';
+import { registerMiniPlaylistRoutes } from './miniPlaylists.js';
 import { registerLikedRoutes } from './liked.js';
 import { removeSpotifyPlaylistTracks } from './spotifyPlaylistWrite.js';
 import { registerFrameRoutes } from './frame.js';
@@ -1143,6 +1144,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       registerBrowseRoutes(r, db);
       registerSavedRoute(r, db);
       registerPinRoutes(r, db, { onChange: () => broadcast({ type: 'library-changed' }) });
+      registerMiniPlaylistRoutes(r, db, { onChange: () => broadcast({ type: 'mini-playlists' }) });
       registerLikedRoutes(r, db, spotify ? {
         api: spotify.api,
         connected: async () => (await spotify.auth.status()).connected,

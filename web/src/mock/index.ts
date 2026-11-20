@@ -1,4 +1,4 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, Track } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, MiniPlaylist, Page, Track } from '@liner/shared';
 import type { RunePlaylistDetail, RunePlaylistSummary } from '../lib/playlists';
 import type { AlbumQuery, MatchCandidate, SearchResults, ZoneInfo } from '../lib/types';
 import { registerTitles } from './covers';
@@ -20,7 +20,21 @@ export const MOCK_ZONES: ZoneInfo[] = [
 const pins = new Set<string>();
 const withPin = <T extends { id: string }>(x: T): T & { pinned?: boolean } => (pins.has(x.id) ? { ...x, pinned: true } : x);
 
+const miniIds: string[] = [];
+const miniList = (): MiniPlaylist[] => {
+  const names = new Map(mockPlaylists.list().map((p) => [p.id, p.name]));
+  return miniIds.filter((id) => names.has(id)).map((id, i) => ({ id, name: names.get(id)!, color: i % 8 }));
+};
+
 export const mockApi = {
+  async miniPlaylists(): Promise<MiniPlaylist[]> { return wait(miniList(), 60); },
+  async setMiniPlaylist(id: string, on: boolean): Promise<MiniPlaylist[]> {
+    const at = miniIds.indexOf(id);
+    if (on && at < 0) miniIds.push(id);
+    if (!on && at >= 0) miniIds.splice(at, 1);
+    return wait(miniList(), 60);
+  },
+  async setMiniPlaylists(ids: string[]): Promise<MiniPlaylist[]> { miniIds.splice(0, miniIds.length, ...ids); return wait(miniList(), 60); },
   async setPinned(id: string, pinned: boolean): Promise<void> { if (pinned) pins.add(id); else pins.delete(id); return wait(undefined, 60); },
   async albums(q: AlbumQuery): Promise<Page<AlbumSummary>> {
     let list = SUMMARIES.filter(inLibrary);

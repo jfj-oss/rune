@@ -1,4 +1,4 @@
-import type { Album, AlbumDetails, AlbumSummary, Artist, Page, PlayerCommand, PlayerState, TabReport, Zone } from '@liner/shared';
+import type { Album, AlbumDetails, AlbumSummary, Artist, MiniPlaylist, Page, PlayerCommand, PlayerState, TabReport, Zone } from '@liner/shared';
 import type { RunePlaylistDetail, RunePlaylistSummary } from './lib/playlists';
 import { mockCover } from './mock/covers';
 import type { AlbumQuery, MatchCandidate, PlayItem, SearchResults, UpdateInstallResult, UpdateStatus, ZoneInfo } from './lib/types';
@@ -211,6 +211,21 @@ export const api = {
   async setPinned(id: string, pinned: boolean): Promise<void> {
     if (isMock) return (await mock()).mockApi.setPinned(id, pinned);
     await http(`/pins/${encodeURIComponent(id)}`, { method: pinned ? 'PUT' : 'DELETE' });
+  },
+  /** The playlists chosen for the rune mini, in order (rune's own list). */
+  async miniPlaylists(): Promise<MiniPlaylist[]> {
+    if (isMock) return (await mock()).mockApi.miniPlaylists();
+    return (await http<{ playlists: MiniPlaylist[] }>('/mini/playlists')).playlists;
+  },
+  /** Put a playlist on / take it off the mini; answers with the new list. */
+  async setMiniPlaylist(id: string, on: boolean): Promise<MiniPlaylist[]> {
+    if (isMock) return (await mock()).mockApi.setMiniPlaylist(id, on);
+    return (await http<{ playlists: MiniPlaylist[] }>(`/mini/playlists/${encodeURIComponent(id)}`, { method: on ? 'PUT' : 'DELETE' })).playlists;
+  },
+  /** Replace the mini's list (reorder / remove). */
+  async setMiniPlaylists(ids: string[]): Promise<MiniPlaylist[]> {
+    if (isMock) return (await mock()).mockApi.setMiniPlaylists(ids);
+    return (await http<{ playlists: MiniPlaylist[] }>('/mini/playlists', { method: 'PUT', body: JSON.stringify({ ids }) })).playlists;
   },
   async trackLiked(id: string): Promise<boolean> {
     if (isMock) return (await mock()).mockApi.trackLiked(id);

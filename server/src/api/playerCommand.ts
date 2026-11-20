@@ -77,8 +77,10 @@ export function parsePlayerCommand(body: unknown): ParsedPlayerCommand {
     case 'pause':
     case 'resume':
     case 'next':
-    case 'prev':
       return { ok: true, command: { type } };
+    case 'prev':
+      if (body.force !== undefined && typeof body.force !== 'boolean') return fail('prev force must be true or false');
+      return { ok: true, command: body.force === true ? { type, force: true } : { type } };
     case 'seek':
       if (!isFiniteNumber(body.positionMs) || body.positionMs < 0) {
         return fail('seek positionMs must be a number of milliseconds (0 or more)');

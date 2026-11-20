@@ -197,7 +197,8 @@ export type PlayerCommand =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'next' }
-  | { type: 'prev' }
+  /** `force`: always the previous song, never "restart this one" after 3 s (the rune mini's key 1). */
+  | { type: 'prev'; force?: boolean }
   | { type: 'seek'; positionMs: number }
   | { type: 'jump'; index: number }
   | { type: 'remove'; queueId: string }
@@ -217,7 +218,16 @@ export type ServerEvent =
   /** First message on every connection: the web build the server serves now (a tab built from another one is told to reload). */
   | { type: 'hello'; build: string | null }
   | { type: 'scan'; progress: ScanProgress }
-  | { type: 'library-changed' };
+  | { type: 'library-changed' }
+  /** The playlists chosen for the rune mini changed (GET /api/mini/playlists has the new list). */
+  | { type: 'mini-playlists' };
+
+/** A playlist chosen for the rune mini (GET /api/mini/playlists). `color` is the dot colour index 0-7, stable while it stays chosen. */
+export interface MiniPlaylist {
+  id: string;
+  name: string;
+  color: number;
+}
 
 /** Websocket /api/ws messages client → server */
 export type ClientEvent =

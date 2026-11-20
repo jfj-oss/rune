@@ -281,7 +281,7 @@ export class QueueDriver implements PlaybackZone {
         return this.moveTo(r.state);
       }
       case 'prev': {
-        const r = Q.prev(this.q, this.livePosition(this.now()));
+        const r = Q.prev(this.q, this.livePosition(this.now()), cmd.force === true);
         if (r.restart) return this.seek(0);
         return this.moveTo(r.state);
       }

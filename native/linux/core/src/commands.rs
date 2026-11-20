@@ -10,6 +10,12 @@ pub enum UiCommand {
     Pause,
     Next,
     Prev,
+    /// Always the previous song (never "restart this one"): the server's `prev` with `force`.
+    PrevSong,
+    /// Start the song again (seek to 0).
+    Restart,
+    /// Skip forward by this fraction of the song's length; past the end it is the next song.
+    SkipFraction(f64),
     /// Absolute position in ms.
     SeekTo(f64),
     /// Relative to the position now, in ms.
@@ -38,6 +44,12 @@ impl Request {
     pub fn path(&self) -> String {
         format!("/api/player/{}", encode(&self.zone))
     }
+}
+
+/// The body of "shuffle-play this playlist": what the web's Shuffle button sends (store/player.ts `startOn`): the whole list,
+/// shuffle on, the zone mixes it itself (first song included).
+pub fn play_playlist_body(track_ids: &[String]) -> Value {
+    json!({"type": "play", "trackIds": track_ids, "startIndex": 0, "shuffle": true})
 }
 
 /// Percent-encode a path segment (zone ids contain ':' and Spotify device ids may contain more).
@@ -75,6 +87,21 @@ pub fn map(model: &Model, cmd: &UiCommand, now: u64) -> Option<Request> {
         UiCommand::Pause => json!({"type": "pause"}),
         UiCommand::Next => json!({"type": "next"}),
         UiCommand::Prev => json!({"type": "prev"}),
+        UiCommand::PrevSong => json!({"type": "prev", "force": true}),
+        UiCommand::Restart => json!({"type": "seek", "positionMs": 0.0}),
+        UiCommand::SkipFraction(f) => {
+            let p = p?;
+            let dur = p.current()?.track.duration_ms;
+            if dur <= 0. {
+                return None;
+            }
+            let to = p.position(now) + f * dur;
+            if to >= dur {
+                json!({"type": "next"})
+            } else {
+                json!({"type": "seek", "positionMs": to.round()})
+            }
+        }
         UiCommand::SeekTo(ms) => json!({"type": "seek", "positionMs": ms.max(0.).round()}),
         UiCommand::SeekBy(d) => {
             let p = p?;
@@ -167,6 +194,28 @@ mod tests {
         assert_eq!(map(&m, &UiCommand::Jump(3), 0).unwrap().body, json!({"type": "jump", "index": 3}));
         assert_eq!(map(&m, &UiCommand::Remove("q2".into()), 0).unwrap().body, json!({"type": "remove", "queueId": "q2"}));
         assert_eq!(map(&m, &UiCommand::Move { queue_id: "q2".into(), to: 0 }, 0).unwrap().body, json!({"type": "move", "queueId": "q2", "toIndex": 0}));
+    }
+
+    #[test]
+    fn number_key_commands() {
+        let m = model(Status::Playing, 50., false, Repeat::Off);
+        assert_eq!(map(&m, &UiCommand::PrevSong, 0).unwrap().body, json!({"type": "prev", "force": true}));
+        assert_eq!(map(&m, &UiCommand::Restart, 0).unwrap().body, json!({"type": "seek", "positionMs": 0.0}));
+        // reported 10 s at t=1000 of a 200 s song; at t=3000 it is 12 s; +20 % (40 s) = 52 s
+        assert_eq!(map(&m, &UiCommand::SkipFraction(0.2), 3000).unwrap().body, json!({"type": "seek", "positionMs": 52000.0}));
+        // past 160 s the 20 % jump passes the end: the next song
+        let late = model(Status::Paused, 50., false, Repeat::Off);
+        let mut late = late;
+        late.player.as_mut().unwrap().position_ms = 170_000.;
+        assert_eq!(map(&late, &UiCommand::SkipFraction(0.2), 9000).unwrap().body, json!({"type": "next"}));
+        assert!(map(&Model::new("pc"), &UiCommand::SkipFraction(0.2), 0).is_none());
+    }
+
+    #[test]
+    fn a_playlist_dot_sends_the_shuffle_play_the_web_sends() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(play_playlist_body(&ids), json!({"type": "play", "trackIds": ["a", "b"], "startIndex": 0, "shuffle": true}));
+        assert_eq!(encode("pl:rune:1b2-c"), "pl%3Arune%3A1b2-c");
     }
 
     #[test]

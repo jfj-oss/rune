@@ -305,6 +305,14 @@ describe('next / prev', () => {
     expect(r.state.index).toBe(1);
   });
 
+  it('prev with force goes back a song even after 3 seconds (the rune mini key 1)', () => {
+    const q = play(createQueue(), items(3), 2);
+    const r = prev(q, PREV_RESTART_THRESHOLD_MS + 60_000, true);
+    expect(r.restart).toBe(false);
+    expect(r.state.index).toBe(1);
+    expect(prev(play(createQueue(), items(3), 0), 60_000, true).restart).toBe(true); // nothing before the first one
+  });
+
   it('prev at the first track restarts it', () => {
     const r = prev(play(createQueue(), items(3), 0), 500);
     expect(r.restart).toBe(true);
