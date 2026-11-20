@@ -151,6 +151,19 @@ impl Rune {
         });
     }
 
+    pub fn apply_match(&mut self, album: &str, mb: &str, cx: &mut Context<Self>) {
+        let a = album.to_string();
+        self.spawn_send(cx, "POST", format!("/albums/{}/match", commands::encode(album)), Some(json!({"musicbrainzReleaseId": mb})), move |me, r, cx| match r {
+            Ok(_) => {
+                me.data.album.remove(&a);
+                me.forget_json(&format!("/albums/{}", commands::encode(&a)));
+                for l in me.data.albums.values_mut() { l.at = None; }
+                me.say("Match updated", cx);
+            }
+            Err(_) => me.say("Could not apply that match", cx),
+        });
+    }
+
     // ------------------------------------------------------------------ pins, likes, radio, scan
 
     pub fn set_pin(&mut self, id: &str, pin: bool, playlist: bool, cx: &mut Context<Self>) {
@@ -228,6 +241,8 @@ impl Rune {
                 }
             }
             MenuAct::Rescan => self.rescan(cx),
+            MenuAct::FixMatch(id) => { self.menu = None; self.dialog = Some(Dialog::FixMatch { album: id, sel: None }); cx.notify(); }
+            MenuAct::CopyText(t, what) => { cx.write_to_clipboard(ClipboardItem::new_string(t)); self.say(what, cx); }
             MenuAct::DuplicatesPage => self.go(Route::Duplicates, cx),
             MenuAct::SettingsPage => self.go(Route::Settings, cx),
         }

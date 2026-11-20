@@ -1,6 +1,7 @@
 //! The pages (web `pages/*`). A page is a list of rows drawn through GPUI's virtual `list`, so only what is on screen is laid
 //! out, and the page's scroll position is kept while the app runs.
 pub mod album;
+pub mod album_sections;
 pub mod albums;
 pub mod artist;
 pub mod artists;

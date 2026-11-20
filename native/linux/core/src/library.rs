@@ -99,6 +99,21 @@ pub struct Album {
     pub release_date: Option<String>,
     #[serde(default)]
     pub match_confidence: Option<f64>,
+    #[serde(default)]
+    pub credits: Vec<Credit>,
+    #[serde(default)]
+    pub folder_path: Option<String>,
+}
+
+/// One credit of an album (`Credit` in shared/src/index.ts): a person, a role, and the tracks it was on (none = the whole album).
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Credit {
+    pub artist: ArtistRef,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub track_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]

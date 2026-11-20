@@ -97,6 +97,21 @@ impl Rune {
             "np" => { self.np_open = b("open"); cx.notify(); json!({"ok": true}) }
             "tracks_sort" => { self.tracks_sort = match s("sort").as_str() { "artist" => "artist", "album" => "album", "duration" => "duration", "added" => "added", _ => "title" }; self.tracks_desc = v.get("desc").and_then(|x| x.as_bool()); cx.notify(); json!({"ok": true}) }
             "zone" => { let z = if s("id") == "own" { self.own_zone.clone() } else { s("id") }; self.set_zone(&z, cx); json!({"ok": true})}
+            "fix_match" => { self.run_menu_act(MenuAct::FixMatch(s("id")), cx); json!({"ok": true}) }
+            "preview" => {
+                // the n-th score (kind "score") or quote (kind "quote") of an album's stored details, as a click on it would open
+                let path = format!("/albums/{}/details", rune_mini_core::commands::encode(&s("id")));
+                let d = self.data.json.get(&path).and_then(|c| c.slot.ready()).and_then(|v| serde_json::from_value::<crate::albumlogic::Details>((**v).clone()).ok());
+                let i = n("n") as usize;
+                self.preview = d.as_ref().and_then(|d| match s("kind").as_str() {
+                    "quote" => d.quotes.get(i).map(|q| crate::preview::quote_preview(q, Some(d))),
+                    "text" => d.reception.as_ref().map(|r| crate::preview::text_preview("Critical reception", "Critical reception", r)),
+                    _ => d.scores.get(i).map(|sc| crate::preview::score_preview(sc, Some(d))),
+                });
+                cx.notify();
+                json!({"ok": self.preview.is_some()})
+            }
+            "prose" => { let k = s("key"); if !self.prose_open.remove(&k) { self.prose_open.insert(k); } cx.notify(); json!({"ok": true}) }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

@@ -1,6 +1,8 @@
 //! rune desktop: the native (GPUI) frontend for the rune music server. See native/desktop/PORT-PLAN.md.
 mod actions;
+mod albumlogic;
 mod audio;
+mod charts;
 mod audio_zone;
 mod covers;
 mod data;
@@ -8,12 +10,14 @@ mod logo;
 mod menu;
 mod nowplaying;
 mod pages;
+mod preview;
 mod queue;
 mod route;
 mod rune;
 mod shell;
 mod shortcuts;
 mod testhook;
+mod text;
 mod theme;
 mod util;
 mod waveform;

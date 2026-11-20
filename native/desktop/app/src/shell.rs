@@ -50,6 +50,7 @@ impl Render for Rune {
             .child(self.playerbar(window, cx))
             .children(self.queue_open.then(|| self.queue_drawer(window, cx)))
             .children(self.np_open.then(|| self.now_playing(window, cx)))
+            .children(self.preview.is_some().then(|| self.preview_overlay(window, cx)))
             .children(self.zone_open.then(|| self.zone_menu(vw, cx)))
             .children(self.signal_open.then(|| self.signal_menu(vw, cx)))
             .children(self.menu.is_some().then(|| self.menu_overlay(window, vw, cx)))

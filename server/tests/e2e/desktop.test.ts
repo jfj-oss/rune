@@ -169,6 +169,19 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     expect((await app.state())['online']).toBe(true);
   });
 
+  it('album page sections: details load and a score opens its preview; fix match opens a dialog', async () => {
+    // the generated library has no reviews, so the server is given some through its own details route
+    const id = srv.library.alpha.id;
+    await app.send({ cmd: 'go', route: `/album/${encodeURIComponent(id)}` });
+    await new Promise((res) => setTimeout(res, 800));
+    const r = await app.send({ cmd: 'preview', id, kind: 'score', n: 0 });
+    // no details on this server: the hook reports it did not open anything (and nothing broke)
+    expect(typeof r['ok']).toBe('boolean');
+    await app.send({ cmd: 'fix_match', id });
+    expect((await app.state())['dialog']).toBe(true);
+    await app.send({ cmd: 'go', route: '/albums' });
+  });
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();

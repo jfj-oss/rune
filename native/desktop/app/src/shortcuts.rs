@@ -36,6 +36,7 @@ impl Rune {
         let k = &ev.keystroke;
         let key = k.key.to_lowercase();
         if key == "escape" {
+            if self.preview.is_some() { self.preview = None; cx.notify(); return; }
             if self.pl_rename.is_some() { self.pl_rename = None; self.pl_rename_sub = None; window.focus(&self.focus.clone(), cx); cx.notify(); return; }
             if self.dialog.is_some() { self.dialog = None; cx.notify(); return; }
             if self.menu.is_some() || self.zone_open || self.signal_open { self.menu = None; self.zone_open = false; self.signal_open = false; cx.notify(); return; }

@@ -156,6 +156,38 @@ impl Rune {
                             cx.notify();
                         })))))
             }
+            Dialog::FixMatch { album, sel } => {
+                let (album, sel) = (album.clone(), sel.clone());
+                let cands = match self.ensure_json(&format!("/albums/{}/candidates", rune_mini_core::commands::encode(&album)), cx) { crate::data::Slot::Ready(v) => v.as_array().cloned(), _ => None };
+                let mut list = v_flex().id("fm-list").gap(px(8.)).max_h(px(380.)).overflow_y_scroll();
+                match cands {
+                    None => { for _ in 0..3 { list = list.child(div().h(px(58.)).rounded(px(12.)).bg(surface())); } }
+                    Some(l) if l.is_empty() => list = list.child(div().text_color(c(TEXT2)).child("No candidate releases were found.")),
+                    Some(l) => for (i, cd) in l.iter().enumerate() {
+                        let s = |k: &str| cd.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                        let (mb, title) = (s("musicbrainzReleaseId"), s("title"));
+                        let on = sel.as_deref() == Some(mb.as_str());
+                        let tracks = cd.get("trackCount").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+                        let sub = format!("{}{} \u{b7} {}{}", s("artist"), cd.get("year").and_then(|y| y.as_i64()).map(|y| format!(" \u{b7} {y}")).unwrap_or_default(), crate::util::plural(tracks, "track"), if s("country").is_empty() { String::new() } else { format!(" \u{b7} {}", s("country")) });
+                        let pct = (cd.get("score").and_then(|x| x.as_f64()).unwrap_or(0.) * 100.).round() as i64;
+                        let (a2, mb2) = (album.clone(), mb.clone());
+                        list = list.child(h_flex().id(SharedString::from(format!("cand-{i}"))).gap(px(14.)).px(px(14.)).py(px(12.)).items_center().rounded(px(12.)).cursor_pointer().border_1()
+                            .border_color(if on { c(ACCENT) } else { line() }).bg(if on { ca(ACCENT, 0.12) } else { surface() }).hover(|s| s.border_color(ca(ACCENT, 0.5)))
+                            .child(div().size(px(18.)).flex_none().rounded_full().border_1().border_color(if on { c(ACCENT) } else { wh(0.35) }).flex().items_center().justify_center().child(div().when(on, |d| d.size(px(10.)).rounded_full().bg(c(ACCENT)))))
+                            .child(v_flex().flex_1().min_w_0().child(div().truncate().text_size(px(14.5)).font_weight(w(700.)).child(title)).child(div().truncate().text_size(px(12.5)).text_color(c(TEXT2)).child(sub)))
+                            .child(div().text_size(px(13.)).font_weight(w(700.)).text_color(c(TEXT2)).child(format!("{pct}%")))
+                            .on_click(cx.listener(move |this, _, _, cx| { this.dialog = Some(Dialog::FixMatch { album: a2.clone(), sel: Some(mb2.clone()) }); cx.notify(); })));
+                    }
+                }
+                let (a3, sel3) = (album.clone(), sel.clone());
+                scrim.child(v_flex().w(px(520.)).p(px(24.)).gap(px(16.)).bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(16.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(div().text_size(px(20.)).font_weight(w(700.)).child("Fix match"))
+                    .child(div().text_size(px(13.5)).text_color(c(TEXT2)).child("Pick the release that matches your files. rune will re-fetch credits, cover art and reviews for it."))
+                    .child(list)
+                    .child(h_flex().gap(px(10.)).justify_end()
+                        .child(div().id("dlg-cancel").child(btn("Cancel", None, false)).on_click(cx.listener(|this, _, _, cx| { this.dialog = None; cx.notify(); })))
+                        .child(div().id("dlg-apply").child(btn("Apply", None, true)).when(sel.is_none(), |d| d.opacity(0.4)).on_click(cx.listener(move |this, _, _, cx| { if let Some(mb) = sel3.clone() { this.dialog = None; this.apply_match(&a3, &mb, cx); } })))))
+            }
             Dialog::DeletePlaylist { id, name } => {
                 let (id, name) = (id.clone(), name.clone());
                 let n2 = name.clone();

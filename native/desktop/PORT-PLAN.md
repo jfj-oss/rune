@@ -208,3 +208,16 @@ sinc resampler. Tests: unit (timeline, resampler, mixer, TabPlayer with a mock e
 server in real time (gapless across 44.1 and 48 kHz, pause, ranged seek, a missing file), and the desktop e2e (the server's zone
 follows the app: play, skip, seek, pause, songs ending by themselves). NOT verified here: the cpal path on a real sound device
 and on macOS (CoreAudio), because the rig is silent by rule; bit-perfect output stays out of scope (CoreAudio resamples).
+
+## Phase 3 results: the album page, fully
+
+Checked in web | native pairs (tools/pair.sh; native paths in the report): hero with the average rating (glass stars drawn as paths,
+tally, chips on open), sticky tab strip with scroll-spy (Tracks / Review / About / Credits; the strip is also drawn as an
+overlay once the hero has scrolled away), Review (reception prose with Read more, scores column, pull quotes, "Read in context"),
+About (facts, editions table, other versions, artist notes with the verified pill, background), Credits (grouped, merged,
+track references), Your plays (tiles + sparkline path), Connections (the "With A (role), B" line is the run-based text element:
+links wrap across lines), More by, Fix match (banner, menu item, candidate dialog, apply) and the review preview sheet (score,
+excerpt, stored text, where the reception mentions the critic with the term marked; "Open original" hands the address to the
+browser instead of an iframe). The pure rules (scores, credits, sentences, dates) are ported with tests in `albumlogic.rs`.
+Known differences: the section cards' glass backdrop and the ASCII hero (phase 6); the review preview has no embedded "Original" view.
+The seeded fixture (reviews, credits, plays) lives in `server/tests/e2e/desktopServe.ts` (RUNE_DESKTOP_SEED=0 to leave it out).
