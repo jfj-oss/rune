@@ -45,11 +45,12 @@ fn rgba(c: [f32; 3], a: f32) -> Hsla {
 }
 
 enum Job { Dust(usize, usize), Waves { w: usize, h: usize, scale: f32, t: f32, cols: Arc<Vec<foil::Col>> } }
-enum Done { Dust { w: usize, h: usize, bytes: Vec<u8> }, Waves { w: usize, h: usize, bytes: Vec<u8> } }
+enum Done { Dust { w: usize, h: usize, bytes: Vec<u8> }, Fade { w: usize, h: usize, bytes: Vec<u8> }, Waves { w: usize, h: usize, bytes: Vec<u8> } }
 
 pub struct Backdrop {
     pub prefs: Prefs,
     dust: Option<(Arc<RenderImage>, usize, usize)>,
+    fade: Option<(Arc<RenderImage>, usize, usize)>,
     /// the physical size the dust image was made for (or is being made for)
     dust_for: Option<(u32, u32)>,
     waves: Option<(Arc<RenderImage>, usize, usize)>,
@@ -92,7 +93,7 @@ impl Backdrop {
             cx.background_executor().timer(wait).await;
         });
         Backdrop {
-            prefs, dust: None, dust_for: None, waves: None, waves_in_flight: false, cols: Arc::new(vec![]), tx, t: t0, last: Instant::now(),
+            prefs, dust: None, fade: None, dust_for: None, waves: None, waves_in_flight: false, cols: Arc::new(vec![]), tx, t: t0, last: Instant::now(),
             was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, _tasks: vec![recv, tick],
         }
     }
@@ -111,6 +112,12 @@ impl Backdrop {
                 let new = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)]));
                 if let Some((old, _, _)) = self.dust.replace((new, w, h)) { let _ = window.drop_image(old); }
             }
+            Done::Fade { w, h, bytes } => {
+                if !self.prefs.on { return; }
+                let Some(rgba) = image::RgbaImage::from_raw(w as u32, h as u32, bytes) else { return };
+                let new = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)]));
+                if let Some((old, _, _)) = self.fade.replace((new, w, h)) { let _ = window.drop_image(old); }
+            }
             Done::Waves { w, h, bytes } => {
                 self.waves_in_flight = false;
                 if !self.prefs.on { return; }
@@ -126,6 +133,7 @@ impl Backdrop {
     fn drop_images(&mut self, window: &mut Window) {
         if let Some((i, _, _)) = self.dust.take() { let _ = window.drop_image(i); }
         if let Some((i, ..)) = self.waves.take() { let _ = window.drop_image(i); }
+        if let Some((i, ..)) = self.fade.take() { let _ = window.drop_image(i); }
         self.dust_for = None;
         self.shown = None;
     }
@@ -177,9 +185,9 @@ impl Render for Backdrop {
         if !self.prefs.on || self.size.0 == 0. { return root; }
         let t = if self.prefs.reduce { foil::STILL_T } else { self.t };
         let (w, h, scale) = (self.size.0, self.size.1, self.scale);
-        let (dust, waves) = (self.dust.clone(), self.waves.clone());
+        let (dust, fade, waves) = (self.dust.clone(), self.fade.clone(), self.waves.clone());
         let edge = |a: f32| ca(0x05091a, a);
-        root.child(canvas(|_, _, _| (), move |bounds, _, window, _| paint(window, bounds, scale, t, dust, waves)).absolute().top_0().left_0().size_full())
+        root.child(canvas(|_, _, _| (), move |bounds, _, window, _| paint(window, bounds, scale, t, dust, fade, waves)).absolute().top_0().left_0().size_full())
             // the plain tint that keeps text readable, and a dark vignette at the edges
             .child(div().absolute().top_0().left_0().size_full().bg(ca(0x030612, 0.28)))
             .child(div().absolute().top_0().left_0().w_full().h(relative(0.3)).bg(linear_gradient(180., linear_color_stop(edge(0.5), 0.), linear_color_stop(edge(0.), 1.))))
@@ -191,13 +199,18 @@ impl Render for Backdrop {
 
 fn run(j: Job, tx: &futures::channel::mpsc::UnboundedSender<Done>, moon: &mut foil::MoonCache) -> Result<(), ()> {
     let d = match j {
-        Job::Dust(w, h) => Done::Dust { w, h, bytes: foil::dust_image(w, h) },
+        Job::Dust(w, h) => {
+            // the fade to black belongs to the screen (not to the drifting dust image): its size is the dust image minus the margin
+            let c = foil::DUST_CYCLE as usize;
+            tx.unbounded_send(Done::Fade { w: w - c, h: h - c, bytes: foil::fade_image(w - c, h - c) }).map_err(|_| ())?;
+            Done::Dust { w, h, bytes: foil::dust_image(w, h) }
+        }
         Job::Waves { w, h, scale, t, cols } => { let mut b = vec![0u8; w * h * 4]; foil::render_waves(w, h, scale, t, &cols, &mut b, moon); Done::Waves { w, h, bytes: b } }
     };
     tx.unbounded_send(d).map_err(|_| ())
 }
 
-fn paint(window: &mut Window, bounds: Bounds<Pixels>, scale: f32, t: f32, dust: Option<(Arc<RenderImage>, usize, usize)>, waves: Option<(Arc<RenderImage>, usize, usize)>) {
+fn paint(window: &mut Window, bounds: Bounds<Pixels>, scale: f32, t: f32, dust: Option<(Arc<RenderImage>, usize, usize)>, fade: Option<(Arc<RenderImage>, usize, usize)>, waves: Option<(Arc<RenderImage>, usize, usize)>) {
     let o = bounds.origin;
     let at = |x: f32, y: f32| point(o.x + px(x), o.y + px(y));
     window.paint_quad(fill(bounds, rgba(foil::BASE, 1.0))); // (the dust image covers it; the base shows before the image is ready)
@@ -206,6 +219,11 @@ fn paint(window: &mut Window, bounds: Bounds<Pixels>, scale: f32, t: f32, dust: 
         // screen pixel (x, y) shows image pixel (x - shift + CYCLE, y + shift): the image sits at (shift - CYCLE, -shift)
         let origin = at((shift - foil::DUST_CYCLE) as f32 / scale, -(shift as f32) / scale);
         let image_bounds = Bounds { origin, size: size(px(iw as f32 / scale), px(ih as f32 / scale)) };
+        let _ = window.paint_image(bounds, image_bounds, Corners::default(), img, 0, false);
+    }
+    if let Some((img, iw, ih)) = fade {
+        // the fade to black over the dust (the waves and the moon dim themselves)
+        let image_bounds = Bounds { origin: at(0., 0.), size: size(px(iw as f32 / scale), px(ih as f32 / scale)) };
         let _ = window.paint_image(bounds, image_bounds, Corners::default(), img, 0, false);
     }
     if let Some((img, iw, ih)) = waves {
