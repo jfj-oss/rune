@@ -23,7 +23,7 @@ if (process.env.RUNE_MINI_PLAYLISTS) {
   };
   const names = (process.env.RUNE_MINI_PLAYLISTS === '1' ? 'Morning Drive,Late Night,Focus,Sunday Records' : process.env.RUNE_MINI_PLAYLISTS!).split(',');
   const pools = [srv.library.alpha.tracks, srv.library.bravo.tracks, srv.library.charlie.tracks];
-  for (const [i, name] of names.entries()) await mk(name, pools[i % 3].map((t) => t.id));
+  for (const [i, name] of names.entries()) await mk(name, pools[i % 3]!.map((t) => t.id));
 }
 console.log(`READY ${srv.base}`);
 const stop = async () => { await srv.stop(); process.exit(0); };

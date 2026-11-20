@@ -220,7 +220,7 @@ function MiniCard() {
           ))}
         </ol>
       )}
-      <p className="muted minipick__hint">Up to {MINI_MAX}. Drag to reorder; in the mini, keys 1–{MINI_MAX} play them in this order.</p>
+      <p className="muted minipick__hint">Up to {MINI_MAX}. Drag to reorder; in the mini, Shift+1–{MINI_MAX} play them in this order.</p>
     </section>
   );
 }
