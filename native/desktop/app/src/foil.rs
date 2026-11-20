@@ -12,7 +12,7 @@
 //! are logical pixels divided by the viewport height; `asp` is width / height.
 
 /// Frames per second of the wave overlay (bands, glints, moon). The bands drift a few pixels a second; more frames cost more CPU.
-pub const FPS: f32 = 4.0;
+pub const FPS: f32 = 10.0;
 /// The still frame (reduced motion).
 pub const STILL_T: f32 = 40.0;
 pub const T_WRAP: f32 = 100000.0;
