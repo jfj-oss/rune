@@ -190,6 +190,42 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await app.send({ cmd: 'zone', id: 'pc' });
   });
 
+  // ---------------------------------------------------------------- phase 4: playlists complete, hotkeys, radio
+  it('smart playlist: the rules go to the server in its own form and the playlist fills itself', async () => {
+    await app.send({ cmd: 'smart_create', name: 'Alpha by title', all: true, sort: 'title', rules: [{ field: 'artist', op: 'contains', a: 'E2E' }] });
+    const p = await until('the smart playlist', async () => (await plist()).find((x) => x.name === 'Alpha by title'));
+    const d = await detail(p.id);
+    expect(d.tracks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('m3u8: a playlist exports to a file and the file imports as a new playlist', async () => {
+    const src = (await plist()).find((x) => x.name === 'Renamed in place');
+    expect(src).toBeTruthy();
+    const file = join(work, 'out.m3u8');
+    await app.send({ cmd: 'export_m3u8', id: src!.id, name: 'Renamed in place', path: file });
+    await until('the file', () => existsSync(file) && readFileSync(file, 'utf8').includes('#EXTM3U'));
+    await app.send({ cmd: 'import_m3u8', path: file });
+    const imp = await until('the imported playlist', async () => (await plist()).find((x) => x.name === 'out'));
+    expect(imp.trackCount).toBe(2);
+  });
+
+  it('hotkeys: a playlist key is kept on the server and opens the playlist', async () => {
+    const p = (await plist()).find((x) => x.name === 'out')!;
+    await app.send({ cmd: 'hotkey', id: p.id, name: 'out', key: 'k' });
+    await until('the stored key', async () => { const h = (await (await fetch(`${srv.base}/api/settings/hotkeys`)).json()) as { hotkeys: { playlistKeys: Record<string, { id: string }> } | null }; return h.hotkeys?.playlistKeys?.['k']?.id === p.id ? h : undefined; });
+    await app.send({ cmd: 'go', route: '/albums' });
+    await app.send({ cmd: 'press', key: 'k' });
+    await until('the playlist page', async () => String((await app.state())['route']).startsWith('playlist:'));
+    await app.send({ cmd: 'hotkey', id: p.id, name: 'out', key: '' });
+    await app.send({ cmd: 'go', route: '/albums' });
+  });
+
+  it('radio and discover pages load without a Spotify connection', async () => {
+    for (const r of ['/radio', '/discover']) { await app.send({ cmd: 'go', route: r }); await new Promise((res) => setTimeout(res, 400)); }
+    expect((await app.state())['online']).toBe(true);
+    await app.send({ cmd: 'go', route: '/albums' });
+  });
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();

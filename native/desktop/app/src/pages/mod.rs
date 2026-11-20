@@ -5,10 +5,12 @@ pub mod album_sections;
 pub mod albums;
 pub mod artist;
 pub mod artists;
+pub mod discover;
 pub mod genres;
 pub mod home;
 pub mod tracks;
 pub mod playlist;
+pub mod radio;
 pub mod playlists;
 pub mod search;
 pub mod soon;
@@ -49,6 +51,8 @@ impl Rune {
             Route::Playlist(id) => self.playlist_page(id, cw, window, cx),
             Route::Search(q) => self.search_page(q, cw, window, cx),
             Route::Home => self.home_page(cw, window, cx),
+            Route::Discover => self.discover_page(cw, window, cx),
+            Route::Radio => self.radio_page(cw, window, cx),
             Route::Tracks => self.tracks_page(cw, window, cx),
             Route::Genres => self.genres_page(cw, window, cx),
             Route::Genre(g) => self.genre_page(g, cw, window, cx),

@@ -170,13 +170,18 @@ impl Rune {
         });
     }
 
-    pub fn create_playlist(&mut self, name: String, ids: Vec<String>, cx: &mut Context<Self>) {
-        self.spawn_send(cx, "POST", "/playlists".into(), Some(json!({"name": name})), move |me, r, cx| match r {
+    pub fn create_playlist(&mut self, name: String, ids: Vec<String>, cx: &mut Context<Self>) { self.create_playlist_with(name, String::new(), ids, cx); }
+
+    pub fn create_playlist_with(&mut self, name: String, desc: String, ids: Vec<String>, cx: &mut Context<Self>) {
+        let mut body = json!({"name": name});
+        if !desc.is_empty() { body["description"] = json!(desc); }
+        let go_there = ids.is_empty();
+        self.spawn_send(cx, "POST", "/playlists".into(), Some(body), move |me, r, cx| match r {
             Ok(v) => {
                 let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
                 let nm = v.get("name").and_then(|x| x.as_str()).unwrap_or_default().to_string();
                 me.data.playlists = None;
-                if ids.is_empty() { me.say(format!("Created \u{201c}{nm}\u{201d}"), cx); } else { me.add_to_playlist(&id, &nm, ids, cx); }
+                if ids.is_empty() { me.say(format!("Created \u{201c}{nm}\u{201d}"), cx); if go_there && !id.is_empty() { me.go(Route::Playlist(id.clone()), cx); } } else { me.add_to_playlist(&id, &nm, ids, cx); }
             }
             Err(_) => me.say("Could not create the playlist \u{2014} is the rune server reachable?", cx),
         });
@@ -235,6 +240,62 @@ impl Rune {
             }
             Err(_) => me.say("Could not apply that match", cx),
         });
+    }
+
+    // ------------------------------------------------------------------ m3u8
+
+    /// Export a playlist as an .m3u8 file: asks where to save it, or writes it to `path` (tests).
+    pub fn export_m3u8(&mut self, id: &str, name: &str, path: Option<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let (client, pid) = (self.client.clone(), id.to_string());
+        let file = format!("{}.m3u8", name.chars().map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c }).collect::<String>().trim());
+        let file = if file == ".m3u8" { "playlist.m3u8".to_string() } else { file };
+        cx.spawn(async move |this, cx| {
+            let dest = match path {
+                Some(p) => Some(p),
+                None => {
+                    let dir = std::env::var("HOME").map(|h| std::path::PathBuf::from(h).join("Downloads")).unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let rx = cx.update(|app| app.prompt_for_new_path(&dir, Some(&file)));
+                    rx.await.ok().and_then(|r| r.ok()).flatten()
+                }
+            };
+            let Some(dest) = dest else { return };
+            let r = cx.background_spawn(async move {
+                let mut reply = client.open_stream(&format!("/api/playlists/{}/export.m3u8", rune_mini_core::commands::encode(&pid)), 0)?;
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut reply.reader, &mut text).map_err(|e| e.to_string())?;
+                std::fs::write(&dest, text).map_err(|e| e.to_string())?;
+                Ok::<_, String>(dest)
+            }).await;
+            let _ = this.update(cx, |me, cx| match r { Ok(p) => me.say(format!("Saved {}", p.file_name().and_then(|f| f.to_str()).unwrap_or("the playlist")), cx), Err(e) => me.say(format!("Could not export: {e}"), cx) });
+        }).detach();
+    }
+
+    /// Import an .m3u8: asks for the file, or reads `path` (tests); the playlist is made from the tracks rune finds.
+    pub fn import_m3u8(&mut self, path: Option<std::path::PathBuf>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let src = match path {
+                Some(p) => Some(p),
+                None => {
+                    let rx = cx.update(|app| app.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Import a playlist".into()) }));
+                    rx.await.ok().and_then(|r| r.ok()).flatten().and_then(|v| v.into_iter().next())
+                }
+            };
+            let Some(src) = src else { return };
+            let name = src.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported playlist").to_string();
+            let text = cx.background_spawn(async move { std::fs::read_to_string(&src) }).await;
+            let _ = this.update(cx, move |me, cx| match text {
+                Err(e) => me.say(format!("Could not read that file: {e}"), cx),
+                Ok(content) => me.spawn_send(cx, "POST", "/playlists/import".into(), Some(json!({"content": content, "name": name})), |me, r, cx| match r {
+                    Ok(v) => {
+                        me.data.playlists = None;
+                        let (n, sk) = (v.get("imported").and_then(|x| x.as_u64()).unwrap_or(0) as usize, v.get("skipped").and_then(|x| x.as_u64()).unwrap_or(0) as usize);
+                        me.say(format!("Imported {}{}", plural(n, "track"), if sk > 0 { format!(", {sk} not found") } else { String::new() }), cx);
+                        if let Some(id) = v.get("id").and_then(|x| x.as_str()) { me.go(Route::Playlist(id.to_string()), cx); }
+                    }
+                    Err(e) => me.say(format!("Could not import: {e}"), cx),
+                }),
+            });
+        }).detach();
     }
 
     // ------------------------------------------------------------------ pins, likes, radio, scan
@@ -296,6 +357,7 @@ impl Rune {
             MenuAct::GoAlbum(id) => self.go(Route::Album(id), cx),
             MenuAct::GoArtist(id) => self.go(Route::Artist(id), cx),
             MenuAct::Radio { from, id } => self.start_radio(from, &id, cx),
+            MenuAct::SongRadio { id, title, artist } => { self.menu = None; self.song_radio = Some((id, title, artist)); cx.notify(); }
             MenuAct::Like { id, on } => self.set_liked(&id, on, cx),
             MenuAct::PinAlbum { id, pin } => self.set_pin(&id, pin, false, cx),
             MenuAct::PinPlaylist { id, pin } => self.set_pin(&id, pin, true, cx),
@@ -313,7 +375,10 @@ impl Rune {
                     self.replace_route(Route::Albums(q), cx);
                 }
             }
+            MenuAct::ExportM3u8 { id, name } => { self.menu = None; self.export_m3u8(&id, &name, None, cx); }
+            MenuAct::ImportM3u8 => { self.menu = None; self.import_m3u8(None, cx); }
             MenuAct::Rescan => self.rescan(cx),
+            MenuAct::Smart(act) => { self.menu = None; self.pending_smart = Some(act); cx.notify(); }
             MenuAct::FixMatch(id) => { self.menu = None; self.dialog = Some(Dialog::FixMatch { album: id, sel: None }); cx.notify(); }
             MenuAct::CopyText(t, what) => { cx.write_to_clipboard(ClipboardItem::new_string(t)); self.say(what, cx); }
             MenuAct::DuplicatesPage => self.go(Route::Duplicates, cx),

@@ -26,6 +26,7 @@ impl Render for Rune {
         self.note_frame();
         self.covers.begin_frame();
         self.covers.evict(window);
+        if let Some(a) = self.pending_smart.take() { self.smart_act(a, window, cx); }
         let vw = f32::from(window.viewport_size().width);
         let collapsed = self.sidebar_collapsed;
         let sw = side_w(collapsed);
@@ -50,11 +51,12 @@ impl Render for Rune {
             .child(self.playerbar(window, cx))
             .children(self.queue_open.then(|| self.queue_drawer(window, cx)))
             .children(self.np_open.then(|| self.now_playing(window, cx)))
+            .children(self.song_radio.is_some().then(|| self.song_radio_sheet(window, cx)))
             .children(self.preview.is_some().then(|| self.preview_overlay(window, cx)))
             .children(self.zone_open.then(|| self.zone_menu(vw, cx)))
             .children(self.signal_open.then(|| self.signal_menu(vw, cx)))
+            .children(self.dialog.is_some().then(|| self.dialog_overlay(window, cx)))
             .children(self.menu.is_some().then(|| self.menu_overlay(window, vw, cx)))
-            .children(self.dialog.is_some().then(|| self.dialog_overlay(cx)))
             .children(self.toast.as_ref().map(|t| {
                 div().absolute().left_0().right_0().bottom(px(NPBAR_H + 18.)).flex().justify_center().child(
                     div().px(px(18.)).py(px(10.)).rounded_full().bg(panel()).border_1().border_color(wh(0.14)).text_size(px(13.5)).child(t.text.clone()))

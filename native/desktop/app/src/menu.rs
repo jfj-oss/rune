@@ -26,7 +26,7 @@ impl Rune {
 
     /// The shared track menu (TrackMenu.tsx): radio, play next, add to queue, add to playlist, like, go to album / artist.
     pub fn track_menu_ids(&self, ids: Vec<String>, what: String, album: Option<String>, artist: Option<String>, spotify: bool, liked_id: String) -> PopMenu {
-        let mut items = vec![];
+        let mut items = vec![item("radio", "Song radio \u{b7} new to you", MenuAct::SongRadio { id: liked_id.clone(), title: what.clone(), artist: String::new() })];
         if !spotify { items.push(item("waves", "Start radio from your library", MenuAct::Radio { from: "track", id: liked_id.clone() })); }
         items.push(item("list-start", "Play next", MenuAct::PlayNext(ids.clone())));
         items.push(item("list-end", "Add to queue", MenuAct::AddToQueue(ids.clone())));
@@ -115,9 +115,10 @@ impl Rune {
 
     pub fn open_new_playlist(&mut self, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let name = cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx).placeholder("Playlist name"));
+        let desc = cx.new(|cx| gpui_kit::component::input::InputState::new(window, cx).placeholder("Description (optional)"));
         let f = name.read(cx).focus_handle(cx);
         window.focus(&f, cx);
-        self.dialog = Some(Dialog::NewPlaylist { name, ids });
+        self.dialog = Some(Dialog::NewPlaylist { name, desc, ids });
         cx.notify();
     }
 
@@ -135,27 +136,35 @@ impl Rune {
         }).detach();
     }
 
-    pub fn dialog_overlay(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn dialog_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let scrim = div().absolute().size_full().top_0().left_0().bg(ca(0x06060a, 0.62)).flex().items_center().justify_center().occlude();
+        if matches!(self.dialog, Some(Dialog::Smart(_))) { return self.smart_overlay(scrim, window, cx); }
         match self.dialog.as_ref().unwrap() {
-            Dialog::NewPlaylist { name, ids } => {
+            Dialog::NewPlaylist { name, desc, ids } => {
                 let ids2 = ids.clone();
+                let desc2 = desc.clone();
                 let name2 = name.clone();
                 let n = ids.len();
                 scrim.child(v_flex().w(px(420.)).p(px(24.)).gap(px(16.)).bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(16.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(div().text_size(px(20.)).font_weight(w(700.)).child("New playlist"))
                     .when(n > 0, |d| d.child(div().text_size(px(13.)).text_color(c(TEXT2)).child(format!("{n} {} will be added", if n == 1 { "track" } else { "tracks" }))))
                     .child(div().h(px(40.)).px(px(14.)).flex().items_center().rounded_full().bg(surface()).border_1().border_color(line()).child(div().flex_1().child(Input::new(name).appearance(false).cleanable(false))))
+                    .child(div().h(px(40.)).px(px(14.)).flex().items_center().rounded_full().bg(surface()).border_1().border_color(line()).child(div().flex_1().child(Input::new(desc).appearance(false).cleanable(false))))
+                    .child(div().text_size(px(12.5)).text_color(c(TEXT3)).child("Mix local files and Spotify tracks freely \u{2014} it all plays from one queue."))
+                    .when(n == 0, |d| d.child(h_flex().id("dlg-smart").gap(px(6.)).items_center().text_size(px(13.)).font_weight(w(600.)).text_color(c(ACCENT2)).cursor_pointer().child(icon("sparkles", 14., c(ACCENT2))).child("Make a smart playlist from rules instead")
+                        .on_click(cx.listener(|this, _, _, cx| { this.dialog = None; this.dialog_smart(cx); }))))
                     .child(h_flex().gap(px(10.)).justify_end()
                         .child(div().id("dlg-cancel").child(btn("Cancel", None, false)).on_click(cx.listener(|this, _, _, cx| { this.dialog = None; cx.notify(); })))
                         .child(div().id("dlg-ok").child(btn("Create", Some("plus"), true)).on_click(cx.listener(move |this, _, _, cx| {
                             let v = name2.read(cx).value().trim().to_string();
                             if v.is_empty() { return; }
                             this.dialog = None;
-                            this.create_playlist(v, ids2.clone(), cx);
+                            let d = desc2.read(cx).value().trim().to_string();
+                            this.create_playlist_with(v, d, ids2.clone(), cx);
                             cx.notify();
                         })))))
             }
+            Dialog::Smart(_) => scrim,
             Dialog::FixMatch { album, sel } => {
                 let (album, sel) = (album.clone(), sel.clone());
                 let cands = match self.ensure_json(&format!("/albums/{}/candidates", rune_mini_core::commands::encode(&album)), cx) { crate::data::Slot::Ready(v) => v.as_array().cloned(), _ => None };

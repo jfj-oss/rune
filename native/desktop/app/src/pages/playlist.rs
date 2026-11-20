@@ -60,6 +60,7 @@ impl Rune {
         let pin = PopItem { icon: if s.pinned { "pin-off" } else { "pin" }, label: if s.pinned { "Unpin".into() } else { "Pin to Library".into() }, act: MenuAct::PinPlaylist { id: s.id.clone(), pin: !s.pinned }, danger: false, chevron: false, dot: false, sub: false };
         let ids: Vec<String> = d.tracks.iter().map(|t| t.id.clone()).collect();
         let mut items = vec![PopItem { icon: "list-end", label: "Play next".into(), act: MenuAct::PlayNext(ids), danger: false, chevron: false, dot: false, sub: false }, pin];
+        if s.is_rune() { items.push(PopItem { icon: "download", label: "Export as .m3u8".into(), act: MenuAct::ExportM3u8 { id: s.id.clone(), name: s.name.clone() }, danger: false, chevron: false, dot: false, sub: false }); }
         let _ = &mut items;
         let (sid, sname) = (s.id.clone(), s.name.clone());
         let dot = || div().mx(px(9.)).text_color(c(TEXT3)).child("\u{b7}");
@@ -75,6 +76,15 @@ impl Rune {
                 .child(div().id("p-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_playlist(&i1, false, 0, cx))))
                 .child(div().id("p-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| this.play_playlist(&i2, true, 0, cx))))
                 .child(div().id("p-queue").child(btn("Queue", Some("plus"), false)).on_click(cx.listener(move |this, _, _, cx| this.enqueue_playlist(&i3, cx))))
+                .children(rune.then(|| {
+                    let (hid, hname) = (s.id.clone(), s.name.clone());
+                    let current = self.playlist_key_of(&s.id);
+                    let listening = self.hotkey_listen.as_ref().is_some_and(|l| l.0 == s.id);
+                    let (hid2, cur2) = (hid.clone(), current.clone());
+                    h_flex().gap(px(6.)).child(div().id("p-hotkey").child(btn(&if listening { "Press a key\u{2026}".to_string() } else { match &current { Some(k) => format!("Hotkey  {}", k.to_uppercase()), None => "Hotkey".into() } }, Some("keyboard"), listening))
+                        .on_click(cx.listener(move |this, _, _, cx| { this.hotkey_listen = if this.hotkey_listen.is_some() { None } else { Some((hid.clone(), hname.clone())) }; cx.notify(); })))
+                        .children(cur2.filter(|_| !listening).map(|_| div().id("p-hotkey-x").child(btn_icon40("x")).on_click(cx.listener(move |this, _, _, cx| { let nm = this.data.playlist.get(&hid2).and_then(|c| c.slot.ready()).map(|d| d.summary.name.clone()).unwrap_or_default(); this.set_playlist_key(&hid2, &nm, "", cx); }))))
+                }))
                 .child(div().id("p-more").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     let p = ev.position();
                     let mut its = items.clone();

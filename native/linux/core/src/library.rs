@@ -247,6 +247,10 @@ pub fn cover_path(album_id: &str, cover_url: Option<&str>, size: &str) -> String
         if u.starts_with("http://") || u.starts_with("https://") {
             return u.to_string();
         }
+        // a station's logo is served by its own route, not the cover route
+        if u.starts_with("/api/") && !u.starts_with("/api/cover/") {
+            return u.to_string();
+        }
     }
     format!("/api/cover/{}?size={}", crate::commands::encode(album_id), size)
 }

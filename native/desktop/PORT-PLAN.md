@@ -221,3 +221,18 @@ excerpt, stored text, where the reception mentions the critic with the term mark
 browser instead of an iframe). The pure rules (scores, credits, sentences, dates) are ported with tests in `albumlogic.rs`.
 Known differences: the section cards' glass backdrop and the ASCII hero (phase 6); the review preview has no embedded "Original" view.
 The seeded fixture (reviews, credits, plays) lives in `server/tests/e2e/desktopServe.ts` (RUNE_DESKTOP_SEED=0 to leave it out).
+
+## Phase 4 results: Discover, Radio, playlists complete, routing, hotkeys
+
+Discover (feed groups, rows with queue / playlist / "not for me" / menu, refresh, the web's unavailable / rate-limited / empty
+states; checked against the web for the unavailable state: the test server has no Spotify), the song-radio sheet ("Song radio
+\u00b7 new to you" in every track menu), Radio (stations from the radio-browser directory through the server: search by name,
+country and tag merged, genre chips, favourites, live cards; checked in a pair), the smart-playlist builder (fields, operators,
+values, match all/any, sort, limit, live count from the preview route; the wire form is tested), m3u8 export (save dialog) and import
+(file dialog), New playlist with description and the smart-rules link, playlist hotkeys and the configurable album key (kept on the
+server; the Hotkey button on a playlist page listens, refuses taken keys with the web's sentences), and Spotify twin routing:
+`playroute.rs` is `routing.ts` + `preferLocal.ts` with the same rules and tests; every play of a list goes through `play_items`
+(own file first, Spotify copy for Spotify-only zones, unplayable songs dropped with the web's toast, the "Play on" sheet when the
+song asked for cannot play on the zone). Known gaps: the "Play on" sheet does not yet remember the choice for the session, there
+is no Soloist / phone path (not applicable on desktop), Discover rows and the song-radio sheet could only be exercised against
+parsing and states (no Spotify on the test server), the playlist hero lacks the web's sort toggle and "Show in rune mini".

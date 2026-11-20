@@ -114,6 +114,23 @@ impl Rune {
             "prose" => { let k = s("key"); if !self.prose_open.remove(&k) { self.prose_open.insert(k); } cx.notify(); json!({"ok": true}) }
             "play_items" => { let items: Vec<crate::playroute::Item> = ids().iter().map(|i| crate::playroute::Item::local(i)).collect(); let z = if s("zone").is_empty() { None } else if s("zone") == "own" { Some(self.own_zone.clone()) } else { Some(s("zone")) }; self.play_items(items, n("start") as usize, b("shuffle"), z, cx); json!({"ok": true}) }
             "dialog_close" => { self.dialog = None; cx.notify(); json!({"ok": true}) }
+            "smart" => { self.dialog_smart(cx); json!({"ok": true}) }
+            "export_m3u8" => { self.export_m3u8(&s("id"), &s("name"), Some(std::path::PathBuf::from(s("path"))), cx); json!({"ok": true}) }
+            "import_m3u8" => { self.import_m3u8(Some(std::path::PathBuf::from(s("path"))), cx); json!({"ok": true}) }
+            "hotkey" => { let (id, name) = (s("id"), s("name")); self.set_playlist_key(&id, &name, &s("key"), cx); json!({"ok": true}) }
+            "press" => { let key = s("key"); if !self.hotkey_capture(&key, cx) { if let Some((id, _)) = self.playlist_keys.get(&key).cloned() { self.go(crate::route::Route::Playlist(id), cx); } } json!({"ok": true}) }
+            "smart_create" => {
+                let rules: Vec<crate::smart::Draft> = v.get("rules").and_then(|r| r.as_array()).map(|a| a.iter().map(|r| {
+                    let g = |k: &str| r.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_string();
+                    let mut d = crate::smart::blank(&g("field"));
+                    if let Some(o) = crate::smart::field_def(d.field).ops.iter().find(|o| o.op == g("op")) { d.op = o.op; }
+                    d.a = g("a"); d.b = g("b"); d
+                }).collect()).unwrap_or_default();
+                let mut body = crate::smart::spec(&rules, b("all"), &s("sort"), b("desc"), None);
+                body["name"] = json!(s("name"));
+                self.spawn_send(cx, "POST", "/playlists/smart".into(), Some(body), |me, r, cx| { match r { Ok(v) => { me.data.playlists = None; if let Some(id) = v.get("id").and_then(|x| x.as_str()) { me.go(crate::route::Route::Playlist(id.to_string()), cx); } } Err(e) => me.say(e, cx) } });
+                json!({"ok": true})
+            }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }
