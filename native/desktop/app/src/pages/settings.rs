@@ -1,6 +1,6 @@
 //! Settings (web `pages/Settings.tsx`): setup, keyboard (the album key and the playlist keys), the rune mini's playlists (reorder,
 //! remove), playback (volume levelling, auto-radio) and the server's status (library, database, playback, background jobs).
-//! Background (the dither picker) is phase 6; the server's self-update card is not part of the native app (it updates by release).
+//! Background: the Foil waves switch, Reduce effects and Battery saver (the web's other dither colours are not ported); the server's self-update card is not part of the native app (it updates by release).
 use super::*;
 use crate::albumlogic::{format_listening, format_stamp};
 use crate::menu::{item, pop};
@@ -148,7 +148,15 @@ impl Rune {
                     .child(grid(lib, db)).child(grid(play, jc)).into_any_element()
             }
         };
-        let top = if two { h_flex().gap(px(16.)).items_start().child(div().flex_1().min_w_0().child(keyboard)).child(v_flex().flex_1().min_w_0().gap(px(16.)).child(mini_card).child(playback)).into_any_element() } else { v_flex().gap(px(16.)).child(keyboard).child(mini_card).child(playback).into_any_element() };
+        // ---- background (web: the Background picker, Reduce effects, Battery saver)
+        let fp = self.foil;
+        let switch = |id: &'static str, on: bool| div().id(id).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
+        let row = |title: &str, sub: &str, sw: Stateful<Div>| h_flex().justify_between().items_center().gap(px(16.)).child(v_flex().min_w_0().child(div().text_size(px(14.)).font_weight(w(600.)).child(title.to_string())).child(muted(sub))).child(sw);
+        let background = card("Background", "palette")
+            .child(row("Foil waves", "Stippled wave lines over an icy-blue cloud, like printed foil. Off shows the plain dark page.", switch("st-foil", fp.on).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { on: !p.on, ..p }, cx); }))))
+            .child(row("Reduce effects", "No moving decorations: one still frame. This device only.", switch("st-reduce", fp.reduce).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { reduce: !p.reduce, ..p }, cx); }))))
+            .child(row("Battery saver", "The waves hold still while another window has focus, or this one is minimised. This device only.", switch("st-saver", fp.saver).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { saver: !p.saver, ..p }, cx); }))));
+        let top = if two { h_flex().gap(px(16.)).items_start().child(div().flex_1().min_w_0().child(keyboard)).child(v_flex().flex_1().min_w_0().gap(px(16.)).child(mini_card).child(playback).child(background)).into_any_element() } else { v_flex().gap(px(16.)).child(keyboard).child(mini_card).child(playback).child(background).into_any_element() };
         let page = v_flex().pb(px(40.)).gap(px(16.)).child(setup).child(top).child(status);
         div().id("settings-scroll").size_full().overflow_y_scroll()
             .child(padded(page_head("Settings", "Keyboard, rune mini, playback and server status", None)))

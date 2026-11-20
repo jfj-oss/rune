@@ -122,6 +122,13 @@ struct Saved {
     /// the zone last chosen in the player bar
     #[serde(default)]
     zone: Option<String>,
+    /// Settings -> Background: stored as the opposite of the defaults (waves on, effects normal, battery saver on)
+    #[serde(default)]
+    foil_off: bool,
+    #[serde(default)]
+    effects_reduced: bool,
+    #[serde(default)]
+    saver_off: bool,
 }
 
 pub struct Rune {
@@ -171,6 +178,8 @@ pub struct Rune {
     pub pl_rename: Option<Entity<InputState>>,
     pub pl_rename_sub: Option<Subscription>,
     pub focus: FocusHandle,
+    pub backdrop: Entity<crate::backdrop::Backdrop>,
+    pub foil: crate::backdrop::Prefs,
 
     pub sidebar_collapsed: bool,
     pub view_list: bool,
@@ -244,6 +253,8 @@ impl Rune {
         }).detach();
 
         let saved: Saved = std::fs::read_to_string(state_path(&dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let foil_prefs = crate::backdrop::Prefs { on: !saved.foil_off, reduce: saved.effects_reduced, saver: !saved.saver_off };
+        let foil_entity = cx.new(|cx| crate::backdrop::Backdrop::new(foil_prefs, window, cx));
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search albums, artists, tracks"));
         let albums_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in albums"));
         let playlists_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in playlists"));
@@ -305,7 +316,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
+            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -318,8 +329,16 @@ impl Rune {
 
     // ------------------------------------------------------------------ persistence
 
+    /// Settings -> Background: change the backdrop switches, tell the backdrop, remember them.
+    pub fn set_foil(&mut self, p: crate::backdrop::Prefs, cx: &mut Context<Self>) {
+        self.foil = p;
+        self.backdrop.update(cx, |b, cx| b.set_prefs(p, cx));
+        self.save_state();
+        cx.notify();
+    }
+
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone() };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver };
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_string(&s) { let _ = std::fs::write(state_path(&self.dir), j); }
     }

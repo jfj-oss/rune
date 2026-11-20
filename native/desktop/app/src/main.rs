@@ -2,10 +2,12 @@
 mod actions;
 mod albumlogic;
 mod audio;
+mod backdrop;
 mod charts;
 mod audio_zone;
 mod covers;
 mod data;
+mod foil;
 mod logo;
 mod hotkeys;
 mod menu;

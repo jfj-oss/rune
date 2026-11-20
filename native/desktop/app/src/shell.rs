@@ -35,6 +35,7 @@ impl Render for Rune {
         div().relative().size_full().bg(c(BG)).text_color(c(TEXT)).font_family(SANS).text_size(px(15.)).line_height(px(21.75))
             .track_focus(&self.focus)
             .key_context("Rune")
+            .child(self.backdrop.clone())
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| this.on_drag_move(ev, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _w, cx| this.on_drag_up(ev, cx)))
