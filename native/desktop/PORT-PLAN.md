@@ -54,7 +54,7 @@ Native modules live in `native/desktop/app/src/`.
 | `Toast.tsx` | `toast.rs` | done |
 | `Popover.tsx` / `TrackMenu.tsx` context + dropdown menus | `menu.rs` (one overlay menu, anchored, keyboard + click-away) | done |
 | `Dialog.tsx`, `PlaylistDialogs.tsx` (new / rename / delete) | `dialog.rs` | done: new playlist, confirm delete; smart-playlist builder phase 4 |
-| `Ambient.tsx`, `DitherBackdrop.tsx`, `lib/dither.ts`, glass blur | `backdrop.rs` | **phase 6**; phase 1 draws the flat `#0f1013` (the web's "Off" setting) with the glass tint |
+| `Ambient.tsx`, `DitherBackdrop.tsx`, `lib/dither.ts`, glass blur | `backdrop.rs`, `foil.rs` | the native-only "Foil waves" backdrop is built (device-resolution images, no web twin); the dither modes are **phase 6**; phase 1 draws the flat `#0f1013` (the web's "Off" setting) with the glass tint |
 | `Logo.tsx` (dot logo) | `logo.rs` | done (static dots) |
 | `MobileTabs`, `MiniPlayer`, `MobileBack`, `UpdateChip` mobile bits | - | web-only |
 | `FirstRunGate`, `Setup.tsx` | `setup.rs`: a first-run "server address" screen only | next (phase 1 reads `--url`/config; no screen yet) |

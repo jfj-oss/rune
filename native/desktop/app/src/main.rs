@@ -76,9 +76,9 @@ fn main() {
         // Opened bare (not through gpui_kit::open_window, whose Root wraps a client-decoration frame around the window).
         cx.open_window(opts, move |window, cx| {
             let v = cx.new(|cx| { let mut r = rune::Rune::new(cfg, dir, token, window, cx); r.first_run = first_run; if first_run { r.open_setup(window, cx); } r });
-            let f = v.read(cx).focus.clone();
+            let (f, backdrop) = { let r = v.read(cx); (r.focus.clone(), r.backdrop.clone()) };
             window.focus(&f, cx);
-            v
+            cx.new(|_| backdrop::Root { rune: v, backdrop })
         }).expect("window");
         cx.activate(true);
     });
