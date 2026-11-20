@@ -32,6 +32,8 @@ impl Rune {
         });
     }
 
+    pub fn save_hotkeys_pub(&mut self, cx: &mut Context<Self>) { self.save_hotkeys(cx); cx.notify(); }
+
     fn save_hotkeys(&mut self, cx: &mut Context<Self>) {
         let keys: serde_json::Map<String, Value> = self.playlist_keys.iter().map(|(k, (id, name))| (k.clone(), json!({"id": id, "name": name}))).collect();
         let body = json!({"hotkeys": {"albumKey": self.album_key, "playlistKeys": keys}});

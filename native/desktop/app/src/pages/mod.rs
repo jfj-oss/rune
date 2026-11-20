@@ -9,7 +9,10 @@ pub mod discover;
 pub mod genres;
 pub mod home;
 pub mod tracks;
+pub mod people;
 pub mod playlist;
+pub mod settings;
+pub mod stats;
 pub mod radio;
 pub mod playlists;
 pub mod search;
@@ -53,6 +56,10 @@ impl Rune {
             Route::Home => self.home_page(cw, window, cx),
             Route::Discover => self.discover_page(cw, window, cx),
             Route::Radio => self.radio_page(cw, window, cx),
+            Route::People => self.people_page(cw, window, cx),
+            Route::Stats => self.stats_page(cw, window, cx),
+            Route::Settings => self.settings_page(cw, window, cx),
+            Route::Person(id) => self.person_page(id, cw, window, cx),
             Route::Tracks => self.tracks_page(cw, window, cx),
             Route::Genres => self.genres_page(cw, window, cx),
             Route::Genre(g) => self.genre_page(g, cw, window, cx),

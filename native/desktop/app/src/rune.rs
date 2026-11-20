@@ -53,6 +53,9 @@ pub enum MenuAct {
     GenreSort(&'static str),
     Facet { kind: &'static str, value: Option<String> },
     Rescan,
+    AlbumKey(String),
+    Normalize(&'static str),
+    AutoRadio(bool),
     ExportM3u8 { id: String, name: String },
     ImportM3u8,
     Smart(crate::smartdlg::SmartAct),
@@ -139,6 +142,10 @@ pub struct Rune {
     pub zone_pref: Option<String>,
     pub peak_cache: Option<(String, Arc<Vec<f32>>, bool)>,
     pub np_open: bool,
+    pub stats_period: &'static str,
+    pub people_find: Entity<InputState>,
+    pub people_q: String,
+    pub people_bucket: &'static str,
     pub album_key: String,
     pub playlist_keys: std::collections::BTreeMap<String, (String, String)>,
     pub hotkey_listen: Option<(String, String)>,
@@ -241,7 +248,9 @@ impl Rune {
         let tracks_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by title, artist or album"));
         let genres_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter genres"));
         let radio_find = cx.new(|cx| InputState::new(window, cx).placeholder("Search stations, tags or countries"));
+        let people_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find a person"));
         let mut subs = Vec::new();
+        subs.push(cx.subscribe_in(&people_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { this.people_q = st.read(cx).value().trim().to_string(); cx.notify(); } }));
         subs.push(cx.subscribe_in(&radio_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
             if let InputEvent::Change = ev {
                 let v = st.read(cx).value().trim().to_string();
@@ -294,7 +303,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
+            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,

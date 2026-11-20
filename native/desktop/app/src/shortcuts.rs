@@ -29,6 +29,7 @@ impl Rune {
             || self.tracks_find.read(cx).focus_handle(cx).is_focused(window)
             || self.genres_find.read(cx).focus_handle(cx).is_focused(window)
             || self.pl_rename.is_some()
+            || self.people_find.read(cx).focus_handle(cx).is_focused(window)
             || self.radio_find.read(cx).focus_handle(cx).is_focused(window)
             || self.dialog.is_some()
     }

@@ -377,6 +377,9 @@ impl Rune {
             }
             MenuAct::ExportM3u8 { id, name } => { self.menu = None; self.export_m3u8(&id, &name, None, cx); }
             MenuAct::ImportM3u8 => { self.menu = None; self.import_m3u8(None, cx); }
+            MenuAct::AlbumKey(k) => { self.album_key = k; self.save_hotkeys_pub(cx); }
+            MenuAct::Normalize(m) => self.spawn_send(cx, "POST", "/settings/normalize".into(), Some(json!({"mode": m})), |me, r, cx| { me.forget_json("/settings/normalize"); if r.is_err() { me.say("Could not save the levelling setting", cx); } cx.notify(); }),
+            MenuAct::AutoRadio(on) => self.spawn_send(cx, "POST", "/settings/autoRadio".into(), Some(json!({"enabled": on})), |me, r, cx| { me.forget_json("/settings/autoRadio"); if r.is_err() { me.say("Could not save the auto-radio setting", cx); } cx.notify(); }),
             MenuAct::Rescan => self.rescan(cx),
             MenuAct::Smart(act) => { self.menu = None; self.pending_smart = Some(act); cx.notify(); }
             MenuAct::FixMatch(id) => { self.menu = None; self.dialog = Some(Dialog::FixMatch { album: id, sel: None }); cx.notify(); }
