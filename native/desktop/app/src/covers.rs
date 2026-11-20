@@ -192,7 +192,7 @@ mod tests {
         out
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn a_small_picture_is_kept_as_it_is_and_swapped_to_bgra() {
         let (img, n) = decode(&png(200, 200), 200).unwrap();
         assert_eq!(n, 200 * 200 * 4);
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(&px[0..4], &[30, 30, 200, 255]);
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn a_picture_much_bigger_than_its_slot_is_shrunk() {
         let (_, n) = decode(&png(600, 600), 200).unwrap();
         assert_eq!(n, 200 * 200 * 4);
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(n, 600 * 600 * 4);
     }
 
-    #[test]
+    #[::core::prelude::v1::test]
     fn garbage_is_none() {
         assert!(decode(b"not an image", 200).is_none());
     }

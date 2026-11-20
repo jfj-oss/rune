@@ -20,7 +20,7 @@ impl Rune {
         let (cols, card_w) = grid_dims(body_w, 170., gap_x, 2);
         let row_h = card_w + 52.15 + gap_y;
         let mut rows = vec![Row::Hero];
-        if artist.bio.is_some() { rows.push(Row::Bio); }
+        rows.push(Row::Bio);
         for (name, list) in [("Albums", &artist.albums), ("Appears on", &artist.appears_on)] {
             if list.is_empty() { continue; }
             rows.push(Row::Head(name));
@@ -31,6 +31,8 @@ impl Rune {
         let n = rows.len();
         let rowfn: RowFn = Box::new(move |this, ix, window, cx| match rows.get(ix) {
             Some(Row::Hero) => this.artist_hero(&artist, window, cx),
+            Some(Row::Bio) if artist.bio.is_none() => abody(div().pt(px(28.)).child(h_flex().gap(px(11.)).py(px(12.)).pl(px(15.)).pr(px(18.)).items_center().rounded(px(R)).border_1().border_color(line()).bg(bk(0.42)).text_size(px(13.5)).text_color(c(TEXT2)).w_auto()
+                .child(icon("book-open", 17., c(TEXT3))).child("No biography found for this artist.")), body_w),
             Some(Row::Bio) => {
                 let b = artist.bio.clone().unwrap();
                 abody(v_flex().pt(px(36.)).child(section_head("Biography")).child(v_flex().max_w(px(760.)).gap(px(8.))

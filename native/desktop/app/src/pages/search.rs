@@ -37,7 +37,7 @@ pub fn activate(this: &mut Rune, cx: &mut Context<Rune>) {
     let Route::Search(q) = this.route().clone() else { return };
     let Some(r) = this.data.search.get(&q).and_then(|c| c.slot.ready()).cloned() else { return };
     let items = nav_items(&q, &r);
-    let Some(it) = items.get(this.search_pick.min(items.len().saturating_sub(1))).cloned() else { return };
+    let Some(it) = items.get(this.search_pick.unwrap_or(0).min(items.len().saturating_sub(1))).cloned() else { return };
     let it = if it == Nav::Top { match top_of(&q, &r) { Some(Top::Artist(a)) => Nav::Artist(a.id), Some(Top::Album(a)) => Nav::Album(a.id), None => return } } else { it };
     match it {
         Nav::Album(id) => this.go(Route::Album(id), cx),
@@ -68,6 +68,7 @@ impl Rune {
     pub fn search_page(&mut self, q: String, cw: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let _ = cw;
         let q = q.trim().to_string();
+        if !self.search_input.read(cx).focus_handle(cx).is_focused(window) && self.search_input.read(cx).value().trim() != q { let v = q.clone(); self.search_input.update(cx, |s, cx| s.set_value(v, window, cx)); }
         self.ensure_search(&q, cx);
         let res = match self.data.search.get(&q).map(|c| c.slot.clone()) { Some(Slot::Ready(r)) => Some(r), _ => None };
         let mut rows = vec![];
@@ -84,10 +85,11 @@ impl Rune {
         }
         rows.push(Row::Space);
         let n = rows.len();
-        let pick = self.search_pick;
+        let pick = self.search_pick.unwrap_or(0);
+        let picked = self.search_pick.is_some();
         let nav = res.as_ref().map(|r| nav_items(&q, r)).unwrap_or_default();
         let pick = pick.min(nav.len().saturating_sub(1));
-        let active = nav.get(pick).cloned();
+        let active = if picked { nav.get(pick).cloned() } else { None };
         let key = format!("search:{q}");
         let rowfn: RowFn = Box::new(move |this, ix, window, cx| {
             match &rows[ix] {
@@ -118,7 +120,10 @@ impl Rune {
                     let mut row = h_flex().gap(px(20.)).items_start().h(px(170. + 64.));
                     for a in r.albums.iter() {
                         let on = active == Some(Nav::Album(a.id.clone()));
-                        row = row.child(outline(on)(div().rounded(px(12.)).child(this.album_card(a, 170., window, cx))));
+                        this.badges_always = true;
+                        let card = this.album_card(a, 170., window, cx);
+                        this.badges_always = false;
+                        row = row.child(outline(on)(div().rounded(px(12.)).child(card)));
                     }
                     padded(div().mb(px(44.)).child(section_head("Albums")).child(div().w_full().overflow_hidden().child(row))).into_any_element()
                 }
@@ -168,22 +173,22 @@ impl Rune {
 mod tests {
     use super::*;
     fn alb(id: &str) -> AlbumSummary { AlbumSummary { id: id.into(), ..Default::default() } }
-    #[test]
+    #[::core::prelude::v1::test]
     fn the_top_result_is_an_artist_that_starts_with_the_query_else_the_first_album() {
         let r = SearchResults { albums: vec![alb("a1")], artists: vec![ArtistRef { id: "x".into(), name: "Glass Animals".into() }], tracks: vec![] };
         assert!(matches!(top_of("glass", &r), Some(Top::Artist(_))));
         assert!(matches!(top_of("zzz", &r), Some(Top::Album(_))), "no artist starts with it: the first album");
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn keyboard_order_is_top_albums_artists_tracks() {
         let t = LibTrack { id: "t".into(), album_id: "a1".into(), source: "local".into(), ..Default::default() };
         let r = SearchResults { albums: vec![alb("a1")], artists: vec![ArtistRef { id: "x".into(), name: "X".into() }], tracks: vec![t] };
         assert_eq!(nav_items("q", &r), vec![Nav::Top, Nav::Album("a1".into()), Nav::Artist("x".into()), Nav::Track("a1".into(), "t".into())]);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn local_tracks_come_before_spotify_ones_and_are_capped() {
         let mk = |i: usize, s: &str| LibTrack { id: format!("{s}{i}"), source: s.into(), ..Default::default() };
-        let r = SearchResults { tracks: (0..10).map(|i| mk(i, "sp")).chain((0..10).map(|i| mk(i, "local"))).collect(), ..Default::default() };
+        let r = SearchResults { tracks: (0..10).map(|i| mk(i, "spotify")).chain((0..10).map(|i| mk(i, "local"))).collect(), ..Default::default() };
         let t = tracks_of(&r);
         assert_eq!(t.len(), 14);
         assert_eq!(t[0].source, "local");

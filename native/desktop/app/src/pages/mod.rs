@@ -85,12 +85,13 @@ impl Rune {
         let (id, aid) = (a.id.clone(), a.artist.id.clone());
         let id2 = id.clone();
         let group = SharedString::from(format!("card-{id}"));
+        let always = self.badges_always;
         let fmt = if a.source == "spotify" { Some(("Spotify".to_string(), true)) } else { a.format.clone().map(|f| (f, false)) };
         v_flex().w(px(w_)).flex_none().min_w_0()
             .child(div().id(group.clone()).group(group.clone()).relative().w(px(w_)).h(px(w_)).rounded(px(R)).cursor_pointer()
                 .shadow(vec![BoxShadow { inset: false, color: bk(0.4), offset: point(px(0.), px(8.)), blur_radius: px(22.), spread_radius: px(0.) }])
                 .child(cover_el(img, &a.id, &a.title, w_, R))
-                .when_some(fmt, |d, (t, sp)| d.child(div().absolute().left(px(8.)).bottom(px(8.)).opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(badge(&t, sp))))
+                .when_some(fmt, |d, (t, sp)| d.child(div().absolute().left(px(8.)).bottom(px(8.)).opacity(if always { 1. } else { 0. }).group_hover(group.clone(), |s| s.opacity(1.)).child(badge(&t, sp))))
                 .when(a.pinned, |d| d.child(div().absolute().top(px(8.)).right(px(8.)).size(px(22.)).rounded_full().bg(ca(0x0c0c10, 0.78)).border_1().border_color(wh(0.14)).flex().items_center().justify_center().child(icon("pin", 11., c(TEXT)))))
                 .child(div().id(SharedString::from(format!("play-{id}"))).absolute().right(px(8.)).bottom(px(8.)).size(px(42.)).rounded_full().bg(c(ACCENT)).hover(|s| s.bg(c(ACCENT2))).flex().items_center().justify_center()
                     .opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(icon("play", 18., c(0x12101f)))

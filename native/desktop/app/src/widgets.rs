@@ -49,7 +49,7 @@ pub fn btn(label: &str, icon_name: Option<&str>, primary: bool) -> Div {
         .text_size(px(14.)).font_weight(w(600.)).text_color(fg)
         .when(primary, |d| d.bg(c(ACCENT)).hover(|s| s.bg(c(ACCENT2))))
         .when(!primary, |d| d.bg(wh(0.09)).border_1().border_color(wh(0.10)).hover(|s| s.bg(wh(0.15))))
-        .when_some(icon_name, |d, n| d.child(icon(n, 18., fg)))
+        .when_some(icon_name, |d, n| d.child(if n == "play" { glyph(G::Play, 18., fg).into_any_element() } else { icon(n, 18., fg).into_any_element() }))
         .child(label.to_string())
 }
 
@@ -81,4 +81,26 @@ pub fn text_link(label: String, color: Hsla) -> Div {
 
 pub fn empty(title: &str, body: &str) -> Div {
     v_flex().items_center().gap(px(6.)).py(px(64.)).px(px(24.)).child(div().text_size(px(17.)).font_weight(w(600.)).child(title.to_string())).child(div().text_color(c(TEXT2)).max_w(px(520.)).child(body.to_string()))
+}
+
+#[derive(Clone, Copy)]
+pub enum G { Play, Pause, Prev, Next }
+
+/// Filled transport glyphs (the web's icons use `fill="currentColor"`; Lucide's SVGs are strokes only), polygons in a unit box.
+pub fn glyph(g: G, size_px: f32, color: Hsla) -> impl IntoElement {
+    canvas(|_, _, _| (), move |b, _, window, _| {
+        let (ox, oy) = (f32::from(b.origin.x), f32::from(b.origin.y));
+        let polys: Vec<Vec<(f32, f32)>> = match g {
+            G::Play => vec![vec![(0.24, 0.1), (0.92, 0.5), (0.24, 0.9)]],
+            G::Pause => vec![vec![(0.2, 0.12), (0.42, 0.12), (0.42, 0.88), (0.2, 0.88)], vec![(0.58, 0.12), (0.8, 0.12), (0.8, 0.88), (0.58, 0.88)]],
+            G::Prev => vec![vec![(0.12, 0.14), (0.26, 0.14), (0.26, 0.86), (0.12, 0.86)], vec![(0.92, 0.12), (0.34, 0.5), (0.92, 0.88)]],
+            G::Next => vec![vec![(0.74, 0.14), (0.88, 0.14), (0.88, 0.86), (0.74, 0.86)], vec![(0.08, 0.12), (0.66, 0.5), (0.08, 0.88)]],
+        };
+        for poly in polys {
+            let mut pb = PathBuilder::fill();
+            let pts: Vec<Point<Pixels>> = poly.iter().map(|&(x, y)| point(px(ox + x * size_px), px(oy + y * size_px))).collect();
+            pb.add_polygon(&pts, true);
+            if let Ok(p) = pb.build() { window.paint_path(p, color); }
+        }
+    }).size(px(size_px)).flex_none()
 }

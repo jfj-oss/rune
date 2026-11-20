@@ -95,7 +95,7 @@ impl Rune {
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }
             "bench" => {
                 let (steps, dy, ms) = (n("steps") as usize, n("dy") as f32, n("ms").max(1.) as u64);
-                self.bench_times.clear();
+                self.bench_times.clear(); self.last_frame = None;
                 let key = self.route().key();
                 cx.spawn(async move |this, cx| {
                     for _ in 0..steps {

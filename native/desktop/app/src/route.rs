@@ -125,7 +125,7 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn history_behaves_like_the_browsers() {
         let mut h = History::new(Route::Home);
         assert!(h.push(Route::Artists));
@@ -137,7 +137,7 @@ mod tests {
         assert!(!h.can_forward());
         assert_eq!(*h.current(), Route::Tracks);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn the_albums_query_matches_the_web_api_call() {
         let q = AlbumsQ { source: Src::Local, sort: Sort::Title, q: "a b".into(), ..Default::default() };
         assert_eq!(q.query(120, 120), "?q=a+b&source=local&sort=title&offset=120&limit=120");

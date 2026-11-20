@@ -136,13 +136,16 @@ pub struct Rune {
     pub sort_open: bool,
     pub hovered_row: Option<String>,
     /// keyboard pick in search results (arrows + Enter)
-    pub search_pick: usize,
+    /// keyboard pick in search results; None until an arrow key is used
+    pub search_pick: Option<usize>,
+    /// cards show their format badge without hover (the search page)
+    pub badges_always: bool,
     pub seek_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub vol_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub test: Option<crate::testhook::Hook>,
     pub frame: u64,
     pub bench_times: Vec<f64>,
-    last_frame: Option<Instant>,
+    pub last_frame: Option<Instant>,
     tick: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
@@ -195,7 +198,7 @@ impl Rune {
             cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), focus: cx.focus_handle(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
-            search_input, albums_find, playlists_find, find_timer: None, sort_open: false, hovered_row: None, search_pick: 0, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
+            search_input, albums_find, playlists_find, find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
         };
         me.net.viewing(vec![me.model.zone.clone()]);
         me
@@ -256,7 +259,7 @@ impl Rune {
                 self.spawn_json::<Value>(cx, format!("/player/{}", commands::encode(&zone)), move |me, r, cx| {
                     if me.signal_for != key { return; }
                     if let Ok(v) = r {
-                        me.signal_path = v.get("signalPath").and_then(|s| s.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+                        me.signal_path = v.get("signalPath").and_then(|s| s.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_else(|| derive_signal(&v));
                         cx.notify();
                     }
                 });
@@ -371,7 +374,7 @@ impl Rune {
         let key = q.to_string();
         self.spawn_json::<SearchResults>(cx, format!("/search{}", rune_mini_core::client_ext::qs(&[("q", q.to_string())])), move |me, r, cx| {
             me.data.search.insert(key, Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() });
-            me.search_pick = 0;
+            me.search_pick = None;
             cx.notify();
         });
     }
@@ -454,7 +457,7 @@ impl Rune {
         self.menu = None;
         self.sort_open = false;
         self.hovered_row = None;
-        self.search_pick = 0;
+        self.search_pick = None;
         cx.notify();
     }
 
@@ -589,7 +592,7 @@ pub fn parse_route(s: &str) -> Route {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn routes_parse_like_the_web_urls() {
         assert_eq!(parse_route("/albums?source=spotify"), Route::Albums(AlbumsQ::spotify()));
         assert_eq!(parse_route("/album/la%3Aabc"), Route::Album("la:abc".into()));
@@ -597,4 +600,18 @@ mod tests {
         assert_eq!(parse_route("/search?q=glass"), Route::Search("glass".into()));
         assert_eq!(parse_route("/"), Route::Home);
     }
+}
+
+/// The web's `useSignalPath` fallback for the PC zone when the server sent no path: derived from the track's file format.
+pub fn derive_signal(state: &Value) -> Vec<String> {
+    if state.get("zone").and_then(|z| z.as_str()) != Some("pc") { return vec![]; }
+    let idx = state.get("index").and_then(|i| i.as_i64()).unwrap_or(-1);
+    let Some(t) = state.get("queue").and_then(|q| q.as_array()).and_then(|q| usize::try_from(idx).ok().and_then(|i| q.get(i))).and_then(|q| q.get("track")) else { return vec![] };
+    if t.get("source").and_then(|s| s.as_str()) == Some("spotify") { return vec![]; }
+    let sr = t.get("sampleRate").and_then(|x| x.as_f64()).unwrap_or(44100.);
+    if t.get("format").and_then(|x| x.as_str()) == Some("mp3") {
+        return vec![format!("MP3 {}", t.get("bitrateKbps").and_then(|x| x.as_i64()).unwrap_or(320)), "mpv".into(), "PipeWire 48 kHz".into(), "resampled".into()];
+    }
+    let bd = t.get("bitDepth").and_then(|x| x.as_i64()).unwrap_or(16);
+    vec![format!("FLAC {}/{}", bd, sr / 1000.), "mpv".into(), format!("PipeWire {} kHz", (sr / 1000.).round()), "bit-perfect".into()]
 }

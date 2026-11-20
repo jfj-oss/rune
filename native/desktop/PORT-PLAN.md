@@ -152,3 +152,26 @@ Every page is built from a **web | native screenshot pair at the same window siz
 Chromium on ANGLE/Vulkan with `--password-store=basic --use-mock-keychain --mute-audio` against `?ambient=off`; the native app in a
 private headless KWin; both against the same generated 60-album server from `server/tests/e2e/desktopServe.ts`). Anything that
 animates (hover fades, queue drawer slide, toast) is checked as a frame sequence. Code reading alone does not count.
+
+## Phase 1 results (this branch)
+
+Built and checked in web | native pairs at 1280x800 (tools/shots.sh; ambient "off" on the web side): Albums (grid, list view
+via toolbar), Album, Artists, Artist, Playlists, Playlist, Search, plus the queue drawer. Known, deliberate differences in those
+pairs: Label/Year facet chips (phase 2), waveform seek bar (phase 3), About/Review tabs and the credits/"Your plays" blocks
+(phase 3/5), ASCII/dither/blurred-mosaic hero backdrops and the animated logo (phase 6), editable playlist chrome (phase 4).
+No animation exists yet (queue drawer slide, hover fades, route fade), so there are no frame sequences; they come with phase 2.
+
+Measured on the 2,000-album generated library (Ryzen 7 7800X3D, RTX 4090, private headless KWin 1280x800, release build;
+`tools/native-perf.py` and `tools/web-perf.mjs`, web = headless Chromium on ANGLE/Vulkan):
+
+| | web (Chromium) | rune-desktop |
+|---|---|---|
+| idle RSS (PSS, whole process tree) | 596 MB | 193 MB |
+| idle CPU | 38 % of a core | 0.2 % |
+| after scrolling 1,200 albums of covers | 859 MB | 292 MB (covers held: 84 MB budget) |
+| scroll, 300 frames at 40 px/frame | p50/p95/max 16.7/16.7/16.8 ms | 16.7/16.8/18.5 ms |
+| scroll, 300 frames at 200 px/frame | 16.7/16.7/16.8 ms, 0 over 20 ms | 16.7/16.8/59.8 ms, 4 over 20 ms |
+
+The 4 slow frames at 200 px/frame are covers arriving (decode is off the UI thread; the texture upload is not).
+Not yet verified: a real keyboard/pointer pass through KWin's fake-input protocol (the e2e drives the same action code through a
+test control port instead), HiDPI, X11, and macOS.

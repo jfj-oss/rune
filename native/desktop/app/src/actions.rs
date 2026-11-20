@@ -201,13 +201,13 @@ impl Rune {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn an_albums_tracks_play_in_disc_then_number_order() {
         let t = |id: &str, d, n| LibTrack { id: id.into(), disc: d, number: n, ..Default::default() };
         let a = Album { tracks: vec![t("c", 2, 1), t("b", 1, 2), t("a", 1, 1)], ..Default::default() };
         assert_eq!(album_track_ids(&a), vec!["a", "b", "c"]);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn play_commands_carry_the_shuffle_flag_only_when_asked() {
         let ids = vec!["l:1".to_string()];
         assert_eq!(play_body(&ids, 0, false), json!({"type":"play","trackIds":["l:1"],"startIndex":0}));

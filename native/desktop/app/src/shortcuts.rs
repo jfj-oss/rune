@@ -46,7 +46,7 @@ impl Rune {
         if self.typing(window, cx) {
             // arrows + Enter walk the search results while the search box has the keyboard (TopBar.tsx onKey)
             if self.search_input.read(cx).focus_handle(cx).is_focused(window) && matches!(self.route(), Route::Search(_)) {
-                match key.as_str() { "down" => { self.search_pick += 1; cx.notify(); cx.stop_propagation(); } "up" => { self.search_pick = self.search_pick.saturating_sub(1); cx.notify(); cx.stop_propagation(); } _ => {} }
+                match key.as_str() { "down" => { self.search_pick = Some(self.search_pick.map_or(0, |p| p + 1)); cx.notify(); cx.stop_propagation(); } "up" => { self.search_pick = Some(self.search_pick.unwrap_or(0).saturating_sub(1)); cx.notify(); cx.stop_propagation(); } _ => {} }
             }
             return;
         }
@@ -102,7 +102,7 @@ impl Rune {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn volume_steps_land_on_multiples_of_five() {
         assert_eq!(volume_target(62., true), 65.);
         assert_eq!(volume_target(62., false), 60.);
@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(volume_target(98., true), 100.);
         assert_eq!(volume_target(2., false), 0.);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn key_four_skips_a_fifth_or_goes_next() {
         assert_eq!(skip_ahead_ms(0., 100_000.), Some(20_000.));
         assert_eq!(skip_ahead_ms(85_000., 100_000.), None);

@@ -90,12 +90,12 @@ mod tests {
     fn al(id: &str, ar: &str, name: &str) -> AlbumSummary {
         AlbumSummary { id: id.into(), artist: rune_mini_core::model::ArtistRef { id: ar.into(), name: name.into() }, ..Default::default() }
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn artists_are_grouped_counted_and_sorted() {
         let c = artist_cards(&[al("1", "b", "bravo"), al("2", "a", "Alpha"), al("3", "b", "bravo")]);
         assert_eq!(c.iter().map(|x| (x.name.as_str(), x.n)).collect::<Vec<_>>(), vec![("Alpha", 1), ("bravo", 2)]);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn library_changed_forgets_playlists_and_likes() {
         let mut d = Data::default();
         d.playlists = Some(Cached::loading());

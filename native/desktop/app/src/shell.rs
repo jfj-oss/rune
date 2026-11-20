@@ -211,13 +211,18 @@ impl Rune {
 
         // ---- centre: transport + seek
         let tbtn = |id: &'static str, name: &'static str, size: f32, on: bool, enabled: bool| {
-            div().id(id).when(!enabled, |d| d.opacity(0.35)).child(btn_icon(name, size, c(TEXT2_GLASS), on))
+            let inner = match name {
+                "skip-back" => h_flex().size(px(36.)).items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).child(glyph(G::Prev, size, c(TEXT2_GLASS))).into_any_element(),
+                "skip-forward" => h_flex().size(px(36.)).items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).child(glyph(G::Next, size, c(TEXT2_GLASS))).into_any_element(),
+                _ => btn_icon(name, size, c(TEXT2_GLASS), on).into_any_element(),
+            };
+            div().id(id).cursor_pointer().when(!enabled, |d| d.opacity(0.35)).child(inner)
         };
         let transport = h_flex().gap(px(12.)).items_center()
             .child(tbtn("sh", "shuffle", 16., shuffle, true).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::ToggleShuffle, cx))))
             .child(tbtn("prev", "skip-back", 20., false, has_queue).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Prev, cx))))
             .child(div().id("pp").size(px(40.)).flex_none().rounded_full().bg(c(TEXT)).flex().items_center().justify_center().cursor_pointer().when(!has_queue, |d| d.opacity(0.4))
-                .child(icon(if playing { "pause" } else { "play" }, 18., c(0x101014)))
+                .child(glyph(if playing { G::Pause } else { G::Play }, 18., c(0x101014)))
                 .on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::PlayPause, cx))))
             .child(tbtn("next", "skip-forward", 20., false, has_queue).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Next, cx))))
             .child(tbtn("rp", if repeat == Repeat::One { "repeat-1" } else { "repeat" }, 16., repeat != Repeat::Off, true).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::CycleRepeat, cx))));

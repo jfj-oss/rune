@@ -37,7 +37,7 @@ impl Rune {
                     let mut menu = this.track_menu_ids(ids, q.track.title.clone(), Some(q.album.id.clone()), q.track.artists.first().map(|a| a.id.clone()), q.track.id.starts_with("sp:"), q.track.id.clone());
                     menu.items.push(PopItem { icon: "x", label: "Remove from queue".into(), act: MenuAct::RemoveFromQueue(qid2.clone()), danger: true, chevron: false, dot: false, sub: false });
                     let group = SharedString::from(format!("q-{qid}"));
-                    h_flex().id(group.clone()).group(group.clone()).h(px(QROW)).mx(px(8.)).rounded(px(R)).items_center().cursor_pointer()
+                    h_flex().id(group.clone()).group(group.clone()).h(px(QROW)).w(px(QUEUE_W - 16.)).mx(px(8.)).rounded(px(R)).items_center().cursor_pointer()
                         .when(current, |d| d.bg(ca(ACCENT, 0.14))).hover(|s| s.bg(surface2()))
                         .child(div().w(px(26.)).flex_none().flex().justify_center().opacity(0.5).child(icon("grip-vertical", 16., c(TEXT3))))
                         .child(h_flex().flex_1().min_w_0().gap(px(12.)).items_center()

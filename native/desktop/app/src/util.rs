@@ -70,7 +70,7 @@ pub fn fold(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
+    #[::core::prelude::v1::test]
     fn durations_and_lengths_match_the_web() {
         assert_eq!(format_duration(0.), "0:00");
         assert_eq!(format_duration(61_999.), "1:01");
@@ -79,25 +79,25 @@ mod tests {
         assert_eq!(format_total_length(72. * 60_000.), "1 hr 12 min");
         assert_eq!(format_total_length(60. * 60_000.), "1 hr");
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn plural_groups_thousands() {
         assert_eq!(plural(1, "album"), "1 album");
         assert_eq!(plural(1234, "album"), "1,234 albums");
         assert_eq!(plural(0, "track"), "0 tracks");
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn initials_skip_articles() {
         assert_eq!(initials("The Lanterns"), "L");
         assert_eq!(initials("Mira Okonkwo"), "MO");
         assert_eq!(initials("Halden & Rowe"), "HR");
         assert_eq!(initials(""), "?");
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn the_hash_is_fnv1a_like_the_web() {
         assert_eq!(hash_string(""), 2166136261);
         assert_eq!(hash_string("a"), 0xe40c292c);
     }
-    #[test]
+    #[::core::prelude::v1::test]
     fn fold_strips_accents() {
         assert_eq!(fold("  Café  "), "cafe");
     }
