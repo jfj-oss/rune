@@ -99,6 +99,21 @@ pub struct Album {
     pub release_date: Option<String>,
     #[serde(default)]
     pub match_confidence: Option<f64>,
+    #[serde(default)]
+    pub credits: Vec<Credit>,
+    #[serde(default)]
+    pub folder_path: Option<String>,
+}
+
+/// One credit of an album (`Credit` in shared/src/index.ts): a person, a role, and the tracks it was on (none = the whole album).
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Credit {
+    pub artist: ArtistRef,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub track_ids: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -175,6 +190,45 @@ pub struct PlaylistDetail {
     pub tracks: Vec<LibTrack>,
 }
 
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreFacet {
+    #[serde(default)]
+    pub genre: String,
+    #[serde(default)]
+    pub album_count: usize,
+    #[serde(default)]
+    pub cover_album_ids: Vec<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelFacet {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub album_count: usize,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct YearFacet {
+    #[serde(default)]
+    pub year: i32,
+    #[serde(default)]
+    pub album_count: usize,
+    #[serde(default)]
+    pub decade: i32,
+}
+
+/// One row of `/history/recent` or `/history/rediscover`.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryAlbum {
+    #[serde(default)]
+    pub album_id: String,
+}
+
 pub const LIKED_PLAYLIST_ID: &str = "pl:sp:liked";
 
 impl PlaylistSummary {
@@ -191,6 +245,10 @@ impl PlaylistSummary {
 pub fn cover_path(album_id: &str, cover_url: Option<&str>, size: &str) -> String {
     if let Some(u) = cover_url {
         if u.starts_with("http://") || u.starts_with("https://") {
+            return u.to_string();
+        }
+        // a station's logo is served by its own route, not the cover route
+        if u.starts_with("/api/") && !u.starts_with("/api/cover/") {
             return u.to_string();
         }
     }

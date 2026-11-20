@@ -26,6 +26,7 @@ impl Render for Rune {
         self.note_frame();
         self.covers.begin_frame();
         self.covers.evict(window);
+        if let Some(a) = self.pending_smart.take() { self.smart_act(a, window, cx); }
         let vw = f32::from(window.viewport_size().width);
         let collapsed = self.sidebar_collapsed;
         let sw = side_w(collapsed);
@@ -49,10 +50,14 @@ impl Render for Rune {
             .child(self.sidebar(window, cx))
             .child(self.playerbar(window, cx))
             .children(self.queue_open.then(|| self.queue_drawer(window, cx)))
+            .children(self.np_open.then(|| self.now_playing(window, cx)))
+            .children(self.song_radio.is_some().then(|| self.song_radio_sheet(window, cx)))
+            .children(self.preview.is_some().then(|| self.preview_overlay(window, cx)))
             .children(self.zone_open.then(|| self.zone_menu(vw, cx)))
             .children(self.signal_open.then(|| self.signal_menu(vw, cx)))
+            .children(self.setup.is_some().then(|| self.setup_overlay(cx)))
+            .children(self.dialog.is_some().then(|| self.dialog_overlay(window, cx)))
             .children(self.menu.is_some().then(|| self.menu_overlay(window, vw, cx)))
-            .children(self.dialog.is_some().then(|| self.dialog_overlay(cx)))
             .children(self.toast.as_ref().map(|t| {
                 div().absolute().left_0().right_0().bottom(px(NPBAR_H + 18.)).flex().justify_center().child(
                     div().px(px(18.)).py(px(10.)).rounded_full().bg(panel()).border_1().border_color(wh(0.14)).text_size(px(13.5)).child(t.text.clone()))
@@ -90,7 +95,7 @@ impl Rune {
                 .child(it(self, "n-artists", "Artists", "mic-vocal", r == Route::Artists, Route::Artists, cx))
                 .child(it(self, "n-people", "People", "users", r == Route::People, Route::People, cx))
                 .child(it(self, "n-tracks", "Tracks", "audio-lines", r == Route::Tracks, Route::Tracks, cx))
-                .child(it(self, "n-genres", "Genres", "tags", r == Route::Genres, Route::Genres, cx))
+                .child(it(self, "n-genres", "Genres", "tags", matches!(r, Route::Genres | Route::Genre(_)), Route::Genres, cx))
                 .child(it(self, "n-discover", "Discover", "compass", r == Route::Discover, Route::Discover, cx))
                 .child(it(self, "n-radio", "Radio", "radio", r == Route::Radio, Route::Radio, cx))
                 .child(it(self, "n-stats", "Stats", "chart-column", r == Route::Stats, Route::Stats, cx)))
@@ -143,7 +148,7 @@ impl Rune {
 
     // ------------------------------------------------------------------ player bar
 
-    fn slider(&self, id: &'static str, frac: f32, track_h: f32, thumb: f32, hover_fill: bool, bounds: Rc<Cell<Bounds<Pixels>>>, which: Drag, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub fn slider(&self, id: &'static str, frac: f32, track_h: f32, thumb: f32, hover_fill: bool, bounds: Rc<Cell<Bounds<Pixels>>>, which: Drag, cx: &mut Context<Self>) -> Stateful<Div> {
         let b = bounds.clone();
         let active = self.drag == Some(which);
         let fill = if active || hover_fill { c(ACCENT2) } else { c(TEXT2) };
@@ -172,6 +177,7 @@ impl Rune {
         let pos = self.seek_drag.unwrap_or_else(|| player.as_ref().map(|p| p.position(now)).unwrap_or(0.));
         let volume = match self.vol_hold { Some((t, v)) if t.elapsed().as_millis() < 4000 => v, _ => player.as_ref().map(|p| p.volume).unwrap_or(0.) };
         let vw_slider = vol_w(vw);
+        let peaks = match cur.as_ref() { Some(q) => self.peaks_for(&q.track.id, q.track.duration_ms, cx), None => None };
 
         // ---- left: art, title row, artists + album
         let left: AnyElement = match cur {
@@ -183,7 +189,7 @@ impl Rune {
                 let item = self.track_menu_ids(vec![q.track.id.clone()], q.track.title.clone(), Some(q.album.id.clone()), artists.first().map(|a| a.0.clone()), q.track.id.starts_with("sp:"), q.track.id.clone());
                 h_flex().flex_grow(1.).flex_shrink(1.).flex_basis(px(0.)).min_w(px(180.)).gap(px(14.)).items_center()
                     .child(div().id("np-art").cursor_pointer().child(cover_el(img, &q.album.id, &q.album.title, 56., R).shadow(vec![BoxShadow { inset: false, color: bk(0.45), offset: point(px(0.), px(6.)), blur_radius: px(18.), spread_radius: px(0.) }]))
-                        .on_click(cx.listener(|this, _, _, cx| this.say("Now Playing opens in a later phase", cx))))
+                        .on_click(cx.listener(|this, _, _, cx| { this.np_open = true; cx.notify(); })))
                     .child(v_flex().flex_1().min_w_0()
                         .child(h_flex().items_center().gap(px(2.)).min_w_0()
                             .child(div().id("np-title").flex_1().min_w_0().truncate().font_weight(w(600.)).text_size(px(14.5)).cursor_pointer().hover(|s| s.underline()).child(q.track.title.clone())
@@ -229,7 +235,7 @@ impl Rune {
         let frac = if dur > 0. { (pos / dur) as f32 } else { 0. };
         let seek = h_flex().w_full().max_w(px(640.)).gap(px(12.)).items_center()
             .child(div().min_w(px(34.)).text_size(px(11.5)).text_color(c(TEXT3_GLASS)).child(crate::util::format_duration(pos)))
-            .child(div().flex_1().min_w_0().child(self.slider("seek", frac, 4., 12., false, self.seek_bounds.clone(), Drag::Seek, cx)))
+            .child(div().flex_1().min_w_0().child(match peaks { Some((p, approx)) => self.waveform("seek", p, approx, frac, 30., cx).into_any_element(), None => self.slider("seek", frac, 4., 12., false, self.seek_bounds.clone(), Drag::Seek, cx).into_any_element() }))
             .child(div().min_w(px(34.)).text_right().text_size(px(11.5)).text_color(c(TEXT3_GLASS)).child(crate::util::format_duration(dur)));
         let centre = v_flex().flex_grow(1.5).flex_shrink(1.).flex_basis(px(0.)).min_w(px(340.)).items_center().gap(px(2.)).child(transport).child(seek);
 
@@ -259,6 +265,11 @@ impl Rune {
     }
 
     // ------------------------------------------------------------------ drag handling (seek, volume)
+
+    pub fn start_seek_drag(&mut self, x: f32, cx: &mut Context<Self>) {
+        self.drag = Some(Drag::Seek);
+        self.drag_to(x, cx);
+    }
 
     fn drag_to(&mut self, x: f32, cx: &mut Context<Self>) {
         match self.drag {

@@ -92,6 +92,31 @@ await post(`/playlists/${encodeURIComponent(pl1.id)}/tracks`, { trackIds: trackI
 const pl2 = (await post('/playlists', { name: 'Late night' })) as { id: string };
 await post(`/playlists/${encodeURIComponent(pl2.id)}/tracks`, { trackIds: trackIds.slice(10, 24) });
 if (first[1]) await fetch(`${base}/api/pins/${encodeURIComponent(first[1].id)}`, { method: 'PUT' });
+
+// Pages that show more than tracks need data the generated library has none of: reviews and scores, credits shared between
+// albums, a listening history. Seeded straight into the temp DB (RUNE_DESKTOP_SEED=0 leaves it out).
+if (process.env.RUNE_DESKTOP_SEED !== '0' && first.length >= 2) {
+  const [a0, a1] = [first[0]!.id, first[1]!.id];
+  const details = {
+    albumId: a0,
+    reception: { value: 'On release, the record was received warmly. Pitchfork called it a quiet, patient set of songs, and the Guardian praised its restraint.\n\nLooking back, critics have kept returning to the production: a dry, close sound that lets every instrument breathe. Several reviews single out the opening track.', source: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Example' },
+    scores: [{ outlet: 'Pitchfork', score: 8.1, scale: 10, url: 'https://pitchfork.com/reviews/albums/example/' }, { outlet: 'Metacritic', score: 84, scale: 100, reviewCount: 22, url: 'https://www.metacritic.com/music/example' }, { outlet: 'AllMusic', score: 4, scale: 5, url: 'https://www.allmusic.com/album/example' }, { outlet: 'NME', score: 5, scale: 10, url: 'https://www.nme.com/reviews/example' }],
+    quotes: [{ outlet: 'The Guardian', author: 'Alex Petridis', quote: 'A record that rewards the second listen far more than the first.', url: 'https://www.theguardian.com/music/example' }],
+    background: { value: 'The album was recorded over eleven days in a converted barn. The band had written most of it on the road and arranged it in the room.\n\nThe sleeve photograph was taken the morning after the last session.', source: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Example' },
+    artistNotes: [{ value: 'We wanted it to sound like the room. No click tracks, nothing fixed afterwards.', source: 'Bandcamp', url: 'https://example.bandcamp.com/', verifiedArtist: true }],
+    fetchedAt: Date.now(),
+  };
+  db.prepare('INSERT OR REPLACE INTO album_details (album_id, json, fetched_at) VALUES (?, ?, ?)').run(a0, JSON.stringify(details), Date.now());
+  const people = db.prepare('SELECT id FROM artists ORDER BY id LIMIT 4').all() as { id: string }[];
+  const add = db.prepare('INSERT INTO credits (album_id, artist_id, role, track_ids) VALUES (?, ?, ?, ?)');
+  const alpha = (await (await fetch(`${base}/api/albums/${encodeURIComponent(a0)}`)).json()) as { tracks: { id: string }[] };
+  for (const [i, p] of people.entries()) {
+    add.run(a0, p.id, ['guitar', 'producer', 'composer', 'drums'][i]!, i === 3 ? JSON.stringify(alpha.tracks.slice(0, 2).map((t) => t.id)) : null);
+    if (i < 2) add.run(a1, p.id, 'bass guitar', null);
+  }
+  const plays = db.prepare('INSERT INTO plays (track_id, album_id, zone, started_at, played_ms, completed) VALUES (?, ?, ?, ?, ?, 1)');
+  for (let d = 1; d <= 9; d++) plays.run(alpha.tracks[0]!.id, a0, 'pc', Date.now() - d * 86_400_000 * 3, 180_000 + d * 7_000);
+}
 console.log(`READY ${base}`);
 const stop = async () => { await built.shutdown('desktopServe').catch(() => undefined); if (!keep) rmSync(dir, { recursive: true, force: true }); process.exit(0); };
 process.on('SIGTERM', stop);

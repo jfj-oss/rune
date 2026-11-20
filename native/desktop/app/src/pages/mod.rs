@@ -1,10 +1,20 @@
 //! The pages (web `pages/*`). A page is a list of rows drawn through GPUI's virtual `list`, so only what is on screen is laid
 //! out, and the page's scroll position is kept while the app runs.
 pub mod album;
+pub mod album_sections;
 pub mod albums;
 pub mod artist;
 pub mod artists;
+pub mod discover;
+pub mod duplicates;
+pub mod genres;
+pub mod home;
+pub mod tracks;
+pub mod people;
 pub mod playlist;
+pub mod settings;
+pub mod stats;
+pub mod radio;
 pub mod playlists;
 pub mod search;
 pub mod soon;
@@ -44,6 +54,17 @@ impl Rune {
             Route::Playlists(q) => self.playlists_page(q, cw, window, cx),
             Route::Playlist(id) => self.playlist_page(id, cw, window, cx),
             Route::Search(q) => self.search_page(q, cw, window, cx),
+            Route::Home => self.home_page(cw, window, cx),
+            Route::Discover => self.discover_page(cw, window, cx),
+            Route::Radio => self.radio_page(cw, window, cx),
+            Route::People => self.people_page(cw, window, cx),
+            Route::Stats => self.stats_page(cw, window, cx),
+            Route::Settings => self.settings_page(cw, window, cx),
+            Route::Duplicates => self.duplicates_page(cw, window, cx),
+            Route::Person(id) => self.person_page(id, cw, window, cx),
+            Route::Tracks => self.tracks_page(cw, window, cx),
+            Route::Genres => self.genres_page(cw, window, cx),
+            Route::Genre(g) => self.genre_page(g, cw, window, cx),
             r => self.soon_page(r, cx),
         }
     }
@@ -128,3 +149,38 @@ pub fn bottom_space() -> AnyElement { div().h(px(NPBAR_H + 56.)).into_any_elemen
 
 #[allow(dead_code)]
 pub fn count_label(n: usize, what: &str) -> String { plural(n, what) }
+
+/// Albums from a cached JSON `{items,total}` (or a bare list of `{albumId}` is handled by the caller).
+pub fn albums_of(slot: &crate::data::Slot<serde_json::Value>) -> Option<rune_mini_core::library::Page<AlbumSummary>> {
+    slot.ready().and_then(|v| serde_json::from_value((**v).clone()).ok())
+}
+
+impl Rune {
+    /// A horizontal scroller (the web's `HScroll`): the track scrolls by wheel or drag, arrows appear on hover.
+    pub fn hscroll(&mut self, key: &str, cards: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
+        let handle = self.hscrolls.entry(key.to_string()).or_default().clone();
+        let group = SharedString::from(format!("hs-{key}"));
+        let (h1, h2) = (handle.clone(), handle.clone());
+        let arrow = |id: String, left: bool, h: ScrollHandle, cx: &mut Context<Self>| {
+            let mut d = div().id(SharedString::from(id)).absolute().top(px(70.)).size(px(40.)).rounded_full().bg(ca(0x14151c, 0.9)).border_1().border_color(wh(0.14)).flex().items_center().justify_center().cursor_pointer()
+                .opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).hover(|s| s.bg(ca(0x23242e, 0.95))).child(icon(if left { "chevron-left" } else { "chevron-right" }, 18., c(TEXT)));
+            d = if left { d.left(px(PAD - 14.)) } else { d.right(px(PAD - 14.)) };
+            d.on_click(cx.listener(move |_, _, _, cx| {
+                let mut o = h.offset();
+                let step = f32::from(h.bounds().size.width).max(300.) * 0.8;
+                o.x = (o.x + px(if left { step } else { -step })).min(px(0.)).max(-h.max_offset().x);
+                h.set_offset(o);
+                cx.notify();
+            }))
+        };
+        div().relative().group(group.clone()).w_full().child(
+            div().id(SharedString::from(format!("hst-{key}"))).track_scroll(&handle).overflow_x_scroll().w_full().pl(px(PAD)).pr(px(PAD)).pt(px(4.)).pb(px(8.))
+                .child(h_flex().gap(px(20.)).children(cards)))
+            .child(arrow(format!("hsl-{key}"), true, h1, cx)).child(arrow(format!("hsr-{key}"), false, h2, cx)).into_any_element()
+    }
+}
+
+/// The web's `.sechead` with an optional "See all" link.
+pub fn sec_head(title: &str, see_all: Option<AnyElement>) -> Div {
+    h_flex().w_full().justify_between().items_baseline().mb(px(14.)).pb(px(10.)).border_b_1().border_color(wh(0.07)).child(eyebrow(title)).children(see_all)
+}

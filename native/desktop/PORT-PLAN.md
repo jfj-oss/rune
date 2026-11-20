@@ -139,7 +139,12 @@ its own with phase 9 (without it the Mac app is a remote control of the PC's zon
 - Browser-only plumbing: `scrollRoot`, `useMedia`, `frameRate`, `oneTab`, `preferLocal`, `capabilities`, localStorage
   keys (replaced by `~/.config/rune-desktop/state.json`).
 
-## Open decisions for the user
+## Decisions taken (2026-11-20)
+
+1. **Mac is not a remote control**: it plays on its own, so phase 9 (own audio) is built right after phase 2 (done below).
+2. **Glass** is the plain dim tint (no blur). 3. Config stays in `~/.config/rune-desktop/`.
+
+## Open decisions for the user (superseded by the list above)
 
 1. **MacBook audio**: ship the Mac build as a remote control first (phases 1-8) or wait for phase 9?
 2. **Backdrop**: the web's default is the dither backdrop. Phase 1 compares against the web with `?ambient=off`
@@ -175,3 +180,70 @@ Measured on the 2,000-album generated library (Ryzen 7 7800X3D, RTX 4090, privat
 The 4 slow frames at 200 px/frame are covers arriving (decode is off the UI thread; the texture upload is not).
 Not yet verified: a real keyboard/pointer pass through KWin's fake-input protocol (the e2e drives the same action code through a
 test control port instead), HiDPI, X11, and macOS.
+
+
+## Phase 2 results (branch gpui-desktop-2)
+
+Built and checked in web | native pairs at 1280x800 (tools/shots.sh, tools/pair.sh): Home (greeting, Recently added / Recently
+played / Spotify / Rediscover, horizontal scrollers with arrows), Tracks (filter, sort + direction, sortable header, virtualised),
+Genres (mosaic tiles, filter) and a genre page, Now Playing full screen (cover, title, waveform, transport, volume, signal path, Up
+next; Esc or the chevron closes; the dither backdrop is phase 6), the waveform seek bar (peaks from `/api/peaks`, the web's
+song-shaped stand-in for Spotify), queue drag-reorder (grip), Albums Label/Year facets (scrolling list menus, removable chips),
+playlist drag-reorder, multi-select (shift / ctrl-click, Select mode, Delete key, add to playlist, remove) and inline rename.
+Window-size handling: pages already re-flow their grids; the sidebar collapse is remembered in `state.json`.
+Not in the pairs yet: the Now Playing "Critical reception / About" cards (phase 3 brings the prose), the playlist hero's
+tinted card and its Hotkey / "Show in rune mini" / sort buttons (phase 4).
+
+## Phase 9 results: the app sounds its own zone
+
+`audio/`: `source.rs` (HTTP byte source with `Range` re-opens), `pipeline.rs` (symphonia decode, channel mix, rubato resample,
+the timeline of songs in the frame stream), `engine.rs` (decode thread + ring buffer + cpal output, or a silent real-time clock
+with `RUNE_DESKTOP_AUDIO=null`), `tabplayer.rs` (the web's `TabPlayer`: follows the server's `TabPlan`, reports started / ended /
+paused / position / failed in order, goes on down the run without a round trip). The zone is `browser:<id>` (id kept in
+`state.json`), listed in the zone picker as "This computer (<host>)"; it is the default zone on macOS. It keeps playing while
+another zone is on screen (a second `Model` follows it). The stream is the original file (`fmt=orig`, `accept=flac,mp3,aac,m4a,
+wav,aiff,vorbis`; opus and wma are transcoded by the server), the server's `X-Rune-Gain-Db` levelling is applied, volume is the
+zone's volume (linear). The output opens at the song's own rate when the device offers it, otherwise the device default with a
+sinc resampler. Tests: unit (timeline, resampler, mixer, TabPlayer with a mock engine), engine tests against a tiny ranged HTTP
+server in real time (gapless across 44.1 and 48 kHz, pause, ranged seek, a missing file), and the desktop e2e (the server's zone
+follows the app: play, skip, seek, pause, songs ending by themselves). NOT verified here: the cpal path on a real sound device
+and on macOS (CoreAudio), because the rig is silent by rule; bit-perfect output stays out of scope (CoreAudio resamples).
+
+## Phase 3 results: the album page, fully
+
+Checked in web | native pairs (tools/pair.sh; native paths in the report): hero with the average rating (glass stars drawn as paths,
+tally, chips on open), sticky tab strip with scroll-spy (Tracks / Review / About / Credits; the strip is also drawn as an
+overlay once the hero has scrolled away), Review (reception prose with Read more, scores column, pull quotes, "Read in context"),
+About (facts, editions table, other versions, artist notes with the verified pill, background), Credits (grouped, merged,
+track references), Your plays (tiles + sparkline path), Connections (the "With A (role), B" line is the run-based text element:
+links wrap across lines), More by, Fix match (banner, menu item, candidate dialog, apply) and the review preview sheet (score,
+excerpt, stored text, where the reception mentions the critic with the term marked; "Open original" hands the address to the
+browser instead of an iframe). The pure rules (scores, credits, sentences, dates) are ported with tests in `albumlogic.rs`.
+Known differences: the section cards' glass backdrop and the ASCII hero (phase 6); the review preview has no embedded "Original" view.
+The seeded fixture (reviews, credits, plays) lives in `server/tests/e2e/desktopServe.ts` (RUNE_DESKTOP_SEED=0 to leave it out).
+
+## Phase 4 results: Discover, Radio, playlists complete, routing, hotkeys
+
+Discover (feed groups, rows with queue / playlist / "not for me" / menu, refresh, the web's unavailable / rate-limited / empty
+states; checked against the web for the unavailable state: the test server has no Spotify), the song-radio sheet ("Song radio
+\u00b7 new to you" in every track menu), Radio (stations from the radio-browser directory through the server: search by name,
+country and tag merged, genre chips, favourites, live cards; checked in a pair), the smart-playlist builder (fields, operators,
+values, match all/any, sort, limit, live count from the preview route; the wire form is tested), m3u8 export (save dialog) and import
+(file dialog), New playlist with description and the smart-rules link, playlist hotkeys and the configurable album key (kept on the
+server; the Hotkey button on a playlist page listens, refuses taken keys with the web's sentences), and Spotify twin routing:
+`playroute.rs` is `routing.ts` + `preferLocal.ts` with the same rules and tests; every play of a list goes through `play_items`
+(own file first, Spotify copy for Spotify-only zones, unplayable songs dropped with the web's toast, the "Play on" sheet when the
+song asked for cannot play on the zone). Known gaps: the "Play on" sheet does not yet remember the choice for the session, there
+is no Soloist / phone path (not applicable on desktop), Discover rows and the song-radio sheet could only be exercised against
+parsing and states (no Spotify on the test server), the playlist hero lacks the web's sort toggle and "Show in rune mini".
+
+## Phase 5 results: the rest of the pages
+
+People (find, role buckets, cards) and Person (hero, roles, albums as artist, every credit with its tracks, "often works with");
+Stats (period switch, tiles, daily sparkline, hour and weekday bars, top albums / tracks / artists, genres, new discoveries,
+lossless and hi-res share; all charts are GPUI paths in `charts.rs`); Duplicates (groups, recommended pick, Hide the others /
+Keep all, hidden list with Unhide); Settings (Set up rune, Keyboard with the album key and playlist keys, the rune mini card with
+drag / up / down / remove, Playback with volume levelling and auto-radio, and the server status cards); the setup screen (the
+server address, checked against `/api/health` before it is saved, shown on a first run and from Settings; folders, Spotify and
+Soloist stay on the server's own setup page, one click away). Pairs checked: People, Person (native only: the web route differs),
+Stats, Settings, Duplicates. Known differences: Settings has no Background card (phase 6), the self-update card is not ported.

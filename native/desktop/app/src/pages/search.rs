@@ -51,9 +51,10 @@ fn play_track(this: &mut Rune, album: &str, track: &str, cx: &mut Context<Rune>)
     let track = track.to_string();
     let a2 = album.to_string();
     this.with_album(album, cx, move |me, a, cx| {
-        let ids = crate::actions::album_track_ids(&a);
-        let idx = ids.iter().position(|x| *x == track).unwrap_or(0);
-        me.play_ids(ids, idx, false, cx);
+        let mut t = a.tracks.clone();
+        t.sort_by_key(|x| (x.disc, x.number));
+        let idx = t.iter().position(|x| x.id == track).unwrap_or(0);
+        me.play_tracks(t, idx, false, cx);
         let _ = a2;
     });
 }

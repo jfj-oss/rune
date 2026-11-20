@@ -48,8 +48,25 @@ pub struct ArtistCard {
     pub n: usize,
 }
 
+/// A paged list of tracks (the Tracks page, one query per key).
+#[derive(Default)]
+pub struct TrackList {
+    pub items: Vec<LibTrack>,
+    pub total: usize,
+    pub loaded: bool,
+    pub fetching: bool,
+    pub error: Option<String>,
+    pub at: Option<Instant>,
+}
+
 #[derive(Default)]
 pub struct Data {
+    pub genres: Option<Cached<Vec<GenreFacet>>>,
+    pub labels: Option<Cached<Vec<LabelFacet>>>,
+    pub years: Option<Cached<Vec<YearFacet>>>,
+    pub tracks: HashMap<String, TrackList>,
+    /// anything the later pages read as plain JSON, by request path
+    pub json: HashMap<String, Cached<serde_json::Value>>,
     pub albums: HashMap<String, AlbumList>,
     pub album: HashMap<String, Cached<Album>>,
     pub artist: HashMap<String, Cached<Artist>>,
@@ -70,6 +87,9 @@ impl Data {
         self.playlist.clear();
         self.playlists = None;
         self.artist_cards = None;
+        self.genres = None;
+        self.json.clear();
+        for l in self.tracks.values_mut() { l.at = None; }
     }
 }
 

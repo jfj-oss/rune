@@ -88,6 +88,21 @@ impl Repeat {
     }
 }
 
+/// A browser zone's instruction to the tab that sounds it (`TabPlan` in shared/src/index.ts): `run[0]` is the song to play,
+/// the others follow gaplessly; a new `load_v` means load now, a new `seek_v` means seek to the state's position.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TabPlan {
+    #[serde(default)]
+    pub token: u64,
+    #[serde(default)]
+    pub load_v: u64,
+    #[serde(default)]
+    pub seek_v: u64,
+    #[serde(default)]
+    pub run: Vec<String>,
+}
+
 /// `PlayerState` as the server sends it. With `?slim=1` the queue is left out of an event whose queue did not change.
 #[derive(Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +125,9 @@ pub struct WireState {
     pub repeat: Repeat,
     #[serde(default)]
     pub elsewhere: bool,
+    /// Browser zones only: what the sounding tab has to do. Missing for every other zone.
+    #[serde(default)]
+    pub tab: Option<TabPlan>,
 }
 
 /// A zone as GET /zones lists it.
@@ -214,6 +232,7 @@ pub struct Player {
     pub shuffle: bool,
     pub repeat: Repeat,
     pub elsewhere: bool,
+    pub tab: Option<TabPlan>,
 }
 
 impl Player {
@@ -306,6 +325,7 @@ impl Model {
             shuffle: w.shuffle,
             repeat: w.repeat,
             elsewhere: w.elsewhere,
+            tab: w.tab,
         });
     }
 

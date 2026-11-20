@@ -1,18 +1,31 @@
 //! rune desktop: the native (GPUI) frontend for the rune music server. See native/desktop/PORT-PLAN.md.
 mod actions;
+mod albumlogic;
+mod audio;
+mod charts;
+mod audio_zone;
 mod covers;
 mod data;
 mod logo;
+mod hotkeys;
 mod menu;
+mod nowplaying;
 mod pages;
+mod playroute;
+mod preview;
 mod queue;
 mod route;
 mod rune;
+mod setup;
 mod shell;
+mod smart;
+mod smartdlg;
 mod shortcuts;
 mod testhook;
+mod text;
 mod theme;
 mod util;
+mod waveform;
 mod widgets;
 
 use gpui_kit::*;
@@ -29,6 +42,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dir = config_dir();
     let mut cfg = config::load(&dir);
+    let had_saved = dir.join("config.json").exists();
     // `--url http://host:port` (or RUNE_DESKTOP_URL) wins over the saved one
     let mut it = args.iter();
     while let Some(a) = it.next() { if a == "--url" { if let Some(u) = it.next() { cfg.url = config::normalize_url(u); } } }
@@ -38,6 +52,7 @@ fn main() {
         eprintln!("rune-desktop: refusing to talk to :4545 in a test run (set RUNE_DESKTOP_ALLOW_LIVE to override)");
         std::process::exit(2);
     }
+    let first_run = !had_saved && !args.iter().any(|a| a == "--url") && std::env::var_os("RUNE_DESKTOP_URL").is_none();
     let token = config::load_token(&dir);
     let (ww, wh) = std::env::var("RUNE_DESKTOP_SIZE").ok().and_then(|v| { let (a, b) = v.split_once('x')?; Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?)) }).unwrap_or((1280., 800.));
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx: &mut App| {
@@ -58,7 +73,7 @@ fn main() {
         };
         // Opened bare (not through gpui_kit::open_window, whose Root wraps a client-decoration frame around the window).
         cx.open_window(opts, move |window, cx| {
-            let v = cx.new(|cx| rune::Rune::new(cfg, dir, token, window, cx));
+            let v = cx.new(|cx| { let mut r = rune::Rune::new(cfg, dir, token, window, cx); r.first_run = first_run; if first_run { r.open_setup(window, cx); } r });
             let f = v.read(cx).focus.clone();
             window.focus(&f, cx);
             v

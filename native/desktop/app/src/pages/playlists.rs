@@ -76,7 +76,7 @@ impl Rune {
         let find_in = self.playlists_find.clone();
         let find2 = find.clone();
         let rowfn: RowFn = Box::new(move |this, ix, window, cx| match &rows[ix] {
-            R_::Head => padded(page_head("Playlists", &sub, Some(div().id("pl-new").child(btn("New playlist", Some("plus"), true)).on_click(cx.listener(|this, _, window, cx| this.open_new_playlist(vec![], window, cx))).into_any_element()))).into_any_element(),
+            R_::Head => padded(page_head("Playlists", &sub, Some(h_flex().gap(px(8.)).child(div().id("pl-import").child(btn("Import", Some("upload"), false)).on_click(cx.listener(|this, _, _, cx| this.import_m3u8(None, cx)))).child(div().id("pl-new").child(btn("New playlist", Some("plus"), true)).on_click(cx.listener(|this, _, window, cx| this.open_new_playlist(vec![], window, cx)))).into_any_element()))).into_any_element(),
             R_::Toolbar => padded(div().mb(px(22.)).child(this.find_box(&find_in))).into_any_element(),
             R_::Section(t) => padded(div().pt(px(8.)).child(section_head(t))).into_any_element(),
             R_::Cards(is_mine, r) => {

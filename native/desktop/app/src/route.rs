@@ -54,7 +54,9 @@ pub enum Route {
     Search(String),
     Tracks,
     Genres,
+    Genre(String),
     People,
+    Person(String),
     Discover,
     Radio,
     Stats,
@@ -76,6 +78,8 @@ impl Route {
             Route::Search(q) => format!("search:{q}"),
             Route::Tracks => "tracks".into(),
             Route::Genres => "genres".into(),
+            Route::Genre(g) => format!("genre:{g}"),
+            Route::Person(p) => format!("person:{p}"),
             Route::People => "people".into(),
             Route::Discover => "discover".into(),
             Route::Radio => "radio".into(),
@@ -87,7 +91,7 @@ impl Route {
     pub fn title(&self) -> &'static str {
         match self {
             Route::Home => "Home", Route::Albums(_) => "Albums", Route::Album(_) => "Album", Route::Artists => "Artists", Route::Artist(_) => "Artist",
-            Route::Playlists(_) => "Playlists", Route::Playlist(_) => "Playlist", Route::Search(_) => "Search", Route::Tracks => "Tracks", Route::Genres => "Genres",
+            Route::Playlists(_) => "Playlists", Route::Playlist(_) => "Playlist", Route::Search(_) => "Search", Route::Tracks => "Tracks", Route::Genres => "Genres", Route::Genre(_) => "Genre", Route::Person(_) => "Person",
             Route::People => "People", Route::Discover => "Discover", Route::Radio => "Radio", Route::Stats => "Stats", Route::Settings => "Settings", Route::Duplicates => "Duplicates",
         }
     }

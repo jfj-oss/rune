@@ -32,6 +32,17 @@ pub fn format_total_length(ms: f64) -> String {
     if m == 0 { format!("{h} hr") } else { format!("{h} hr {m} min") }
 }
 
+/// 1234 -> "1,234".
+pub fn group(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 { out.push(','); }
+        out.push(ch);
+    }
+    out
+}
+
 /// 1,234 albums / 1 album.
 pub fn plural(n: usize, one: &str) -> String {
     let digits = n.to_string();

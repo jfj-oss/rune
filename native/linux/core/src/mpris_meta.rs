@@ -101,6 +101,7 @@ mod tests {
             shuffle: true,
             repeat: Repeat::All,
             elsewhere: false,
+            tab: None,
         };
         m.update(Msg::Fetched { state: st, rev: None }, 0);
         m

@@ -39,6 +39,7 @@ pub enum MenuAct {
     GoAlbum(String),
     GoArtist(String),
     Radio { from: &'static str, id: String },
+    SongRadio { id: String, title: String, artist: String },
     Like { id: String, on: bool },
     PinAlbum { id: String, pin: bool },
     PinPlaylist { id: String, pin: bool },
@@ -47,7 +48,19 @@ pub enum MenuAct {
     DeletePlaylist { id: String, name: String },
     SetSort(crate::route::Sort),
     SetView(bool),
+    TracksSort(&'static str),
+    TracksDir,
+    GenreSort(&'static str),
+    Facet { kind: &'static str, value: Option<String> },
     Rescan,
+    AlbumKey(String),
+    Normalize(&'static str),
+    AutoRadio(bool),
+    ExportM3u8 { id: String, name: String },
+    ImportM3u8,
+    Smart(crate::smartdlg::SmartAct),
+    FixMatch(String),
+    CopyText(String, String),
     DuplicatesPage,
     SettingsPage,
 }
@@ -80,8 +93,14 @@ pub struct PopMenu {
 }
 
 pub enum Dialog {
+    /// The smart-playlist rule builder
+    Smart(Box<crate::smartdlg::SmartState>),
+    /// Play on: the song asked for cannot play on this zone; where to hear these instead
+    PlayOn { items: Vec<crate::playroute::Item>, start: usize, shuffle: bool, need: crate::playroute::Source },
+    /// Fix match: the album and the candidate release picked so far
+    FixMatch { album: String, sel: Option<String> },
     /// New playlist: name box, and the tracks to put in it
-    NewPlaylist { name: Entity<InputState>, ids: Vec<String> },
+    NewPlaylist { name: Entity<InputState>, desc: Entity<InputState>, ids: Vec<String> },
     DeletePlaylist { id: String, name: String },
 }
 
@@ -97,6 +116,12 @@ struct Saved {
     sidebar_collapsed: bool,
     #[serde(default)]
     view_list: bool,
+    /// the id of this install's own zone (`browser:<id>`), made on first run
+    #[serde(default)]
+    audio_id: String,
+    /// the zone last chosen in the player bar
+    #[serde(default)]
+    zone: Option<String>,
 }
 
 pub struct Rune {
@@ -110,6 +135,41 @@ pub struct Rune {
     pub hist: History,
     pub lists: HashMap<String, ListState>,
     pub list_sigs: HashMap<String, u64>,
+    pub hscrolls: HashMap<String, ScrollHandle>,
+    pub audio_model: Model,
+    pub audio: Option<crate::audio::tabplayer::TabPlayer<crate::audio::engine::RealEngine, crate::audio_zone::ChanReporter>>,
+    pub own_zone: String,
+    pub zone_pref: Option<String>,
+    pub peak_cache: Option<(String, Arc<Vec<f32>>, bool)>,
+    pub np_open: bool,
+    pub setup: Option<crate::setup::Setup>,
+    pub first_run: bool,
+    pub stats_period: &'static str,
+    pub people_find: Entity<InputState>,
+    pub people_q: String,
+    pub people_bucket: &'static str,
+    pub album_key: String,
+    pub playlist_keys: std::collections::BTreeMap<String, (String, String)>,
+    pub hotkey_listen: Option<(String, String)>,
+    pub pending_smart: Option<crate::smartdlg::SmartAct>,
+    pub dlg_subs: Vec<Subscription>,
+    pub smart_prev: Option<(String, Option<(usize, Vec<String>)>, bool)>,
+    pub smart_timer: Option<Task<()>>,
+    pub radio_find: Entity<InputState>,
+    pub radio_q: String,
+    pub radio_tag: Option<String>,
+    pub fav_override: HashMap<String, bool>,
+    pub dismissed: std::collections::HashSet<String>,
+    pub discover_refresh: bool,
+    pub song_radio: Option<(String, String, String)>,
+    pub prose_open: std::collections::HashSet<String>,
+    pub hscores_open: bool,
+    pub preview: Option<crate::preview::Preview>,
+    pub pl_sel: std::collections::BTreeSet<usize>,
+    pub pl_anchor: Option<usize>,
+    pub pl_select_mode: bool,
+    pub pl_rename: Option<Entity<InputState>>,
+    pub pl_rename_sub: Option<Subscription>,
     pub focus: FocusHandle,
 
     pub sidebar_collapsed: bool,
@@ -132,6 +192,13 @@ pub struct Rune {
     pub search_input: Entity<InputState>,
     pub albums_find: Entity<InputState>,
     pub playlists_find: Entity<InputState>,
+    pub tracks_find: Entity<InputState>,
+    pub genres_find: Entity<InputState>,
+    pub tracks_q: String,
+    pub genres_q: String,
+    pub tracks_sort: &'static str,
+    pub tracks_desc: Option<bool>,
+    pub genre_sort: &'static str,
     pub find_timer: Option<Task<()>>,
     pub sort_open: bool,
     pub hovered_row: Option<String>,
@@ -180,7 +247,33 @@ impl Rune {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search albums, artists, tracks"));
         let albums_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in albums"));
         let playlists_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in playlists"));
+        let tracks_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by title, artist or album"));
+        let genres_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter genres"));
+        let radio_find = cx.new(|cx| InputState::new(window, cx).placeholder("Search stations, tags or countries"));
+        let people_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find a person"));
         let mut subs = Vec::new();
+        subs.push(cx.subscribe_in(&people_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { this.people_q = st.read(cx).value().trim().to_string(); cx.notify(); } }));
+        subs.push(cx.subscribe_in(&radio_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
+            if let InputEvent::Change = ev {
+                let v = st.read(cx).value().trim().to_string();
+                this.find_timer = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                    let _ = this.update(cx, |m, cx| { if m.radio_find.read(cx).value().trim() == v && m.radio_q != v { m.radio_q = v; cx.notify(); } });
+                }));
+            }
+        }));
+        subs.push(cx.subscribe_in(&tracks_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
+            if let InputEvent::Change = ev {
+                let v = st.read(cx).value().trim().to_string();
+                this.find_timer = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                    let _ = this.update(cx, |m, cx| { if m.tracks_find.read(cx).value().trim() == v && m.tracks_q != v { m.tracks_q = v; cx.notify(); } });
+                }));
+            }
+        }));
+        subs.push(cx.subscribe_in(&genres_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
+            if let InputEvent::Change = ev { this.genres_q = st.read(cx).value().trim().to_string(); cx.notify(); }
+        }));
         subs.push(cx.subscribe_in(&search_input, window, |this: &mut Rune, st, ev: &InputEvent, window, cx| this.on_search_input(st, ev, window, cx)));
         subs.push(cx.subscribe_in(&albums_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
             if let InputEvent::Change = ev { let v = st.read(cx).value().trim().to_string(); this.find_changed(v, true, cx); }
@@ -193,21 +286,40 @@ impl Rune {
             Some(r) => parse_route(r),
             None => Route::Home,
         };
-        let model = Model::new(&cfg.zone);
+        let mut saved = saved;
+        if saved.audio_id.is_empty() { saved.audio_id = crate::audio_zone::fresh_id(); let _ = std::fs::create_dir_all(&dir); if let Ok(j) = serde_json::to_string(&saved) { let _ = std::fs::write(state_path(&dir), j); } }
+        let own_zone = format!("browser:{}", saved.audio_id);
+        // this app sounds its own zone; on a Mac that is the default, since nothing else there plays
+        let first_zone = saved.zone.clone().unwrap_or_else(|| if cfg!(target_os = "macos") { own_zone.clone() } else { cfg.zone.clone() });
+        let model = Model::new(&first_zone);
+        let audio_model = Model::new(&own_zone);
+        let (audio_tx, audio_rx) = futures::channel::mpsc::unbounded();
+        let audio = crate::audio_zone::start(&client, &own_zone, audio_tx);
+        cx.spawn(async move |this, cx| {
+            let mut audio_rx = audio_rx;
+            while let Some(ev) = audio_rx.next().await { if this.update(cx, |m, cx| m.audio_event(ev, cx)).is_err() { break; } }
+        }).detach();
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            if this.update(cx, |m, _| { if let Some(a) = m.audio.as_mut() { a.tick(now_ms()); } }).is_err() { break; }
+        }).detach();
         let me = Rune {
-            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), focus: cx.focus_handle(),
+            audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
+            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
-            search_input, albums_find, playlists_find, find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
+            search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
         };
         me.net.viewing(vec![me.model.zone.clone()]);
+        let mut me = me;
+        me.load_hotkeys(cx);
         me
     }
 
     // ------------------------------------------------------------------ persistence
 
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone() };
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_string(&s) { let _ = std::fs::write(state_path(&self.dir), j); }
     }
@@ -216,17 +328,18 @@ impl Rune {
 
     pub fn on_net(&mut self, ev: NetEvent, cx: &mut Context<Self>) {
         let now = now_ms();
-        let msg = match ev {
+        let (msg, msg2) = match ev {
             NetEvent::Conn(c) => {
                 if c == Conn::Online {
                     self.net.fetch_zones();
                     self.net.fetch_state(&self.model.zone.clone(), None);
+                    if self.model.zone != self.own_zone { self.net.fetch_state(&self.own_zone.clone(), None); }
                     self.net.viewing(vec![self.model.zone.clone()]);
                     // the library may have changed while we were away
                     self.data.library_changed();
                     for l in self.data.albums.values_mut() { l.at = None; }
                 }
-                Msg::Conn(c)
+                (Msg::Conn(c.clone()), Msg::Conn(c))
             }
             NetEvent::Ws(rune_mini_core::model::ServerEvent::LibraryChanged) => {
                 self.data.library_changed();
@@ -234,19 +347,25 @@ impl Rune {
                 cx.notify();
                 return;
             }
-            NetEvent::Ws(e) => Msg::Ws(e),
-            NetEvent::Fetched { state, rev } => Msg::Fetched { state, rev },
-            NetEvent::Zones(z) => Msg::Zones(z),
+            NetEvent::Ws(e) => (Msg::Ws(e.clone()), Msg::Ws(e)),
+            NetEvent::Fetched { state, rev } => (Msg::Fetched { state: state.clone(), rev: rev.clone() }, Msg::Fetched { state, rev }),
+            NetEvent::Zones(z) => (Msg::Zones(z.clone()), Msg::Zones(z)),
             NetEvent::Failed(e) => { self.say(e, cx); return; }
             NetEvent::Cover { .. } => return,
             // rune mini's playlist dots: not used by the desktop app
             NetEvent::Minis(_) | NetEvent::Started { .. } => return,
         };
+        // the zone this app sounds is followed whichever zone is on screen
+        if self.model.zone != self.own_zone {
+            for e in self.audio_model.update(msg2, now) { let Effect::Fetch { zone, rev } = e; self.net.fetch_state(&zone, rev); }
+            self.audio_changed(now);
+        }
         let fx = self.model.update(msg, now);
         for e in fx {
             let Effect::Fetch { zone, rev } = e;
             self.net.fetch_state(&zone, rev);
         }
+        if self.model.zone == self.own_zone { self.audio_state_from_view(now); }
         self.player_changed(cx);
     }
 
@@ -381,6 +500,60 @@ impl Rune {
         });
     }
 
+    /// Any GET as JSON, kept by its path like a query cache. Returns what is known now; asks again when stale.
+    pub fn ensure_json(&mut self, path: &str, cx: &mut Context<Self>) -> Slot<serde_json::Value> {
+        if let Some(c) = self.data.json.get(path) {
+            if !c.stale() { return c.slot.clone(); }
+        }
+        let prev = self.data.json.get(path).map(|c| c.slot.clone());
+        self.data.json.insert(path.to_string(), Cached { slot: prev.clone().unwrap_or(Slot::Loading), at: Instant::now() });
+        let key = path.to_string();
+        self.spawn_json::<Value>(cx, path.to_string(), move |me, r, cx| {
+            me.data.json.insert(key, Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() });
+            cx.notify();
+        });
+        prev.unwrap_or(Slot::Loading)
+    }
+
+    /// Drop one cached JSON (after we changed it) so the next draw asks again.
+    pub fn forget_json(&mut self, prefix: &str) { self.data.json.retain(|k, _| !k.starts_with(prefix)); }
+
+    pub fn ensure_facets(&mut self, cx: &mut Context<Self>) {
+        if self.data.genres.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.genres.is_none() { self.data.genres = Some(Cached::loading()); } else if let Some(c) = self.data.genres.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<GenreFacet>>(cx, "/genres".into(), |me, r, cx| { me.data.genres = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+    }
+
+    pub fn ensure_labels_years(&mut self, cx: &mut Context<Self>) {
+        if self.data.labels.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.labels.is_none() { self.data.labels = Some(Cached::loading()); } else if let Some(c) = self.data.labels.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<LabelFacet>>(cx, "/labels".into(), |me, r, cx| { me.data.labels = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+        if self.data.years.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.years.is_none() { self.data.years = Some(Cached::loading()); } else if let Some(c) = self.data.years.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<YearFacet>>(cx, "/years".into(), |me, r, cx| { me.data.years = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+    }
+
+    /// The Tracks page's pages (`/tracks?q&sort&dir&offset&limit`), or a genre's albums through `ensure_albums`.
+    pub fn ensure_tracks(&mut self, key: &str, query: &str, more: bool, cx: &mut Context<Self>) {
+        let l = self.data.tracks.entry(key.to_string()).or_default();
+        if l.fetching { return; }
+        let offset = if more { if !l.loaded || l.items.len() >= l.total { return; } l.items.len() } else { if l.loaded && l.at.is_some_and(|t| t.elapsed() < STALE) { return; } 0 };
+        l.fetching = true;
+        let (k, q) = (key.to_string(), query.to_string());
+        self.spawn_json::<Page<LibTrack>>(cx, format!("/tracks?{}offset={}&limit=200", if query.is_empty() { String::new() } else { format!("{query}&") }, offset), move |me, r, cx| {
+            let l = me.data.tracks.entry(k).or_default();
+            l.fetching = false;
+            match r {
+                Ok(p) => { if offset == 0 { l.items = p.items; } else { l.items.extend(p.items); } l.total = p.total; l.loaded = true; l.error = None; l.at = Some(Instant::now()); }
+                Err(e) => l.error = Some(e),
+            }
+            cx.notify();
+        });
+    }
+
     /// The first page of an Albums query, and (when `more`) the next one.
     pub fn ensure_albums(&mut self, q: &AlbumsQ, more: bool, cx: &mut Context<Self>) {
         let key = q.key();
@@ -456,6 +629,11 @@ impl Rune {
     fn routed(&mut self, cx: &mut Context<Self>) {
         // the web closes the queue and menus when the path changes (Shell.tsx)
         self.queue_open = false;
+        self.np_open = false;
+        self.pl_sel.clear();
+        self.pl_anchor = None;
+        self.pl_select_mode = false;
+        self.pl_rename = None;
         self.menu = None;
         self.sort_open = false;
         self.hovered_row = None;
@@ -520,14 +698,23 @@ impl Rune {
     pub fn zone_list(&self) -> Vec<(String, String, String)> {
         let mut z: Vec<(String, String, String)> = pickable_zones(&self.model.zones).into_iter().map(|z| (z.id, z.name, z.kind)).collect();
         if z.is_empty() { z.push(("pc".into(), "Linux PC speakers".into(), "pc".into())); }
+        z.push((self.own_zone.clone(), crate::audio_zone::device_name(), "browser".into()));
         z
     }
 
     pub fn zone_name(&self) -> String {
+        if self.model.zone == self.own_zone { return crate::audio_zone::device_name(); }
         self.model.zones.iter().find(|z| z.id == self.model.zone).map(|z| z.name.clone()).unwrap_or_else(|| if self.model.zone == "pc" { "Linux PC speakers".into() } else { self.model.zone.clone() })
     }
 
     pub fn set_zone(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.zone_pref = Some(id.to_string());
+        self.save_state();
+        if id != self.own_zone && self.model.zone == self.own_zone {
+            // our own zone is followed by the second model while another zone is on screen: start it from the server's word
+            self.audio_model = Model::new(&self.own_zone);
+            self.net.fetch_state(&self.own_zone.clone(), None);
+        }
         let fx = self.model.set_zone(id);
         for e in fx { let Effect::Fetch { zone, rev } = e; self.net.fetch_state(&zone, rev); }
         self.net.viewing(vec![id.to_string()]);
@@ -570,7 +757,10 @@ pub fn parse_route(s: &str) -> Route {
             let mut q = AlbumsQ::default();
             match param("source").as_deref() { Some("local") => q.source = Src::Local, Some("spotify") => q.source = Src::Spotify, _ => {} }
             match param("sort").as_deref() { Some("artist") => q.sort = Sort::Artist, Some("title") => q.sort = Sort::Title, Some("year") => q.sort = Sort::Year, _ => {} }
-            q.q = param("q").unwrap_or_default();
+            q.q = param("q").map(|v| pct_decode(&v.replace('+', " "))).unwrap_or_default();
+            q.genre = param("genre").map(|v| pct_decode(&v));
+            q.label = param("label").map(|v| pct_decode(&v));
+            q.year = param("year").and_then(|v| v.parse().ok());
             Route::Albums(q)
         }
         ["album", id] => Route::Album(dec(id)),
@@ -581,6 +771,8 @@ pub fn parse_route(s: &str) -> Route {
         ["search"] => Route::Search(param("q").unwrap_or_default()),
         ["tracks"] => Route::Tracks,
         ["genres"] => Route::Genres,
+        ["genres", g] => Route::Genre(dec(g)),
+        ["people", p] => Route::Person(dec(p)),
         ["people"] => Route::People,
         ["discover"] => Route::Discover,
         ["radio"] => Route::Radio,

@@ -26,13 +26,22 @@ impl Rune {
         self.search_input.read(cx).focus_handle(cx).is_focused(window)
             || self.albums_find.read(cx).focus_handle(cx).is_focused(window)
             || self.playlists_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.tracks_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.genres_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.pl_rename.is_some()
+            || self.people_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.radio_find.read(cx).focus_handle(cx).is_focused(window)
             || self.dialog.is_some()
     }
 
     pub fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &ev.keystroke;
         let key = k.key.to_lowercase();
+        if self.hotkey_listen.is_some() && !k.modifiers.control && !k.modifiers.platform && !k.modifiers.alt { if !ev.is_held { self.hotkey_capture(&key, cx); } return; }
         if key == "escape" {
+            if self.preview.is_some() { self.preview = None; cx.notify(); return; }
+            if self.song_radio.is_some() { self.song_radio = None; cx.notify(); return; }
+            if self.pl_rename.is_some() { self.pl_rename = None; self.pl_rename_sub = None; window.focus(&self.focus.clone(), cx); cx.notify(); return; }
             if self.dialog.is_some() { self.dialog = None; cx.notify(); return; }
             if self.menu.is_some() || self.zone_open || self.signal_open { self.menu = None; self.zone_open = false; self.signal_open = false; cx.notify(); return; }
             if self.search_input.read(cx).focus_handle(cx).is_focused(window) {
@@ -40,7 +49,9 @@ impl Rune {
                 window.focus(&self.focus.clone(), cx);
                 return;
             }
-            if self.queue_open { self.queue_open = false; cx.notify(); }
+            if self.queue_open { self.queue_open = false; cx.notify(); return; }
+            if self.np_open { self.np_open = false; cx.notify(); return; }
+            if !self.pl_sel.is_empty() { self.pl_sel.clear(); self.pl_anchor = None; self.pl_select_mode = false; cx.notify(); }
             return;
         }
         if self.typing(window, cx) {
@@ -81,14 +92,18 @@ impl Rune {
                 if dur <= 0. { return; }
                 match skip_ahead_ms(p.position(now_ms()), dur) { Some(to) => self.cmd(UiCommand::SeekTo(to), cx), None => self.cmd(UiCommand::Next, cx) }
             }
+            "delete" | "backspace" if !held => {
+                if let Route::Playlist(id) = self.route().clone() { if !self.pl_sel.is_empty() { let pos: Vec<usize> = self.pl_sel.iter().copied().collect(); self.remove_positions(&id, pos, cx); } }
+            }
             "q" if !held => self.back(cx),
             "z" if !held => self.go(Route::Home, cx),
             "x" if !held => self.go(Route::Playlists(String::new()), cx),
             "g" if !held => { if has_queue { self.cmd(UiCommand::ToggleShuffle, cx); } }
-            "a" if !held => {
+            kk if !held && !self.album_key.is_empty() && kk == self.album_key => {
                 if let Some(id) = self.model.player.as_ref().and_then(|p| p.current()).map(|c| c.album.id.clone()) { if id != "sp:unknown" && !id.is_empty() { self.go(Route::Album(id), cx); } }
             }
             "f" if !held => { if let Route::Playlist(id) = self.route().clone() { self.play_playlist(&id, true, 0, cx); } }
+            kk if !held && self.playlist_keys.contains_key(kk) => { if let Some((id, _)) = self.playlist_keys.get(kk).cloned() { self.go(Route::Playlist(id), cx); } }
             "/" => { let f = self.search_input.read(cx).focus_handle(cx); window.focus(&f, cx); cx.stop_propagation(); }
             _ => {}
         }
