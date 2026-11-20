@@ -101,6 +101,12 @@ struct Saved {
     sidebar_collapsed: bool,
     #[serde(default)]
     view_list: bool,
+    /// the id of this install's own zone (`browser:<id>`), made on first run
+    #[serde(default)]
+    audio_id: String,
+    /// the zone last chosen in the player bar
+    #[serde(default)]
+    zone: Option<String>,
 }
 
 pub struct Rune {
@@ -115,6 +121,10 @@ pub struct Rune {
     pub lists: HashMap<String, ListState>,
     pub list_sigs: HashMap<String, u64>,
     pub hscrolls: HashMap<String, ScrollHandle>,
+    pub audio_model: Model,
+    pub audio: Option<crate::audio::tabplayer::TabPlayer<crate::audio::engine::RealEngine, crate::audio_zone::ChanReporter>>,
+    pub own_zone: String,
+    pub zone_pref: Option<String>,
     pub peak_cache: Option<(String, Arc<Vec<f32>>, bool)>,
     pub np_open: bool,
     pub pl_sel: std::collections::BTreeSet<usize>,
@@ -226,8 +236,25 @@ impl Rune {
             Some(r) => parse_route(r),
             None => Route::Home,
         };
-        let model = Model::new(&cfg.zone);
+        let mut saved = saved;
+        if saved.audio_id.is_empty() { saved.audio_id = crate::audio_zone::fresh_id(); let _ = std::fs::create_dir_all(&dir); if let Ok(j) = serde_json::to_string(&saved) { let _ = std::fs::write(state_path(&dir), j); } }
+        let own_zone = format!("browser:{}", saved.audio_id);
+        // this app sounds its own zone; on a Mac that is the default, since nothing else there plays
+        let first_zone = saved.zone.clone().unwrap_or_else(|| if cfg!(target_os = "macos") { own_zone.clone() } else { cfg.zone.clone() });
+        let model = Model::new(&first_zone);
+        let audio_model = Model::new(&own_zone);
+        let (audio_tx, audio_rx) = futures::channel::mpsc::unbounded();
+        let audio = crate::audio_zone::start(&client, &own_zone, audio_tx);
+        cx.spawn(async move |this, cx| {
+            let mut audio_rx = audio_rx;
+            while let Some(ev) = audio_rx.next().await { if this.update(cx, |m, cx| m.audio_event(ev, cx)).is_err() { break; } }
+        }).detach();
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_secs(1)).await;
+            if this.update(cx, |m, _| { if let Some(a) = m.audio.as_mut() { a.tick(now_ms()); } }).is_err() { break; }
+        }).detach();
         let me = Rune {
+            audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
             cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
@@ -240,7 +267,7 @@ impl Rune {
     // ------------------------------------------------------------------ persistence
 
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone() };
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_string(&s) { let _ = std::fs::write(state_path(&self.dir), j); }
     }
@@ -249,17 +276,18 @@ impl Rune {
 
     pub fn on_net(&mut self, ev: NetEvent, cx: &mut Context<Self>) {
         let now = now_ms();
-        let msg = match ev {
+        let (msg, msg2) = match ev {
             NetEvent::Conn(c) => {
                 if c == Conn::Online {
                     self.net.fetch_zones();
                     self.net.fetch_state(&self.model.zone.clone(), None);
+                    if self.model.zone != self.own_zone { self.net.fetch_state(&self.own_zone.clone(), None); }
                     self.net.viewing(vec![self.model.zone.clone()]);
                     // the library may have changed while we were away
                     self.data.library_changed();
                     for l in self.data.albums.values_mut() { l.at = None; }
                 }
-                Msg::Conn(c)
+                (Msg::Conn(c.clone()), Msg::Conn(c))
             }
             NetEvent::Ws(rune_mini_core::model::ServerEvent::LibraryChanged) => {
                 self.data.library_changed();
@@ -267,19 +295,25 @@ impl Rune {
                 cx.notify();
                 return;
             }
-            NetEvent::Ws(e) => Msg::Ws(e),
-            NetEvent::Fetched { state, rev } => Msg::Fetched { state, rev },
-            NetEvent::Zones(z) => Msg::Zones(z),
+            NetEvent::Ws(e) => (Msg::Ws(e.clone()), Msg::Ws(e)),
+            NetEvent::Fetched { state, rev } => (Msg::Fetched { state: state.clone(), rev: rev.clone() }, Msg::Fetched { state, rev }),
+            NetEvent::Zones(z) => (Msg::Zones(z.clone()), Msg::Zones(z)),
             NetEvent::Failed(e) => { self.say(e, cx); return; }
             NetEvent::Cover { .. } => return,
             // rune mini's playlist dots: not used by the desktop app
             NetEvent::Minis(_) | NetEvent::Started { .. } => return,
         };
+        // the zone this app sounds is followed whichever zone is on screen
+        if self.model.zone != self.own_zone {
+            for e in self.audio_model.update(msg2, now) { let Effect::Fetch { zone, rev } = e; self.net.fetch_state(&zone, rev); }
+            self.audio_changed(now);
+        }
         let fx = self.model.update(msg, now);
         for e in fx {
             let Effect::Fetch { zone, rev } = e;
             self.net.fetch_state(&zone, rev);
         }
+        if self.model.zone == self.own_zone { self.audio_state_from_view(now); }
         self.player_changed(cx);
     }
 
@@ -612,14 +646,23 @@ impl Rune {
     pub fn zone_list(&self) -> Vec<(String, String, String)> {
         let mut z: Vec<(String, String, String)> = pickable_zones(&self.model.zones).into_iter().map(|z| (z.id, z.name, z.kind)).collect();
         if z.is_empty() { z.push(("pc".into(), "Linux PC speakers".into(), "pc".into())); }
+        z.push((self.own_zone.clone(), crate::audio_zone::device_name(), "browser".into()));
         z
     }
 
     pub fn zone_name(&self) -> String {
+        if self.model.zone == self.own_zone { return crate::audio_zone::device_name(); }
         self.model.zones.iter().find(|z| z.id == self.model.zone).map(|z| z.name.clone()).unwrap_or_else(|| if self.model.zone == "pc" { "Linux PC speakers".into() } else { self.model.zone.clone() })
     }
 
     pub fn set_zone(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.zone_pref = Some(id.to_string());
+        self.save_state();
+        if id != self.own_zone && self.model.zone == self.own_zone {
+            // our own zone is followed by the second model while another zone is on screen: start it from the server's word
+            self.audio_model = Model::new(&self.own_zone);
+            self.net.fetch_state(&self.own_zone.clone(), None);
+        }
         let fx = self.model.set_zone(id);
         for e in fx { let Effect::Fetch { zone, rev } = e; self.net.fetch_state(&zone, rev); }
         self.net.viewing(vec![id.to_string()]);

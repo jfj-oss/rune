@@ -72,6 +72,7 @@ impl Rune {
                     "queue": p.map(|p| p.queue.iter().map(|q| q.track.title.clone()).collect::<Vec<_>>()),
                     "toast": self.toast.as_ref().map(|t| t.text.clone()), "queue_open": self.queue_open, "menu": self.menu.is_some(), "dialog": self.dialog.is_some(),
                     "covers_held": held, "covers_bytes": bytes, "covers_requested": self.covers.requested, "covers_fetched": self.covers.fetched, "frames": self.frame,
+                    "own_zone": self.own_zone, "audio": self.audio.as_ref().map(|a| json!({"loaded": a.loaded(), "sounding": a.is_sounding(), "position": crate::audio::Engine::position(&a.engine)})),
                     "albums_loaded": self.data.albums.values().map(|l| l.items.len()).max(),
                 })
             }
@@ -95,6 +96,7 @@ impl Rune {
             "playlist_remove" => { let pos: Vec<usize> = v.get("positions").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64().map(|x| x as usize)).collect()).unwrap_or_default(); self.remove_positions(&s("id"), pos, cx); json!({"ok": true}) }
             "np" => { self.np_open = b("open"); cx.notify(); json!({"ok": true}) }
             "tracks_sort" => { self.tracks_sort = match s("sort").as_str() { "artist" => "artist", "album" => "album", "duration" => "duration", "added" => "added", _ => "title" }; self.tracks_desc = v.get("desc").and_then(|x| x.as_bool()); cx.notify(); json!({"ok": true}) }
+            "zone" => { let z = if s("id") == "own" { self.own_zone.clone() } else { s("id") }; self.set_zone(&z, cx); json!({"ok": true})}
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

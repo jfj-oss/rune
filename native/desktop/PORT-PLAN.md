@@ -139,7 +139,12 @@ its own with phase 9 (without it the Mac app is a remote control of the PC's zon
 - Browser-only plumbing: `scrollRoot`, `useMedia`, `frameRate`, `oneTab`, `preferLocal`, `capabilities`, localStorage
   keys (replaced by `~/.config/rune-desktop/state.json`).
 
-## Open decisions for the user
+## Decisions taken (2026-11-20)
+
+1. **Mac is not a remote control**: it plays on its own, so phase 9 (own audio) is built right after phase 2 (done below).
+2. **Glass** is the plain dim tint (no blur). 3. Config stays in `~/.config/rune-desktop/`.
+
+## Open decisions for the user (superseded by the list above)
 
 1. **MacBook audio**: ship the Mac build as a remote control first (phases 1-8) or wait for phase 9?
 2. **Backdrop**: the web's default is the dither backdrop. Phase 1 compares against the web with `?ambient=off`
@@ -175,3 +180,31 @@ Measured on the 2,000-album generated library (Ryzen 7 7800X3D, RTX 4090, privat
 The 4 slow frames at 200 px/frame are covers arriving (decode is off the UI thread; the texture upload is not).
 Not yet verified: a real keyboard/pointer pass through KWin's fake-input protocol (the e2e drives the same action code through a
 test control port instead), HiDPI, X11, and macOS.
+
+
+## Phase 2 results (branch gpui-desktop-2)
+
+Built and checked in web | native pairs at 1280x800 (tools/shots.sh, tools/pair.sh): Home (greeting, Recently added / Recently
+played / Spotify / Rediscover, horizontal scrollers with arrows), Tracks (filter, sort + direction, sortable header, virtualised),
+Genres (mosaic tiles, filter) and a genre page, Now Playing full screen (cover, title, waveform, transport, volume, signal path, Up
+next; Esc or the chevron closes; the dither backdrop is phase 6), the waveform seek bar (peaks from `/api/peaks`, the web's
+song-shaped stand-in for Spotify), queue drag-reorder (grip), Albums Label/Year facets (scrolling list menus, removable chips),
+playlist drag-reorder, multi-select (shift / ctrl-click, Select mode, Delete key, add to playlist, remove) and inline rename.
+Window-size handling: pages already re-flow their grids; the sidebar collapse is remembered in `state.json`.
+Not in the pairs yet: the Now Playing "Critical reception / About" cards (phase 3 brings the prose), the playlist hero's
+tinted card and its Hotkey / "Show in rune mini" / sort buttons (phase 4).
+
+## Phase 9 results: the app sounds its own zone
+
+`audio/`: `source.rs` (HTTP byte source with `Range` re-opens), `pipeline.rs` (symphonia decode, channel mix, rubato resample,
+the timeline of songs in the frame stream), `engine.rs` (decode thread + ring buffer + cpal output, or a silent real-time clock
+with `RUNE_DESKTOP_AUDIO=null`), `tabplayer.rs` (the web's `TabPlayer`: follows the server's `TabPlan`, reports started / ended /
+paused / position / failed in order, goes on down the run without a round trip). The zone is `browser:<id>` (id kept in
+`state.json`), listed in the zone picker as "This computer (<host>)"; it is the default zone on macOS. It keeps playing while
+another zone is on screen (a second `Model` follows it). The stream is the original file (`fmt=orig`, `accept=flac,mp3,aac,m4a,
+wav,aiff,vorbis`; opus and wma are transcoded by the server), the server's `X-Rune-Gain-Db` levelling is applied, volume is the
+zone's volume (linear). The output opens at the song's own rate when the device offers it, otherwise the device default with a
+sinc resampler. Tests: unit (timeline, resampler, mixer, TabPlayer with a mock engine), engine tests against a tiny ranged HTTP
+server in real time (gapless across 44.1 and 48 kHz, pause, ranged seek, a missing file), and the desktop e2e (the server's zone
+follows the app: play, skip, seek, pause, songs ending by themselves). NOT verified here: the cpal path on a real sound device
+and on macOS (CoreAudio), because the rig is silent by rule; bit-perfect output stays out of scope (CoreAudio resamples).
