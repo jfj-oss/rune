@@ -78,7 +78,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Rgb {
 pub fn opposite(c: Rgb) -> Rgb { let (h, s, l) = rgb_to_hsl(c); hsl_to_rgb(h + 0.5, s, l) }
 
 static REDUCE: AtomicBool = AtomicBool::new(false);
-pub fn set_effects(_backdrop_on: bool, reduce: bool) { REDUCE.store(reduce, Ordering::Relaxed); }
+pub fn set_effects(_backdrop_on: bool, reduce: bool) { REDUCE.store(reduce, Ordering::Relaxed); crate::logo::set_reduce(reduce); }
 fn reduced() -> bool { REDUCE.load(Ordering::Relaxed) }
 
 /// (light, mid) of the art: the opposite of the web's default backdrop palette (red `#d4584f` / `#521d1a`), a teal that sits
