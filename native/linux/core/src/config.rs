@@ -17,7 +17,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Config {
-        Config { url: DEFAULT_URL.into(), zone: "pc".into(), hotkey: "LOGO+ALT+space".into() }
+        Config { url: DEFAULT_URL.into(), zone: "pc".into(), hotkey: "CTRL+SHIFT+space".into() }
     }
 }
 

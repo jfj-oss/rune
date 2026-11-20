@@ -63,7 +63,9 @@ pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWind
         app_id: Some("rune-mini".into()),
         ..Default::default()
     };
-    let layer = std::env::var_os("RUNE_MINI_NO_LAYER").is_none();
+    // A plain borderless window by default: KWin moves it (drag the cover or the title) and a window rule keeps it above,
+    // off the taskbar and where it was left. RUNE_MINI_LAYER=1 brings back the fixed layer-shell overlay.
+    let layer = std::env::var_os("RUNE_MINI_LAYER").is_some();
     for attempt in [layer, false] {
         if !attempt && layer && false {
             continue;
@@ -273,12 +275,14 @@ impl Render for Panel {
             });
 
         let info = v_flex().flex_1().min_w_0().h(px(84.)).justify_between()
-            .child(v_flex().gap(px(2.))
+            .child(v_flex().gap(px(2.)).cursor_grab().on_mouse_down(MouseButton::Left, |_, window, cx| { cx.stop_propagation(); window.start_window_move(); })
                 .child(div().overflow_hidden().whitespace_nowrap().font_family(look::MONO).text_size(px(15.)).text_color(if online { c(look::INK) } else { c(look::ERROR) }).child(title))
                 .child(div().overflow_hidden().whitespace_nowrap().font_family(look::MONO).text_size(px(12.)).text_color(c(look::DIM)).child(sub)))
             .child(controls)
             .child(footer);
-        let top = h_flex().gap(px(12.)).child(cover).child(info);
+        // drag the cover (or the title lines) to move the panel; the compositor moves it and remembers where
+        let mover = |e: AnyElement| div().cursor_grab().on_mouse_down(MouseButton::Left, |_, window, cx| { cx.stop_propagation(); window.start_window_move(); }).child(e);
+        let top = h_flex().gap(px(12.)).child(mover(cover)).child(info);
 
         // ---- the queue: a typed filter line and a window of rows
         let queue: Option<AnyElement> = m.queue_open.then(|| {
