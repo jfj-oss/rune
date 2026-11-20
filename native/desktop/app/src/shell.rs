@@ -32,7 +32,8 @@ impl Render for Rune {
         let sw = side_w(collapsed);
         let page = self.page(vw - sw, window, cx);
 
-        div().relative().size_full().bg(c(BG)).text_color(c(TEXT)).font_family(SANS).text_size(px(15.)).line_height(px(21.75))
+        // (no background colour of its own: the window's Root draws the page colour and the foil backdrop under this view)
+        div().relative().size_full().text_color(c(TEXT)).font_family(SANS).text_size(px(15.)).line_height(px(21.75))
             .track_focus(&self.focus)
             .key_context("Rune")
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
