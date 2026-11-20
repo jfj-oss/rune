@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=rune mini
+GenericName=Music player panel
+Comment=Show or hide the rune player panel; media keys control rune
+Exec=rune-mini
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+Actions=Toggle;
+
+[Desktop Action Toggle]
+Name=Show or hide
+Exec=rune-mini toggle
