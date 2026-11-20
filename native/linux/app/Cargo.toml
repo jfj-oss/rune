@@ -1,0 +1,21 @@
+[package]
+name = "rune-mini"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "rune mini: a summon-style panel for the rune music server (Linux, GPUI)"
+
+[[bin]]
+name = "rune-mini"
+path = "src/main.rs"
+
+[dependencies]
+rune-mini-core = { path = "../core" }
+gpui-kit = "=0.9.1"
+serde_json = "1"
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+smallvec = "1"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+zbus = "=5.19.0"
+libc = "0.2"

@@ -1,0 +1,141 @@
+// The rune mini panel's core (native/linux/core) against a REAL rune server: real silent FLACs, mpv on a null output, a
+// temp data dir and its own port. The panel is run headless as `rune-mini-probe`: the same websocket reducer, command
+// mapping and REST client the panel uses, with a line protocol on stdin/stdout instead of a window. Nothing is audible.
+//
+// Needs the probe built: `cd native/linux && cargo build -p rune-mini-core --bin rune-mini-probe`; RUNE_MINI_PROBE names it
+// (default: the agent-tmp target dir). Skipped when it is not there, so `pnpm -r test` stays green without a Rust toolchain.
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { haveAudioTools, startServer, until, type Server } from './rig.js';
+
+process.env.LOG_LEVEL = 'silent';
+const probePath = process.env.RUNE_MINI_PROBE ?? join(homedir(), 'data/agent-tmp/rune-mini/target/debug/rune-mini-probe');
+const ready = haveAudioTools() && existsSync(probePath);
+
+interface View { conn: string; status?: string; index?: number; title?: string | null; queue?: string[]; queue_ids?: string[]; position_ms?: number; volume?: number; shuffle?: boolean; repeat?: string }
+
+class Probe {
+  readonly lines: Record<string, unknown>[] = [];
+  private child: ChildProcessWithoutNullStreams;
+  constructor(url: string, zone = 'pc') {
+    this.child = spawn(probePath, [url, zone], { stdio: ['pipe', 'pipe', 'inherit'] });
+    createInterface({ input: this.child.stdout }).on('line', (l) => { try { this.lines.push(JSON.parse(l)); } catch { /* not ours */ } });
+  }
+  view(): View | undefined { return [...this.lines].reverse().find((l) => 'view' in l)?.['view'] as View | undefined; }
+  sent(): unknown[] { return this.lines.filter((l) => 'sent' in l).map((l) => l['sent']); }
+  cmd(c: Record<string, unknown>) { this.child.stdin.write(`${JSON.stringify(c)}\n`); }
+  waitView(what: string, pred: (v: View) => boolean, ms = 10_000) { return until(`the panel to show ${what}`, () => { const v = this.view(); return v && pred(v) ? v : undefined; }, ms); }
+  stop() { this.cmd({ cmd: 'quit' }); setTimeout(() => this.child.kill('SIGTERM'), 500).unref(); }
+}
+
+describe.skipIf(!ready)('rune mini (headless) against a real server', () => {
+  let srv: Server;
+  let probe: Probe;
+  let alpha: string[];
+  let bravo: string[];
+  let charlie: string[];
+  const titles = async () => (await srv.state('pc')).queue.map((q) => q.track.title);
+
+  beforeAll(async () => {
+    srv = await startServer();
+    alpha = srv.library.alpha.tracks.map((t) => t.id);
+    bravo = srv.library.bravo.tracks.map((t) => t.id);
+    charlie = srv.library.charlie.tracks.map((t) => t.id);
+    probe = new Probe(srv.base);
+    await until('the probe to be ready', () => probe.lines.some((l) => l['ready']));
+    await probe.waitView('online', (v) => v.conn === 'Online');
+  }, 60_000);
+  afterAll(async () => { probe?.stop(); await srv?.stop(); });
+
+  it('a change made on the server reaches the panel (play, queue, volume, shuffle)', { timeout: 30_000 }, async () => {
+    await srv.send('pc', { type: 'play', trackIds: [...alpha, ...bravo], startIndex: 0, paused: true });
+    const v = await probe.waitView('the queue', (x) => (x.queue?.length ?? 0) === 7 && x.status === 'paused');
+    expect(v.queue).toEqual(['A1', 'A2', 'A3', 'A4', 'B1', 'B2', 'B3']);
+    expect(v.title).toBe('A1');
+    await srv.send('pc', { type: 'volume', volume: 33 });
+    await probe.waitView('volume 33', (x) => x.volume === 33);
+    await srv.send('pc', { type: 'repeat', mode: 'all' });
+    await probe.waitView('repeat all', (x) => x.repeat === 'all');
+    await srv.send('pc', { type: 'repeat', mode: 'off' });
+    await probe.waitView('repeat off', (x) => x.repeat === 'off');
+  });
+
+  it('the panel\'s commands move the server: next, prev, jump, seek, volume, repeat, shuffle', { timeout: 40_000 }, async () => {
+    await srv.send('pc', { type: 'clear' });
+    await srv.send('pc', { type: 'play', trackIds: [...alpha, ...charlie], startIndex: 0, paused: true });
+    await probe.waitView('A1 paused', (x) => x.title === 'A1' && x.status === 'paused' && (x.queue?.length ?? 0) === 5);
+
+    probe.cmd({ cmd: 'next' });
+    await until('the server on A2', async () => (await srv.state('pc')).queue[(await srv.state('pc')).index]?.track.title === 'A2');
+    await probe.waitView('A2 in the panel', (x) => x.title === 'A2');
+    probe.cmd({ cmd: 'prev' });
+    await probe.waitView('A1 again', (x) => x.title === 'A1');
+    expect((await srv.state('pc')).index).toBe(0);
+
+    probe.cmd({ cmd: 'jump', index: 4 });
+    await probe.waitView('C1 current', (x) => x.title === 'C1');
+    expect((await srv.state('pc')).index).toBe(4);
+
+    probe.cmd({ cmd: 'seek_to', ms: 6000 });
+    const seeked = await until('the server seeked', async () => { const s = await srv.state('pc'); return s.positionMs >= 5900 && s.positionMs < 9000 ? s : undefined; });
+    expect(seeked.queue[seeked.index]?.track.title).toBe('C1');
+    probe.cmd({ cmd: 'view' });
+    await probe.waitView('the position near 6 s', (x) => (x.position_ms ?? 0) >= 5900);
+
+    probe.cmd({ cmd: 'volume', v: 55 });
+    await until('volume 55', async () => (await srv.state('pc')).volume === 55);
+
+    probe.cmd({ cmd: 'repeat' });
+    await until('repeat all', async () => (await srv.state('pc')).repeat === 'all');
+    probe.cmd({ cmd: 'repeat' });
+    await until('repeat one', async () => (await srv.state('pc')).repeat === 'one');
+    probe.cmd({ cmd: 'repeat' });
+    await until('repeat off', async () => (await srv.state('pc')).repeat === 'off');
+
+    probe.cmd({ cmd: 'shuffle' });
+    await until('shuffle on', async () => (await srv.state('pc')).shuffle === true);
+    await probe.waitView('shuffle in the panel', (x) => x.shuffle === true);
+    probe.cmd({ cmd: 'shuffle' });
+    await until('shuffle off', async () => (await srv.state('pc')).shuffle === false);
+  });
+
+  it('play/pause toggles the real player', { timeout: 30_000 }, async () => {
+    await srv.send('pc', { type: 'clear' });
+    await srv.send('pc', { type: 'play', trackIds: charlie, startIndex: 0 });
+    await probe.waitView('playing', (x) => x.status === 'playing');
+    probe.cmd({ cmd: 'play_pause' });
+    await until('paused', async () => (await srv.state('pc')).status === 'paused');
+    await probe.waitView('paused in the panel', (x) => x.status === 'paused');
+    probe.cmd({ cmd: 'play_pause' });
+    await until('playing again', async () => (await srv.state('pc')).status === 'playing');
+    await srv.send('pc', { type: 'pause' });
+  });
+
+  it('queue edits: reorder and remove go to the server and come back', { timeout: 30_000 }, async () => {
+    await srv.send('pc', { type: 'clear' });
+    await srv.send('pc', { type: 'play', trackIds: [...alpha, ...bravo], startIndex: 0, paused: true });
+    const v = await probe.waitView('the 7-song queue', (x) => (x.queue?.length ?? 0) === 7 && x.title === 'A1');
+    const ids = v.queue_ids!;
+    probe.cmd({ cmd: 'move', queue_id: ids[6], to: 1 });
+    await until('B3 moved to the second place', async () => (await titles())[1] === 'B3');
+    expect(await titles()).toEqual(['A1', 'B3', 'A2', 'A3', 'A4', 'B1', 'B2']);
+    await probe.waitView('the new order in the panel', (x) => x.queue?.[1] === 'B3');
+    probe.cmd({ cmd: 'remove', queue_id: ids[1] });
+    await until('A2 removed', async () => !(await titles()).includes('A2'));
+    await probe.waitView('A2 gone from the panel', (x) => !x.queue?.includes('A2') && x.queue?.length === 6);
+    expect(probe.sent().length).toBeGreaterThan(5);
+  });
+
+  it('a server restart: the panel shows offline, then reconnects by itself', { timeout: 60_000 }, async () => {
+    await srv.restart();
+    await probe.waitView('online again after the restart', (x) => x.conn === 'Online', 30_000);
+    await srv.send('pc', { type: 'clear' });
+    await srv.send('pc', { type: 'play', trackIds: bravo, startIndex: 1, paused: true });
+    await probe.waitView('B2 after the reconnect', (x) => x.title === 'B2');
+    expect(probe.lines.some((l) => (l['view'] as View | undefined)?.conn.startsWith('Offline'))).toBe(true);
+  });
+});
