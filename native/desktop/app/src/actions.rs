@@ -124,6 +124,33 @@ impl Rune {
         });
     }
 
+    pub fn rename_playlist(&mut self, id: &str, name: String, cx: &mut Context<Self>) {
+        let name = name.trim().to_string();
+        if name.is_empty() { return; }
+        self.spawn_send(cx, "PATCH", format!("/playlists/{}", commands::encode(id)), Some(json!({"name": name})), move |me, r, cx| match r {
+            Ok(_) => { me.data.playlists = None; me.data.playlist.clear(); cx.notify(); }
+            Err(e) => me.say(format!("Could not rename the playlist: {e}"), cx),
+        });
+    }
+
+    /// Drag a row of a rune playlist from one position to another (`POST /playlists/:id/move`).
+    pub fn move_in_playlist(&mut self, id: &str, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to { return; }
+        self.spawn_send(cx, "POST", format!("/playlists/{}/move", commands::encode(id)), Some(json!({"from": from, "to": to})), move |me, r, cx| match r {
+            Ok(_) => { me.data.playlist.clear(); me.data.playlists = None; me.pl_sel.clear(); cx.notify(); }
+            Err(e) => me.say(format!("Could not move that track: {e}"), cx),
+        });
+    }
+
+    pub fn remove_positions(&mut self, playlist: &str, positions: Vec<usize>, cx: &mut Context<Self>) {
+        if positions.is_empty() { return; }
+        let n = positions.len();
+        self.spawn_send(cx, "DELETE", format!("/playlists/{}/tracks", commands::encode(playlist)), Some(json!({"positions": positions})), move |me, r, cx| match r {
+            Ok(_) => { me.data.playlists = None; me.data.playlist.clear(); me.pl_sel.clear(); me.pl_anchor = None; me.pl_select_mode = false; me.say(format!("Removed {}", plural(n, "track")), cx); }
+            Err(e) => me.say(format!("Could not remove the tracks: {e}"), cx),
+        });
+    }
+
     // ------------------------------------------------------------------ pins, likes, radio, scan
 
     pub fn set_pin(&mut self, id: &str, pin: bool, playlist: bool, cx: &mut Context<Self>) {
@@ -191,6 +218,15 @@ impl Rune {
             MenuAct::DeletePlaylist { id, name } => { self.menu = None; self.dialog = Some(Dialog::DeletePlaylist { id, name }); cx.notify(); }
             MenuAct::SetSort(s) => { if let Route::Albums(mut q) = self.route().clone() { q.sort = s; self.replace_route(Route::Albums(q), cx); } }
             MenuAct::SetView(list) => { self.view_list = list; self.save_state(); cx.notify(); }
+            MenuAct::TracksSort(k) => { self.tracks_sort = k; self.tracks_desc = None; cx.notify(); }
+            MenuAct::TracksDir => { let d = self.tracks_desc.unwrap_or(self.tracks_sort == "added"); self.tracks_desc = Some(!d); cx.notify(); }
+            MenuAct::GenreSort(k) => { self.genre_sort = k; cx.notify(); }
+            MenuAct::Facet { kind, value } => {
+                if let Route::Albums(mut q) = self.route().clone() {
+                    match kind { "label" => q.label = value, _ => q.year = value.and_then(|v| v.parse().ok()) }
+                    self.replace_route(Route::Albums(q), cx);
+                }
+            }
             MenuAct::Rescan => self.rescan(cx),
             MenuAct::DuplicatesPage => self.go(Route::Duplicates, cx),
             MenuAct::SettingsPage => self.go(Route::Settings, cx),

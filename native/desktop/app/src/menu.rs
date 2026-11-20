@@ -8,8 +8,12 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rune_mini_core::library::*;
 
-fn item(icon: &'static str, label: impl Into<String>, act: MenuAct) -> PopItem {
+pub fn item(icon: &'static str, label: impl Into<String>, act: MenuAct) -> PopItem {
     PopItem { icon, label: label.into(), act, danger: false, chevron: false, dot: false, sub: false }
+}
+
+pub fn pop(x: f32, y: f32, items: Vec<PopItem>) -> PopMenu {
+    PopMenu { x, y, items, add_ids: vec![], add_label: String::new(), add_open: false, right_aligned: false, up: false }
 }
 
 impl Rune {
@@ -73,13 +77,13 @@ impl Rune {
                 }
             }
         }
-        let est_h = 12. + items.len() as f32 * 40.;
+        let est_h = (12. + items.len() as f32 * 40.).min(380.);
         let mut x = if m.right_aligned { m.x - 240. } else { m.x };
         x = x.clamp(8., (vw - 248.).max(8.));
         let mut y = m.y;
         let limit = vh - NPBAR_H - 8.;
         if !m.up && y + est_h > limit { y = (limit - est_h).max(8.); }
-        let mut panel = v_flex().absolute().left(px(x)).w(px(240.)).p(px(6.)).bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(12.)).occlude()
+        let mut panel = v_flex().id("menu-panel").absolute().left(px(x)).w(px(240.)).p(px(6.)).max_h(px(380.)).overflow_y_scroll().bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(12.)).occlude()
             .shadow(vec![BoxShadow { inset: false, color: bk(0.55), offset: point(px(0.), px(18.)), blur_radius: px(48.), spread_radius: px(0.) }]);
         panel = if m.up { panel.bottom(px((vh - y).max(0.))) } else { panel.top(px(y)) };
         for (i, (it, sub)) in items.into_iter().enumerate() {

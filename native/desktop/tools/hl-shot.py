@@ -2,7 +2,7 @@
 """Screenshot the private headless KWin's workspace to a PNG: hl-shot.py out.png"""
 import os, sys, dbus
 from PIL import Image
-bus = dbus.bus.BusConnection(open(os.path.expanduser('~/data/agent-tmp/rune-gpui/run/bus')).read().strip())
+bus = dbus.bus.BusConnection(open(os.path.join(os.environ.get('RG', os.path.expanduser('~/data/agent-tmp/rune-gpui')), 'run/bus')).read().strip())
 o = bus.get_object('org.kde.KWin', '/org/kde/KWin/ScreenShot2')
 r, w = os.pipe()
 res = dbus.Interface(o, 'org.kde.KWin.ScreenShot2').CaptureWorkspace({'native-resolution': True}, dbus.types.UnixFd(w))

@@ -47,6 +47,10 @@ pub enum MenuAct {
     DeletePlaylist { id: String, name: String },
     SetSort(crate::route::Sort),
     SetView(bool),
+    TracksSort(&'static str),
+    TracksDir,
+    GenreSort(&'static str),
+    Facet { kind: &'static str, value: Option<String> },
     Rescan,
     DuplicatesPage,
     SettingsPage,
@@ -110,6 +114,14 @@ pub struct Rune {
     pub hist: History,
     pub lists: HashMap<String, ListState>,
     pub list_sigs: HashMap<String, u64>,
+    pub hscrolls: HashMap<String, ScrollHandle>,
+    pub peak_cache: Option<(String, Arc<Vec<f32>>, bool)>,
+    pub np_open: bool,
+    pub pl_sel: std::collections::BTreeSet<usize>,
+    pub pl_anchor: Option<usize>,
+    pub pl_select_mode: bool,
+    pub pl_rename: Option<Entity<InputState>>,
+    pub pl_rename_sub: Option<Subscription>,
     pub focus: FocusHandle,
 
     pub sidebar_collapsed: bool,
@@ -132,6 +144,13 @@ pub struct Rune {
     pub search_input: Entity<InputState>,
     pub albums_find: Entity<InputState>,
     pub playlists_find: Entity<InputState>,
+    pub tracks_find: Entity<InputState>,
+    pub genres_find: Entity<InputState>,
+    pub tracks_q: String,
+    pub genres_q: String,
+    pub tracks_sort: &'static str,
+    pub tracks_desc: Option<bool>,
+    pub genre_sort: &'static str,
     pub find_timer: Option<Task<()>>,
     pub sort_open: bool,
     pub hovered_row: Option<String>,
@@ -180,7 +199,21 @@ impl Rune {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search albums, artists, tracks"));
         let albums_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in albums"));
         let playlists_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in playlists"));
+        let tracks_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by title, artist or album"));
+        let genres_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter genres"));
         let mut subs = Vec::new();
+        subs.push(cx.subscribe_in(&tracks_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
+            if let InputEvent::Change = ev {
+                let v = st.read(cx).value().trim().to_string();
+                this.find_timer = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                    let _ = this.update(cx, |m, cx| { if m.tracks_find.read(cx).value().trim() == v && m.tracks_q != v { m.tracks_q = v; cx.notify(); } });
+                }));
+            }
+        }));
+        subs.push(cx.subscribe_in(&genres_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
+            if let InputEvent::Change = ev { this.genres_q = st.read(cx).value().trim().to_string(); cx.notify(); }
+        }));
         subs.push(cx.subscribe_in(&search_input, window, |this: &mut Rune, st, ev: &InputEvent, window, cx| this.on_search_input(st, ev, window, cx)));
         subs.push(cx.subscribe_in(&albums_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
             if let InputEvent::Change = ev { let v = st.read(cx).value().trim().to_string(); this.find_changed(v, true, cx); }
@@ -195,10 +228,10 @@ impl Rune {
         };
         let model = Model::new(&cfg.zone);
         let me = Rune {
-            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), focus: cx.focus_handle(),
+            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
-            search_input, albums_find, playlists_find, find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
+            search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
         };
         me.net.viewing(vec![me.model.zone.clone()]);
         me
@@ -381,6 +414,60 @@ impl Rune {
         });
     }
 
+    /// Any GET as JSON, kept by its path like a query cache. Returns what is known now; asks again when stale.
+    pub fn ensure_json(&mut self, path: &str, cx: &mut Context<Self>) -> Slot<serde_json::Value> {
+        if let Some(c) = self.data.json.get(path) {
+            if !c.stale() { return c.slot.clone(); }
+        }
+        let prev = self.data.json.get(path).map(|c| c.slot.clone());
+        self.data.json.insert(path.to_string(), Cached { slot: prev.clone().unwrap_or(Slot::Loading), at: Instant::now() });
+        let key = path.to_string();
+        self.spawn_json::<Value>(cx, path.to_string(), move |me, r, cx| {
+            me.data.json.insert(key, Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() });
+            cx.notify();
+        });
+        prev.unwrap_or(Slot::Loading)
+    }
+
+    /// Drop one cached JSON (after we changed it) so the next draw asks again.
+    pub fn forget_json(&mut self, prefix: &str) { self.data.json.retain(|k, _| !k.starts_with(prefix)); }
+
+    pub fn ensure_facets(&mut self, cx: &mut Context<Self>) {
+        if self.data.genres.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.genres.is_none() { self.data.genres = Some(Cached::loading()); } else if let Some(c) = self.data.genres.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<GenreFacet>>(cx, "/genres".into(), |me, r, cx| { me.data.genres = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+    }
+
+    pub fn ensure_labels_years(&mut self, cx: &mut Context<Self>) {
+        if self.data.labels.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.labels.is_none() { self.data.labels = Some(Cached::loading()); } else if let Some(c) = self.data.labels.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<LabelFacet>>(cx, "/labels".into(), |me, r, cx| { me.data.labels = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+        if self.data.years.as_ref().is_none_or(|c| c.stale()) {
+            if self.data.years.is_none() { self.data.years = Some(Cached::loading()); } else if let Some(c) = self.data.years.as_mut() { c.at = Instant::now(); }
+            self.spawn_json::<Vec<YearFacet>>(cx, "/years".into(), |me, r, cx| { me.data.years = Some(Cached { slot: match r { Ok(a) => Slot::Ready(Arc::new(a)), Err(e) => Slot::Err(e) }, at: Instant::now() }); cx.notify(); });
+        }
+    }
+
+    /// The Tracks page's pages (`/tracks?q&sort&dir&offset&limit`), or a genre's albums through `ensure_albums`.
+    pub fn ensure_tracks(&mut self, key: &str, query: &str, more: bool, cx: &mut Context<Self>) {
+        let l = self.data.tracks.entry(key.to_string()).or_default();
+        if l.fetching { return; }
+        let offset = if more { if !l.loaded || l.items.len() >= l.total { return; } l.items.len() } else { if l.loaded && l.at.is_some_and(|t| t.elapsed() < STALE) { return; } 0 };
+        l.fetching = true;
+        let (k, q) = (key.to_string(), query.to_string());
+        self.spawn_json::<Page<LibTrack>>(cx, format!("/tracks?{}offset={}&limit=200", if query.is_empty() { String::new() } else { format!("{query}&") }, offset), move |me, r, cx| {
+            let l = me.data.tracks.entry(k).or_default();
+            l.fetching = false;
+            match r {
+                Ok(p) => { if offset == 0 { l.items = p.items; } else { l.items.extend(p.items); } l.total = p.total; l.loaded = true; l.error = None; l.at = Some(Instant::now()); }
+                Err(e) => l.error = Some(e),
+            }
+            cx.notify();
+        });
+    }
+
     /// The first page of an Albums query, and (when `more`) the next one.
     pub fn ensure_albums(&mut self, q: &AlbumsQ, more: bool, cx: &mut Context<Self>) {
         let key = q.key();
@@ -456,6 +543,11 @@ impl Rune {
     fn routed(&mut self, cx: &mut Context<Self>) {
         // the web closes the queue and menus when the path changes (Shell.tsx)
         self.queue_open = false;
+        self.np_open = false;
+        self.pl_sel.clear();
+        self.pl_anchor = None;
+        self.pl_select_mode = false;
+        self.pl_rename = None;
         self.menu = None;
         self.sort_open = false;
         self.hovered_row = None;
@@ -570,7 +662,10 @@ pub fn parse_route(s: &str) -> Route {
             let mut q = AlbumsQ::default();
             match param("source").as_deref() { Some("local") => q.source = Src::Local, Some("spotify") => q.source = Src::Spotify, _ => {} }
             match param("sort").as_deref() { Some("artist") => q.sort = Sort::Artist, Some("title") => q.sort = Sort::Title, Some("year") => q.sort = Sort::Year, _ => {} }
-            q.q = param("q").unwrap_or_default();
+            q.q = param("q").map(|v| pct_decode(&v.replace('+', " "))).unwrap_or_default();
+            q.genre = param("genre").map(|v| pct_decode(&v));
+            q.label = param("label").map(|v| pct_decode(&v));
+            q.year = param("year").and_then(|v| v.parse().ok());
             Route::Albums(q)
         }
         ["album", id] => Route::Album(dec(id)),
@@ -581,6 +676,8 @@ pub fn parse_route(s: &str) -> Route {
         ["search"] => Route::Search(param("q").unwrap_or_default()),
         ["tracks"] => Route::Tracks,
         ["genres"] => Route::Genres,
+        ["genres", g] => Route::Genre(dec(g)),
+        ["people", p] => Route::Person(dec(p)),
         ["people"] => Route::People,
         ["discover"] => Route::Discover,
         ["radio"] => Route::Radio,

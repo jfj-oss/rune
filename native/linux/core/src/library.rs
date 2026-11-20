@@ -175,6 +175,45 @@ pub struct PlaylistDetail {
     pub tracks: Vec<LibTrack>,
 }
 
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreFacet {
+    #[serde(default)]
+    pub genre: String,
+    #[serde(default)]
+    pub album_count: usize,
+    #[serde(default)]
+    pub cover_album_ids: Vec<String>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelFacet {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub album_count: usize,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct YearFacet {
+    #[serde(default)]
+    pub year: i32,
+    #[serde(default)]
+    pub album_count: usize,
+    #[serde(default)]
+    pub decade: i32,
+}
+
+/// One row of `/history/recent` or `/history/rediscover`.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryAlbum {
+    #[serde(default)]
+    pub album_id: String,
+}
+
 pub const LIKED_PLAYLIST_ID: &str = "pl:sp:liked";
 
 impl PlaylistSummary {

@@ -90,6 +90,11 @@ impl Rune {
             "move" => match qid(n("index") as usize) { Some(id) => { self.cmd(UiCommand::Move { queue_id: id, to: n("to") as usize }, cx); json!({"ok": true}) } None => json!({"error": "no such row"}) },
             "add_to_playlist" => { self.add_to_playlist(&s("playlist"), &s("name"), ids(), cx); json!({"ok": true}) }
             "new_playlist" => { self.create_playlist(s("name"), ids(), cx); json!({"ok": true}) }
+            "rename_playlist" => { self.rename_playlist(&s("id"), s("name"), cx); json!({"ok": true}) }
+            "playlist_move" => { self.move_in_playlist(&s("id"), n("from") as usize, n("to") as usize, cx); json!({"ok": true}) }
+            "playlist_remove" => { let pos: Vec<usize> = v.get("positions").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64().map(|x| x as usize)).collect()).unwrap_or_default(); self.remove_positions(&s("id"), pos, cx); json!({"ok": true}) }
+            "np" => { self.np_open = b("open"); cx.notify(); json!({"ok": true}) }
+            "tracks_sort" => { self.tracks_sort = match s("sort").as_str() { "artist" => "artist", "album" => "album", "duration" => "duration", "added" => "added", _ => "title" }; self.tracks_desc = v.get("desc").and_then(|x| x.as_bool()); cx.notify(); json!({"ok": true}) }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

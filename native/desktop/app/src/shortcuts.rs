@@ -26,6 +26,9 @@ impl Rune {
         self.search_input.read(cx).focus_handle(cx).is_focused(window)
             || self.albums_find.read(cx).focus_handle(cx).is_focused(window)
             || self.playlists_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.tracks_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.genres_find.read(cx).focus_handle(cx).is_focused(window)
+            || self.pl_rename.is_some()
             || self.dialog.is_some()
     }
 
@@ -33,6 +36,7 @@ impl Rune {
         let k = &ev.keystroke;
         let key = k.key.to_lowercase();
         if key == "escape" {
+            if self.pl_rename.is_some() { self.pl_rename = None; self.pl_rename_sub = None; window.focus(&self.focus.clone(), cx); cx.notify(); return; }
             if self.dialog.is_some() { self.dialog = None; cx.notify(); return; }
             if self.menu.is_some() || self.zone_open || self.signal_open { self.menu = None; self.zone_open = false; self.signal_open = false; cx.notify(); return; }
             if self.search_input.read(cx).focus_handle(cx).is_focused(window) {
@@ -40,7 +44,9 @@ impl Rune {
                 window.focus(&self.focus.clone(), cx);
                 return;
             }
-            if self.queue_open { self.queue_open = false; cx.notify(); }
+            if self.queue_open { self.queue_open = false; cx.notify(); return; }
+            if self.np_open { self.np_open = false; cx.notify(); return; }
+            if !self.pl_sel.is_empty() { self.pl_sel.clear(); self.pl_anchor = None; self.pl_select_mode = false; cx.notify(); }
             return;
         }
         if self.typing(window, cx) {
@@ -80,6 +86,9 @@ impl Rune {
                 let dur = cur.track.duration_ms;
                 if dur <= 0. { return; }
                 match skip_ahead_ms(p.position(now_ms()), dur) { Some(to) => self.cmd(UiCommand::SeekTo(to), cx), None => self.cmd(UiCommand::Next, cx) }
+            }
+            "delete" | "backspace" if !held => {
+                if let Route::Playlist(id) = self.route().clone() { if !self.pl_sel.is_empty() { let pos: Vec<usize> = self.pl_sel.iter().copied().collect(); self.remove_positions(&id, pos, cx); } }
             }
             "q" if !held => self.back(cx),
             "z" if !held => self.go(Route::Home, cx),

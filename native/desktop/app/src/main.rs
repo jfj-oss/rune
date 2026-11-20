@@ -4,6 +4,7 @@ mod covers;
 mod data;
 mod logo;
 mod menu;
+mod nowplaying;
 mod pages;
 mod queue;
 mod route;
@@ -13,6 +14,7 @@ mod shortcuts;
 mod testhook;
 mod theme;
 mod util;
+mod waveform;
 mod widgets;
 
 use gpui_kit::*;

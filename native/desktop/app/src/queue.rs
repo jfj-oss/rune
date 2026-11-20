@@ -1,5 +1,5 @@
 //! The queue drawer (web `Queue.tsx`, `.drawer` / `.queue` / `.qrow`): the server's queue, current row marked, click to jump,
-//! x to remove, Clear. Phase 1 has no drag-to-reorder (phase 2).
+//! x to remove, Clear, drag a row's grip to reorder.
 use crate::rune::*;
 use crate::theme::*;
 use crate::util::*;
@@ -11,6 +11,22 @@ use rune_mini_core::commands::UiCommand;
 use rune_mini_core::model::Status;
 
 pub const QROW: f32 = 60.;
+
+/// What a queue row carries while it is dragged (its place in the queue and its title for the ghost).
+#[derive(Clone)]
+pub struct QueueDrag {
+    pub index: usize,
+    pub queue_id: String,
+    pub title: String,
+}
+
+/// The ghost under the pointer.
+pub struct DragGhost(pub String);
+impl Render for DragGhost {
+    fn render(&mut self, _w: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex().h(px(40.)).px(px(14.)).gap(px(10.)).items_center().rounded(px(R)).bg(panel()).border_1().border_color(wh(0.2)).text_size(px(13.5)).text_color(c(TEXT)).child(icon("grip-vertical", 14., c(TEXT3))).child(self.0.clone())
+    }
+}
 
 impl Rune {
     pub fn queue_drawer(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -39,7 +55,8 @@ impl Rune {
                     let group = SharedString::from(format!("q-{qid}"));
                     h_flex().id(group.clone()).group(group.clone()).h(px(QROW)).w(px(QUEUE_W - 16.)).mx(px(8.)).rounded(px(R)).items_center().cursor_pointer()
                         .when(current, |d| d.bg(ca(ACCENT, 0.14))).hover(|s| s.bg(surface2()))
-                        .child(div().w(px(26.)).flex_none().flex().justify_center().opacity(0.5).child(icon("grip-vertical", 16., c(TEXT3))))
+                        .child(div().id(SharedString::from(format!("qg-{qid}"))).w(px(26.)).h_full().flex_none().flex().items_center().justify_center().opacity(0.5).cursor(CursorStyle::ClosedHand).hover(|s| s.opacity(1.)).child(icon("grip-vertical", 16., c(TEXT3)))
+                            .on_drag(QueueDrag { index: i, queue_id: qid.clone(), title: q.track.title.clone() }, |d, _off, _w, cx| { let t = d.title.clone(); cx.new(|_| DragGhost(t)) }))
                         .child(h_flex().flex_1().min_w_0().gap(px(12.)).items_center()
                             .child(div().relative().size(px(40.)).flex_none().child(cover_el(img, &q.album.id, &q.album.title, 40., R))
                                 .when(current, |d| d.child(div().absolute().inset_0().rounded(px(R)).bg(bk(0.55)).flex().items_center().justify_center().child(icon(if playing { "audio-lines" } else { "play" }, 16., c(TEXT))))))
@@ -50,6 +67,8 @@ impl Rune {
                         .child(div().id(SharedString::from(format!("qx-{qid2}"))).size(px(36.)).flex_none().flex().items_center().justify_center().rounded_full().opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).hover(|s| s.bg(wh(0.08)))
                             .child(icon("x", 16., c(TEXT2)))
                             .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.cmd(UiCommand::Remove(qid2.clone()), cx); })))
+                        .drag_over::<QueueDrag>(|st, _, _, _| st.border_t_2().border_color(c(ACCENT)))
+                        .on_drop(cx.listener(move |this, d: &QueueDrag, _, cx| { if d.index != i { this.cmd(UiCommand::Move { queue_id: d.queue_id.clone(), to: i }, cx); } }))
                         .on_click(cx.listener(move |this, _, _, cx| this.cmd(UiCommand::Jump(i), cx)))
                         .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
                             let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y);
