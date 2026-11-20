@@ -3,6 +3,8 @@
 use crate::rune::*;
 use crate::route::*;
 use crate::util::plural;
+use crate::playroute::*;
+use std::collections::HashMap;
 use gpui_kit::*;
 use rune_mini_core::commands;
 use rune_mini_core::library::*;
@@ -24,10 +26,82 @@ pub fn play_body(ids: &[String], start: usize, shuffle: bool) -> Value {
 }
 
 impl Rune {
+    /// Play a list of song ids on the zone on screen (ids only: no Spotify routing, for lists the server made of local files).
     pub fn play_ids(&mut self, ids: Vec<String>, start: usize, shuffle: bool, cx: &mut Context<Self>) {
         if ids.is_empty() { return; }
         self.player_body(play_body(&ids, start, shuffle));
         cx.notify();
+    }
+
+    /// The kind of a zone ("pc", "browser", "spotify"), by id.
+    pub fn zone_kind(&self, id: &str) -> String {
+        if id == self.own_zone { return "browser".into(); }
+        self.model.zones.iter().find(|z| z.id == id).map(|z| z.kind.clone()).unwrap_or_else(|| if id.starts_with("spotify:") { "spotify".into() } else { "pc".into() })
+    }
+
+    pub fn play_tracks(&mut self, tracks: Vec<LibTrack>, start: usize, shuffle: bool, cx: &mut Context<Self>) {
+        self.play_items(tracks.iter().map(Item::from_track).collect(), start, shuffle, None, cx);
+    }
+
+    /// `usePlayer.playItems`: pick the copy each song has on this zone (own file first), drop what it cannot play, and when the
+    /// song asked for cannot play here ask where ("Play on"). Lists with nothing but local songs go straight through.
+    pub fn play_items(&mut self, items: Vec<Item>, start: usize, shuffle: bool, zone: Option<String>, cx: &mut Context<Self>) {
+        if items.is_empty() { return; }
+        let zone = zone.unwrap_or_else(|| self.model.zone.clone());
+        let kind = self.zone_kind(&zone);
+        if items.iter().all(|i| zone_can_play(&kind, i.source) && i.source != Source::Spotify) {
+            if zone != self.model.zone { self.set_zone(&zone, cx); }
+            self.play_ids(items.iter().map(|i| i.id.clone()).collect(), start, shuffle, cx);
+            return;
+        }
+        let connected = self.spotify_connected(cx);
+        let can = ability(&kind, connected);
+        let (need_local, need_sp) = lookups_needed(can, true, &items);
+        let client = self.client.clone();
+        let items2 = items.clone();
+        cx.spawn(async move |this, cx| {
+            let (to_local, to_sp) = cx.background_spawn(async move {
+                let twins = |path: &str, body: Value| -> HashMap<String, Item> {
+                    let Ok(v) = client.send_json("POST", path, Some(&body)) else { return HashMap::new() };
+                    v.get("twins").and_then(|t| t.as_object()).map(|m| m.iter().filter_map(|(k, p)| {
+                        let t = p.get("track")?;
+                        Some((k.clone(), Item { id: t.get("id")?.as_str()?.to_string(), source: source_of(t.get("id")?.as_str()?, t.get("source").and_then(|s| s.as_str()).unwrap_or("")), title: t.get("title").and_then(|x| x.as_str()).unwrap_or("").into(), artists: t.get("artists").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.get("name").and_then(|n| n.as_str()).map(String::from)).collect()).unwrap_or_default(), duration_ms: t.get("durationMs").and_then(|d| d.as_f64()).unwrap_or(0.), album_id: t.get("albumId").and_then(|x| x.as_str()).unwrap_or("").into() }))
+                    }).collect()).unwrap_or_default()
+                };
+                let sp: Vec<&Item> = items2.iter().filter(|i| i.source == Source::Spotify).collect();
+                let loc: Vec<&Item> = items2.iter().filter(|i| i.source == Source::Local).collect();
+                let a = if need_local && !sp.is_empty() { twins("/local-twins", json!({"tracks": sp.iter().map(|i| json!({"id": i.id, "title": i.title, "artists": i.artists, "durationMs": i.duration_ms})).collect::<Vec<_>>()})) } else { HashMap::new() };
+                let b = if need_sp && !loc.is_empty() { twins("/spotify-twins", json!({"ids": loc.iter().map(|i| i.id.clone()).collect::<Vec<_>>()})) } else { HashMap::new() };
+                (a, b)
+            }).await;
+            let _ = this.update(cx, move |me, cx| me.play_routed(items, start, shuffle, zone, kind, can, (to_local, to_sp), cx));
+        }).detach();
+    }
+
+    fn play_routed(&mut self, items: Vec<Item>, start: usize, shuffle: bool, zone: String, kind: String, can: Ability, twins: (HashMap<String, Item>, HashMap<String, Item>), cx: &mut Context<Self>) {
+        let list = fit_for_zone(&items, start, can, true, &twins.0, &twins.1);
+        match route_items(&kind, &list, start) {
+            Routing::Start { need } => {
+                self.dialog = Some(Dialog::PlayOn { items: list, start, shuffle, need });
+                cx.notify();
+            }
+            Routing::Ok { items: kept, start, dropped } => {
+                if dropped > 0 { let zn = if zone == self.model.zone { self.zone_name() } else { zone.clone() }; self.say(format!("{} skipped \u{2014} {} can't play them", plural(dropped, "track"), zn), cx); }
+                if zone != self.model.zone { self.set_zone(&zone, cx); }
+                self.play_ids(kept.iter().map(|i| i.id.clone()).collect(), start, shuffle, cx);
+            }
+        }
+    }
+
+    /// Chosen on the "Play on" sheet: that zone, the copies it can play.
+    pub fn play_on(&mut self, zone: &str, items: Vec<Item>, start: usize, shuffle: bool, cx: &mut Context<Self>) {
+        self.dialog = None;
+        self.play_items(items, start, shuffle, Some(zone.to_string()), cx);
+    }
+
+    /// Is Spotify connected (the server's own status; no Spotify call)?
+    pub fn spotify_connected(&mut self, cx: &mut Context<Self>) -> bool {
+        self.ensure_json("/spotify/status", cx).ready().and_then(|v| v.get("connected").and_then(|c| c.as_bool())).unwrap_or(false)
     }
 
     pub fn enqueue_ids(&mut self, ids: Vec<String>, next: bool, cx: &mut Context<Self>) {
@@ -47,7 +121,7 @@ impl Rune {
     }
 
     pub fn play_album(&mut self, id: &str, shuffle: bool, start: usize, cx: &mut Context<Self>) {
-        self.with_album(id, cx, move |me, a, cx| me.play_ids(album_track_ids(&a), start, shuffle, cx));
+        self.with_album(id, cx, move |me, a, cx| { let mut t = a.tracks.clone(); t.sort_by_key(|x| (x.disc, x.number)); me.play_tracks(t, start, shuffle, cx) });
     }
 
     pub fn enqueue_album(&mut self, id: &str, next: bool, cx: &mut Context<Self>) {
@@ -69,10 +143,9 @@ impl Rune {
     }
 
     pub fn play_playlist(&mut self, id: &str, shuffle: bool, start: usize, cx: &mut Context<Self>) {
-        let ids_of = |d: &PlaylistDetail| d.tracks.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
-        if let Some(d) = self.data.playlist.get(id).and_then(|c| c.slot.ready()).cloned() { self.play_ids(ids_of(&d), start, shuffle, cx); return; }
+        if let Some(d) = self.data.playlist.get(id).and_then(|c| c.slot.ready()).cloned() { self.play_tracks(d.tracks.clone(), start, shuffle, cx); return; }
         self.spawn_json::<PlaylistDetail>(cx, format!("/playlists/{}", commands::encode(id)), move |me, r, cx| match r {
-            Ok(d) => me.play_ids(ids_of(&d), start, shuffle, cx),
+            Ok(d) => me.play_tracks(d.tracks.clone(), start, shuffle, cx),
             Err(_) => me.say("Could not load that playlist", cx),
         });
     }

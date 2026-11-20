@@ -188,6 +188,31 @@ impl Rune {
                         .child(div().id("dlg-cancel").child(btn("Cancel", None, false)).on_click(cx.listener(|this, _, _, cx| { this.dialog = None; cx.notify(); })))
                         .child(div().id("dlg-apply").child(btn("Apply", None, true)).when(sel.is_none(), |d| d.opacity(0.4)).on_click(cx.listener(move |this, _, _, cx| { if let Some(mb) = sel3.clone() { this.dialog = None; this.apply_match(&a3, &mb, cx); } })))))
             }
+            Dialog::PlayOn { items, start, shuffle, need } => {
+                let (items, start, shuffle, need) = (items.clone(), *start, *shuffle, *need);
+                let cur = self.zone_name();
+                let opts = crate::playroute::playable_zones(&self.zone_list(), need);
+                let first = items.get(start).map(|i| i.title.clone()).unwrap_or_default();
+                let what = if items.len() > 1 { format!("{} tracks", items.len()) } else { first };
+                let mut list = v_flex().gap(px(6.));
+                for (i, (id, name, kind)) in opts.into_iter().enumerate() {
+                    let ic = match kind.as_str() { "browser" => "globe", "spotify" => "smartphone", _ => "speaker" };
+                    let hint = match kind.as_str() { "pc" => if need == crate::playroute::Source::Spotify { "Local files, and Spotify (rune starts the app)" } else { "Local files, bit-perfect" }, "browser" => "On this computer", _ => "Spotify Connect" };
+                    let on = id == self.model.zone;
+                    let (items2, id2) = (items.clone(), id.clone());
+                    list = list.child(h_flex().id(SharedString::from(format!("po-{i}"))).gap(px(14.)).px(px(14.)).py(px(12.)).items_center().rounded(px(12.)).cursor_pointer().hover(|s| s.bg(wh(0.07)))
+                        .child(icon(ic, 20., c(TEXT)))
+                        .child(v_flex().flex_1().min_w_0().child(div().text_size(px(14.5)).font_weight(w(700.)).child(name)).child(div().text_size(px(12.5)).text_color(c(TEXT3)).child(hint)))
+                        .when(on, |d| d.child(icon("check", 16., c(ACCENT2))))
+                        .on_click(cx.listener(move |this, _, _, cx| this.play_on(&id2, items2.clone(), start, shuffle, cx))));
+                }
+                scrim.child(v_flex().w(px(460.)).p(px(24.)).gap(px(14.)).bg(panel_solid()).border_1().border_color(wh(0.14)).rounded(px(16.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(div().text_size(px(20.)).font_weight(w(700.)).child("Play on\u{2026}"))
+                    .child(div().text_size(px(13.5)).text_color(c(TEXT2)).child(format!("{} can\u{2019}t play {}. Pick where to hear {}.", cur, if need == crate::playroute::Source::Spotify { "Spotify tracks" } else { "local files" }, what)))
+                    .child(list)
+                    .child(div().text_size(px(12.)).text_color(c(TEXT3)).child("Your choice is remembered for this session."))
+                    .child(h_flex().justify_end().child(div().id("dlg-cancel").child(btn("Cancel", None, false)).on_click(cx.listener(|this, _, _, cx| { this.dialog = None; cx.notify(); })))))
+            }
             Dialog::DeletePlaylist { id, name } => {
                 let (id, name) = (id.clone(), name.clone());
                 let n2 = name.clone();

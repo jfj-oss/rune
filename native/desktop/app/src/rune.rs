@@ -86,6 +86,8 @@ pub struct PopMenu {
 }
 
 pub enum Dialog {
+    /// Play on: the song asked for cannot play on this zone; where to hear these instead
+    PlayOn { items: Vec<crate::playroute::Item>, start: usize, shuffle: bool, need: crate::playroute::Source },
     /// Fix match: the album and the candidate release picked so far
     FixMatch { album: String, sel: Option<String> },
     /// New playlist: name box, and the tracks to put in it

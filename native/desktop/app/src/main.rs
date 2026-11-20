@@ -10,6 +10,7 @@ mod logo;
 mod menu;
 mod nowplaying;
 mod pages;
+mod playroute;
 mod preview;
 mod queue;
 mod route;

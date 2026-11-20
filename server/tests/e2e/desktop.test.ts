@@ -182,6 +182,14 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await app.send({ cmd: 'go', route: '/albums' });
   });
 
+  it('a Spotify song asked for on a zone that cannot play it opens the "Play on" sheet and plays nothing', async () => {
+    await app.send({ cmd: 'play_items', ids: ['sp:nothere0000'], zone: 'own' });
+    await until('the Play on sheet', async () => ((await app.state())['dialog'] === true ? true : undefined));
+    await app.send({ cmd: 'dialog_close' });
+    expect((await app.state())['dialog']).toBe(false);
+    await app.send({ cmd: 'zone', id: 'pc' });
+  });
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();

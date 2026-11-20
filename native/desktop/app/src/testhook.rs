@@ -112,6 +112,8 @@ impl Rune {
                 json!({"ok": self.preview.is_some()})
             }
             "prose" => { let k = s("key"); if !self.prose_open.remove(&k) { self.prose_open.insert(k); } cx.notify(); json!({"ok": true}) }
+            "play_items" => { let items: Vec<crate::playroute::Item> = ids().iter().map(|i| crate::playroute::Item::local(i)).collect(); let z = if s("zone").is_empty() { None } else if s("zone") == "own" { Some(self.own_zone.clone()) } else { Some(s("zone")) }; self.play_items(items, n("start") as usize, b("shuffle"), z, cx); json!({"ok": true}) }
+            "dialog_close" => { self.dialog = None; cx.notify(); json!({"ok": true}) }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

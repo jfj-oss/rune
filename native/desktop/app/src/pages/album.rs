@@ -198,6 +198,7 @@ impl Rune {
         let ids_all = ids.to_vec();
         let menu = self.track_menu_ids(vec![t.id.clone()], t.title.clone(), Some(album.summary.id.clone()), t.artists.first().map(|a| a.id.clone()), t.source == "spotify", t.id.clone());
         let (menu2, ids2) = (menu.clone(), ids_all.clone());
+        let order2 = order.to_vec();
         let artist_line = if differs { t.artist_line() } else { String::new() };
         h_flex().id(group.clone()).group(group.clone()).h(px(48.)).px(px(6.)).items_center().rounded(px(R)).cursor_pointer()
             .when(playing, |d| d.bg(ca(ACCENT, 0.12))).when(!playing, |d| d.hover(|s| s.bg(wh(0.05))))
@@ -211,7 +212,7 @@ impl Rune {
                 .child(btn_icon("ellipsis", 18., c(TEXT2), false))
                 .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
-            .on_click(cx.listener(move |this, _, _, cx| this.play_ids(ids2.clone(), i, false, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| { let _ = &ids2; this.play_tracks(order2.clone(), i, false, cx) }))
             .into_any_element()
     }
 }
