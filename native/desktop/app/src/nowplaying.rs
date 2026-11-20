@@ -15,6 +15,50 @@ use rune_mini_core::now_ms;
 const UP_NEXT_MAX: usize = 100;
 
 impl Rune {
+    /// Critical reception, About this album (the song's own note first, then the background) and About the artist, under the player.
+    fn np_more(&mut self, q: &rune_mini_core::model::QueueItem, vw: f32, cx: &mut Context<Self>) -> AnyElement {
+        use crate::pages::album_sections::source_line;
+        use crate::preview::text_preview;
+        let (album_id, album_title) = (q.album.id.clone(), q.album.title.clone());
+        let body_w = (vw - 96.).clamp(320., 1040.);
+        self.ensure_album(&album_id, cx);
+        let ex = self.album_extra(&album_id, cx);
+        let d = ex.details.clone();
+        let album = self.data.album.get(&album_id).and_then(|c| c.slot.ready()).cloned();
+        let artist = q.track.artists.first().cloned();
+        if let Some(a) = &artist { self.ensure_artist(&a.id, cx); }
+        let bio = artist.as_ref().and_then(|a| self.data.artist.get(&a.id)).and_then(|c| c.slot.ready()).and_then(|a| a.bio.clone());
+        let has_review = d.as_ref().is_some_and(|d| d.reception.is_some() || !d.scores.is_empty() || !d.quotes.is_empty());
+        let mut col = v_flex().w(px(body_w)).mx_auto().gap(px(36.)).p(px(22.)).rounded(px(16.)).bg(ca(0x04040a, 0.72)).border_1().border_color(wh(0.08));
+        if ex.details_loading { col = col.child(v_flex().gap(px(12.)).child(eyebrow("Critical reception")).child(div().text_size(px(13.5)).text_color(c(TEXT3)).child("Looking up reviews\u{2026}"))); }
+        if let (Some(dd), true) = (&d, has_review) { col = col.child(v_flex().gap(px(14.)).child(eyebrow("Critical reception")).child(self.review_section(dd, body_w, cx))); }
+        if let Some(dd) = &d {
+            if !dd.artist_notes.is_empty() || dd.background.is_some() {
+                let mut sec = v_flex().gap(px(18.)).child(eyebrow("About this album"));
+                if !dd.artist_notes.is_empty() {
+                    let mut notes = dd.artist_notes.clone();
+                    notes.sort_by_key(|n| std::cmp::Reverse(n.track_id.as_deref() == Some(q.track.id.as_str())));
+                    if let Some(al) = &album { sec = sec.child(self.artist_notes(&notes, al, body_w, cx)); }
+                }
+                if let Some(bg) = dd.background.clone() {
+                    let mut b = v_flex().gap(px(8.));
+                    if !dd.artist_notes.is_empty() { b = b.child(eyebrow("Background")); }
+                    sec = sec.child(b.child(self.prose("np-background", &bg.value, 9, body_w, cx)).child(source_line(self, "np-src-bg", &bg.source, text_preview("Background", &album_title, &bg), cx)));
+                }
+                col = col.child(sec);
+            }
+        }
+        if let (Some(b), Some(a)) = (bio, artist) {
+            col = col.child(v_flex().gap(px(14.)).child(eyebrow(&format!("About {}", a.name)))
+                .child(self.prose("np-bio", &b.value, 6, body_w, cx))
+                .child(source_line(self, "np-src-bio", &b.source, text_preview("Biography", &a.name, &crate::albumlogic::Sourced { value: b.value.clone(), source: b.source.clone(), url: b.url.clone() }), cx)));
+        }
+        let aid = album_id.clone();
+        col = col.child(div().id("np-open-album").text_size(px(14.)).text_color(c(ACCENT2)).cursor_pointer().hover(|s| s.underline()).child("Open the album page \u{2192}")
+            .on_click(cx.listener(move |this, _, _, cx| { this.np_open = false; this.go(Route::Album(aid.clone()), cx); })));
+        div().w_full().px(px(24.)).pb(px(NPBAR_H + 40.)).child(col).into_any_element()
+    }
+
     pub fn now_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let vw = f32::from(window.viewport_size().width);
         let vh = f32::from(window.viewport_size().height);
@@ -120,9 +164,13 @@ impl Rune {
         let main = if wide { h_flex().size_full().items_center().justify_center().gap(px(64.)).px(px(72.)).pb(px(32.)).child(cover).child(panel).into_any_element() }
             else { v_flex().size_full().items_center().gap(px(22.)).px(px(24.)).pb(px(28.)).child(cover).child(panel).into_any_element() };
 
+        // below the player: what the album's critics and its artist say (the web's `.np__more`)
+        let is_radio = cur.as_ref().is_some_and(|q| crate::playroute::source_of(&q.track.id, "") == crate::playroute::Source::Radio);
+        let np_scroll = self.hscrolls.entry("np-body".into()).or_default().clone();
+        let more = cur.as_ref().filter(|_| !is_radio).map(|q| self.np_more(q, vw, cx));
         div().absolute().top_0().left_0().size_full().bg(c(0x000000)).occlude().flex().flex_col()
             .child(div().absolute().inset_0().bg(linear_gradient(180., linear_color_stop(ca(0x000000, 0.0), 0.), linear_color_stop(ca(0x0f1013, 0.55), 1.))))
             .child(top)
-            .child(div().id("np-body").flex_1().min_h_0().overflow_y_scroll().child(div().w_full().h(px(vh - 64.)).child(main)))
+            .child(div().id("np-body").flex_1().min_h_0().overflow_y_scroll().track_scroll(&np_scroll).child(div().w_full().h(px(vh - 64.)).child(main)).children(more))
     }
 }

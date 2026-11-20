@@ -94,6 +94,7 @@ impl Rune {
             "rename_playlist" => { self.rename_playlist(&s("id"), s("name"), cx); json!({"ok": true}) }
             "playlist_move" => { self.move_in_playlist(&s("id"), n("from") as usize, n("to") as usize, cx); json!({"ok": true}) }
             "playlist_remove" => { let pos: Vec<usize> = v.get("positions").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_u64().map(|x| x as usize)).collect()).unwrap_or_default(); self.remove_positions(&s("id"), pos, cx); json!({"ok": true}) }
+            "np_scroll" => { let h = self.hscrolls.entry("np-body".into()).or_default().clone(); h.set_offset(point(px(0.), px(-(v.get("y").and_then(|x| x.as_f64()).unwrap_or(0.) as f32)))); cx.notify(); json!({"ok": true}) }
             "np" => { self.np_open = b("open"); cx.notify(); json!({"ok": true}) }
             "tracks_sort" => { self.tracks_sort = match s("sort").as_str() { "artist" => "artist", "album" => "album", "duration" => "duration", "added" => "added", _ => "title" }; self.tracks_desc = v.get("desc").and_then(|x| x.as_bool()); cx.notify(); json!({"ok": true}) }
             "zone" => { let z = if s("id") == "own" { self.own_zone.clone() } else { s("id") }; self.set_zone(&z, cx); json!({"ok": true})}
