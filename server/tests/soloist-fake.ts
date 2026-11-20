@@ -149,6 +149,9 @@ export class FakeSoloist {
   }
 
   /** Another Spotify app on the account started a song on Soloist (a context of its own: the queue is gone). */
+  /** Titles to report for some ids (a relinked copy of a song carries the song's own title). */
+  readonly names = new Map<string, string>();
+
   takeOver(uri: string): void {
     this.becomeActive();
     this.item = uri;
@@ -324,7 +327,7 @@ export class FakeSoloist {
       uri,
       entity_type: 'track',
       decorations: {
-        identity: { name: `Song ${id}` },
+        identity: { name: this.names.get(id) ?? `Song ${id}` },
         visual_identity: { cover: [{ url: `https://i.scdn.co/image/${id}`, size: 'large' }] },
         parent: { entity: { uri: 'spotify:album:alb', entity_type: 'album', decorations: { identity: { name: 'An Album' } } } },
         creators: [{ entity: { uri: 'spotify:artist:art', entity_type: 'artist', decorations: { identity: { name: 'An Artist' } } } }],

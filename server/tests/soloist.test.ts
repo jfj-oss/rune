@@ -207,6 +207,23 @@ describe('SoloistZone', () => {
     client.close();
   });
 
+  it('Spotify relinking: the song rune asked for, played under another id, is rune\'s song, not a takeover (it used to park the queue)', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.queue.length === 1);
+    fake.names.set('a2', 'Song a (Remastered)');
+    fake.takeOver('spotify:track:a2');
+    await new Promise((r) => setTimeout(r, 300));
+    expect(zone.adopted()).toBeNull();
+    expect(zone.state().status).toBe('playing');
+    expect(zone.state().index).toBe(0);
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b']);
+    fake.names.delete('a2');
+    await zone.close();
+    client.close();
+  });
+
   it('autoplay after rune\'s list is followed: the song is shown with Soloist\'s title and cover, never as stopped, and the controls act on it', async () => {
     const client = await connected();
     const programs: number[] = [];

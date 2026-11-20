@@ -83,6 +83,15 @@ const END_SLACK_MS = 5000;
 
 /** A snapshot saying "not the active device" this soon after rune's own play may describe the moment before it. */
 const OWN_PLAY_GRACE_MS = 2000;
+/** How long after rune's own play a same-titled song under another id counts as Spotify relinking rune's song. */
+const RELINK_WINDOW_MS = 15_000;
+
+/** Titles equal once case, punctuation and a trailing " - Remastered ..." style suffix are ignored. */
+export function sameTitle(a: string, b: string): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/\s+-\s+.*$/, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const x = norm(a), y = norm(b);
+  return x.length > 0 && x === y;
+}
 /** After rune's own play: when Soloist is asked whether it really became the active device. */
 const OWN_PLAY_CHECK_MS = 2500;
 /** A song rune did not ask for is acted on once Soloist confirmed it is the device playing it; at the latest after this. */
@@ -698,12 +707,31 @@ export class SoloistZone implements PlaybackZone {
     this.unasked(p.id, { live: p.live || this.soloistLive(), ended: p.ended, left: p.left });
   }
 
+  /** Soon after rune's own play, a different id with the same title as the song rune asked for. */
+  private isRelinkOfExpected(id: string): boolean {
+    const cur = currentItem(this.q);
+    if (!cur || !this.expected || id === this.expected || idOf(cur) !== this.expected) return false;
+    if (this.now() - this.ownPlayAt > RELINK_WINDOW_MS) return false;
+    const item = this.deps.link.view.item;
+    const name = idOfUri(item?.uri) === id ? item?.decorations?.identity?.name : undefined;
+    return !!name && sameTitle(name, cur.track.title);
+  }
+
   /** Soloist itself plays a song rune never queued here: go on with rune's queue, or follow it. */
   private unasked(id: string, opts: { snapshot?: boolean; live: boolean; ended: boolean; left?: boolean }): void {
     const live = opts.live;
     const cur = currentItem(this.q);
     // `left`: a song left in Soloist's queue, which may be the current song once more (it sounds again from 0:00).
     if (id === this.expected && !opts.left) { this.revive(live); return; }
+    // Spotify relinking: rune asked for a song and, just after, Soloist plays the same song under another id (a
+    // regional or re-released copy). It is rune's song, not a takeover; adopting it parked rune's queue and stopped.
+    if (this.isRelinkOfExpected(id)) {
+      this.deps.log?.({ asked: this.expected, playing: id }, 'soloist: Spotify plays rune\'s song under another id (relinked)');
+      this.expected = id;
+      this.revive(live);
+      this.bump();
+      return;
+    }
     // Soloist's own next (autoplay after rune's song, its context, a song queued in a Spotify app) is one it listed in
     // its queue, or one that began as rune's song ran out; anything else is a takeover.
     const natural = !!opts.left || this.soloistSources.has(id) || opts.ended;
