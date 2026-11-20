@@ -5575,6 +5575,8 @@ dependencies = [
  "futures",
  "gpui-kit",
  "image",
+ "naga",
+ "pollster",
  "ringbuf",
  "rubato",
  "rune-mini-core",
@@ -5582,6 +5584,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "symphonia",
+ "wgpu",
 ]
 
 [[package]]

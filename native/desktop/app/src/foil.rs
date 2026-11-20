@@ -768,6 +768,18 @@ mod tests {
         for (i, c) in cols.iter().enumerate() { assert_eq!(d[GPU_COLS_AT + i] as u32 >> 1, c.id); assert_eq!(d[GPU_COLS_AT + i] as u32 & 1 == 1, c.sep); }
     }
 
+    /// Not a test: `RUNE_FOIL_DATA=<file> RUNE_FOIL_W=.. RUNE_FOIL_H=.. RUNE_FOIL_SCALE=.. RUNE_FOIL_T=.. cargo test dump_gpu_data -- --ignored`
+    /// writes the float array of the GPU shader (little-endian f32), for the offscreen render and timing in the vendored wgpu crate.
+    #[test]
+    #[ignore]
+    fn dump_gpu_data() {
+        let Some(f) = std::env::var_os("RUNE_FOIL_DATA") else { return };
+        let g = |k: &str| std::env::var(k).unwrap().parse::<f32>().unwrap();
+        let (w, h) = (g("RUNE_FOIL_W"), g("RUNE_FOIL_H"));
+        let d = gpu_data(w, h, g("RUNE_FOIL_SCALE"), g("RUNE_FOIL_T"), &columns(w as usize));
+        std::fs::write(f, d.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    }
+
     /// Not a test: `cargo test bench_waves --release -- --ignored --nocapture` prints the time of one frame of the wave overlay.
     #[test]
     #[ignore]

@@ -21,3 +21,11 @@ symphonia = { version = "0.5", default-features = false, features = ["flac", "mp
 cpal = "0.15"
 ringbuf = "0.4"
 rubato = "0.15"
+
+[dev-dependencies]
+# checks that shaders/foil.wgsl is valid WGSL (the Linux/wgpu side of the shader hook) without a GPU
+naga = { version = "30", default-features = false, features = ["wgsl-in"] }
+# GPU time of the foil shader (an ignored test in src/gpubench.rs): Linux only, the same wgpu features gpui-wgpu uses
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "metal", "gles", "vulkan", "wgsl", "webgpu"] }
+pollster = "0.4"

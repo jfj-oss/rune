@@ -363,6 +363,16 @@ mod tests {
         assert!(!needs_still(Prefs { on: false, ..p }, None, sig));
     }
 
+    /// The hook's WGSL prelude (vendor/gpui-pre-wgpu-0.3.12/src/custom_shader.rs) declares these; the app's source must be valid after them.
+    #[test]
+    fn foil_wgsl_is_valid() {
+        let prelude = "struct GlobalParams { viewport_size: vec2<f32>, premultiplied_alpha: u32, pad: u32, }\n@group(0) @binding(0) var<uniform> globals: GlobalParams;\n@group(1) @binding(0) var<storage, read> U: array<f32>;\nfn ud(i: u32) -> f32 { return U[12u + i]; }\n";
+        let src = format!("{prelude}{}", include_str!("shaders/foil.wgsl"));
+        let module = naga::front::wgsl::parse_str(&src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&src)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).expect("validates");
+        assert!(include_str!("shaders/foil.metal").contains("float4 custom_fs(float2 pos, constant float* U)"));
+    }
+
     #[test]
     fn defaults_are_on_and_saving() {
         assert_eq!(Prefs::default(), Prefs { on: true, reduce: false, saver: true, software: false });

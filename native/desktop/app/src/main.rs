@@ -3,6 +3,8 @@ mod actions;
 mod albumlogic;
 mod audio;
 mod backdrop;
+mod gpubench;
+mod shader_hook_tests;
 mod charts;
 mod audio_zone;
 mod covers;

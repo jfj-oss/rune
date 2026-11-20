@@ -68,6 +68,7 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
+        self.shader_quads.clear(); // RUNE PATCH
     }
 
     pub fn len(&self) -> usize {

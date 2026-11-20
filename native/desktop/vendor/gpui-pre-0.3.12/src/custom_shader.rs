@@ -131,35 +131,5 @@ pub fn shader_quad(shader: ShaderId, data: impl FnOnce(Bounds<Pixels>, &mut Wind
     canvas(|_, _, _| (), move |bounds, _, window, _| { let d = data(bounds, window); window.paint_shader_quad(bounds, shader, d); })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{point, size};
-
-    fn quad(data: &[f32]) -> ShaderQuad {
-        let b = Bounds { origin: point(ScaledPixels(10.0), ScaledPixels(20.0)), size: size(ScaledPixels(300.0), ScaledPixels(200.0)) };
-        ShaderQuad { order: 0, bounds: b, content_mask: ContentMask { bounds: b }, shader: ShaderId(7), time: 1.5, data: data.into() }
-    }
-
-    #[test]
-    fn uniforms_are_packed_header_then_app_floats() {
-        let u = quad(&[0.25, 0.5]).pack();
-        assert_eq!(u.len(), SHADER_HEADER_LEN + 2);
-        assert_eq!(&u[..9], &[10.0, 20.0, 300.0, 200.0, 10.0, 20.0, 300.0, 200.0, 1.5]);
-        assert_eq!(&u[SHADER_HEADER_LEN..], &[0.25, 0.5]);
-    }
-
-    #[test]
-    fn registry_tracks_sources_and_status() {
-        let id = ShaderId(0xBEEF);
-        assert_eq!(shader_status(id), ShaderStatus::Pending);
-        assert!(shader_source(id).is_none());
-        register_shader(id, ShaderSource { wgsl: "a", msl: "b" });
-        assert_eq!(shader_source(id).unwrap().wgsl, "a");
-        set_shader_status(id, ShaderStatus::Failed("x".into()));
-        assert_eq!(shader_status(id), ShaderStatus::Failed("x".into()));
-        register_shader(id, ShaderSource { wgsl: "c", msl: "d" });
-        assert_eq!(shader_status(id), ShaderStatus::Pending, "a new source is tried again");
-        assert_eq!(shader_source(id).unwrap().msl, "d");
-    }
-}
+// The tests of this module live in the app (native/desktop/app/src/shader_hook_tests.rs): gpui-pre's own test build needs dev
+// dependencies and assets that the crates.io package does not ship.
