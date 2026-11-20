@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { ALBUM_KEY_CHOICES, FIXED_KEYS } from '../lib/keys';
 import { encId } from '../lib/format';
-import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, FOIL_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
+import { AMBIENT_LABEL, AMBIENTS, DITHER_AMBIENTS, DOT_LABEL, DOT_SIZES, useUi } from '../store/ui';
 import { useSpotify } from '../store/spotify';
 import { LIKED_PLAYLIST_ID, missingWriteScope } from '../lib/playlists';
 
@@ -111,7 +111,7 @@ function AmbientPicker() {
       <h2 className="statuscard__head"><Palette size={17} /> Background</h2>
       <p className="muted">Shared by all your devices.</p>
       <div className="ambientpick__list" role="radiogroup" aria-label="Background">
-        {[...FOIL_AMBIENTS, ...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
+        {[...DITHER_AMBIENTS, ...AMBIENTS].map((a) => (
           <button key={a} role="radio" aria-checked={ambient === a} className={`ambientpick__item${ambient === a ? ' is-current' : ''}`} onClick={() => setAmbient(a)}>
             <i className={`ambdot ambdot--${a}`} />
             <span>{AMBIENT_LABEL[a]}</span>

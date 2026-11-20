@@ -27,7 +27,6 @@ function useBackdropPalette(): DitherPalette {
   }, [cycling, still]);
   if (ambient === 'off') return DITHER_PALETTES.red;
   if (page) return page;
-  if (ambient === 'foil') return DITHER_PALETTES.blue;
   if (ambient === 'dither-album') return (album && paletteFromColour(tint)) || DITHER_PALETTES.purple;
   if (cycling) return paletteAt('cycle', t);
   const hue = (ambient === 'dither' ? 'red' : ambient.slice(7)) as DitherHue;

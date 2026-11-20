@@ -16,26 +16,23 @@ function save(key: string, v: unknown) {
   try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* storage blocked */ }
 }
 
-export type Ambient = 'off' | 'foil' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-slate' | 'dither-amber' | 'dither-copper' | 'dither-rose' | 'dither-cycle' | 'dither-album' | 'dither-custom';
+export type Ambient = 'off' | 'dither' | 'dither-blue' | 'dither-purple' | 'dither-green' | 'dither-olive' | 'dither-lime' | 'dither-teal' | 'dither-slate' | 'dither-amber' | 'dither-copper' | 'dither-rose' | 'dither-cycle' | 'dither-album' | 'dither-custom';
 /** Non-Dither choices: only Off (plain dark) is left; the old gradient backdrops were removed. */
 export const AMBIENTS: Ambient[] = ['off'];
-/** "Foil waves" (the default): stippled wave lines over an icy-blue cloud on navy (components/FoilBackdrop). */
-export const FOIL_AMBIENTS: Ambient[] = ['foil'];
 /** The removed gradient backdrops, mapped to the nearest Dither colour for anyone who still has one saved. */
 const RETIRED_AMBIENT: Record<string, Ambient> = { cycle: 'dither-cycle', blue: 'dither-blue', purple: 'dither-purple', slate: 'dither-blue', green: 'dither-green' };
 const upgradeAmbient = (v: unknown): unknown => (typeof v === 'string' && v in RETIRED_AMBIENT ? RETIRED_AMBIENT[v] : v);
 /** "Dither" backdrop variants (WebGL, see components/DitherBackdrop); plain `dither` is the red default. */
 export const DITHER_AMBIENTS: Ambient[] = ['dither', 'dither-blue', 'dither-purple', 'dither-green', 'dither-olive', 'dither-lime', 'dither-teal', 'dither-slate', 'dither-amber', 'dither-copper', 'dither-rose', 'dither-cycle', 'dither-album', 'dither-custom'];
 export const AMBIENT_LABEL: Record<Ambient, string> = {
-  off: 'Off', foil: 'Foil waves',
+  off: 'Off',
   dither: 'Dither · Red', 'dither-blue': 'Dither · Blue', 'dither-purple': 'Dither · Purple', 'dither-green': 'Dither · Green', 'dither-olive': 'Dither · Olive', 'dither-lime': 'Dither · Lime', 'dither-teal': 'Dither · Teal', 'dither-slate': 'Dither · Slate', 'dither-amber': 'Dither · Amber', 'dither-copper': 'Dither · Copper', 'dither-rose': 'Dither · Rose', 'dither-cycle': 'Dither · Cycle', 'dither-album': 'Dither · Album', 'dither-custom': 'Dither · Custom',
 };
-const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || FOIL_AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
+const isAmbient = (v: unknown): v is Ambient => AMBIENTS.includes(v as Ambient) || DITHER_AMBIENTS.includes(v as Ambient);
 
 /** `rune.ambient` is stored as a plain string; `?ambient=green` in the URL also sets (and persists) it
     (`?ambient=dither-red` is accepted as an alias of `dither`). */
 /** True when the URL picked the ambient (`?ambient=`): that wins over the shared server choice for this load. */
-export const DEFAULT_AMBIENT: Ambient = 'foil';
 let ambientFromUrl = false;
 function loadAmbient(): Ambient {
   let v: unknown = null;
@@ -48,7 +45,7 @@ function loadAmbient(): Ambient {
     v = upgradeAmbient(raw);
     if (v !== raw && isAmbient(v)) localStorage.setItem('rune.ambient', v);
   } catch { /* storage blocked */ }
-  return isAmbient(v) ? v : DEFAULT_AMBIENT;
+  return isAmbient(v) ? v : 'dither';
 }
 /** Dither dot grain ("Dot size" in Settings): fine is the default, classic the original chunkier grain.
     Persisted like the ambient: localStorage + the shared server value; `?dots=classic` picks it for this load. */
@@ -71,7 +68,7 @@ const PAGE_BG: Partial<Record<Ambient, string>> = { off: '#0f1013' };
 function applyAmbient(a: Ambient) {
   if (typeof document === 'undefined') return; // node (unit tests): nothing to paint
   document.documentElement.dataset.ambient = a;
-  const bg = a === 'foil' ? '#05091a' : a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#000000';
+  const bg = a.startsWith('dither') ? '#000000' : PAGE_BG[a] ?? '#000000';
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.setAttribute('content', bg);
 }
 
