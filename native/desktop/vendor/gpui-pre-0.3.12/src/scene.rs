@@ -50,6 +50,8 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
+    /// RUNE PATCH: quads drawn by app-registered shaders.
+    pub shader_quads: Vec<crate::ShaderQuad>,
 }
 
 #[expect(missing_docs)]
@@ -133,6 +135,10 @@ impl Scene {
                 surface.order = order;
                 self.surfaces.push(surface.clone());
             }
+            Primitive::ShaderQuad(q) => {
+                q.order = order;
+                self.shader_quads.push(q.clone());
+            }
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
@@ -160,6 +166,7 @@ impl Scene {
         self.polychrome_sprites
             .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
         self.surfaces.sort_by_key(|surface| surface.order);
+        self.shader_quads.sort_by_key(|q| q.order);
     }
 
     #[cfg_attr(
@@ -187,6 +194,8 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
+            shader_quads_start: 0,
+            shader_quads_iter: self.shader_quads.iter().peekable(),
         }
     }
 }
@@ -209,6 +218,7 @@ pub(crate) enum PrimitiveKind {
     SubpixelSprite,
     PolychromeSprite,
     Surface,
+    ShaderQuad,
 }
 
 pub(crate) enum PaintOperation {
@@ -228,6 +238,7 @@ pub enum Primitive {
     SubpixelSprite(SubpixelSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
+    ShaderQuad(crate::ShaderQuad),
 }
 
 #[expect(missing_docs)]
@@ -242,6 +253,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
+            Primitive::ShaderQuad(q) => &q.bounds,
         }
     }
 
@@ -255,6 +267,7 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
+            Primitive::ShaderQuad(q) => &q.content_mask,
         }
     }
 }
@@ -283,6 +296,8 @@ struct BatchIterator<'a> {
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
+    shader_quads_start: usize,
+    shader_quads_iter: Peekable<slice::Iter<'a, crate::ShaderQuad>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -315,6 +330,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.surfaces_iter.peek().map(|s| s.order),
                 PrimitiveKind::Surface,
+            ),
+            (
+                self.shader_quads_iter.peek().map(|s| s.order),
+                PrimitiveKind::ShaderQuad,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -461,6 +480,20 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.surfaces_start = surfaces_end;
                 Some(PrimitiveBatch::Surfaces(surfaces_start..surfaces_end))
             }
+            PrimitiveKind::ShaderQuad => {
+                let start = self.shader_quads_start;
+                let mut end = start + 1;
+                self.shader_quads_iter.next();
+                while self
+                    .shader_quads_iter
+                    .next_if(|q| (q.order, batch_kind) < max_order_and_kind)
+                    .is_some()
+                {
+                    end += 1;
+                }
+                self.shader_quads_start = end;
+                Some(PrimitiveBatch::ShaderQuads(start..end))
+            }
         }
     }
 }
@@ -493,6 +526,8 @@ pub enum PrimitiveBatch {
         range: Range<usize>,
     },
     Surfaces(Range<usize>),
+    /// RUNE PATCH: quads of app-registered shaders (indices into `Scene::shader_quads`).
+    ShaderQuads(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -525,6 +560,7 @@ impl PrimitiveBatch {
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
+            Self::ShaderQuads(range) => format!("shader quads ({})", range.len()),
         }
     }
 }

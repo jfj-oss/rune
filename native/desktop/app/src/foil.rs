@@ -459,6 +459,28 @@ fn render_bands(w: usize, h: usize, scale: f32, t: f32, cols: &[Col], buf: &mut 
     }
 }
 
+/// Where the band slots start in the float array of the GPU shader (see `shaders/foil.wgsl`), and the column table after them.
+pub const GPU_BANDS_AT: usize = 16;
+pub const GPU_COLS_AT: usize = 96;
+
+/// The app's floats for the GPU shader of a w x h device-pixel window: 0 width, 1 height, 2 scale, 3 t, 4 dust shift, 5 columns,
+/// 6-8 the moon (x, y, radius); from 16 the bands (10 floats each: start angle, span, hook, four phases, phase p, r_max x p^gamma,
+/// 0); from 96 one float per device column (strip id x 2 + 1 for a separator). Everything per-frame that the shader cannot
+/// cheaply derive: a few hundred floats and the column table (cached by the caller, copied here).
+pub fn gpu_data(w: f32, h: f32, scale: f32, t: f32, cols: &[Col]) -> Vec<f32> {
+    let mut d = vec![0.0f32; GPU_COLS_AT + cols.len()];
+    let (mx, my, mr) = (w * MOON_X, MOON_V * h, MOON_R * h);
+    d[..9].copy_from_slice(&[w, h, scale, t, shift_at(t) as f32, cols.len() as f32, mx, my, mr]);
+    let rmax = r_max(w, h);
+    for k in 0..N_BANDS {
+        let (b, p) = (band(k), band_phase(t, k));
+        let o = GPU_BANDS_AT + k * 10;
+        d[o..o + 9].copy_from_slice(&[start_angle(&b, p), b.span, b.hook, b.ph[0], b.ph[1], b.ph[2], b.ph[3], p, rmax * p.powf(BAND_GAMMA)]);
+    }
+    for (i, c) in cols.iter().enumerate() { d[GPU_COLS_AT + i] = (c.id * 2 + c.sep as u32) as f32; }
+    d
+}
+
 /// The fade to black as an image of w x h device pixels: black with an alpha from [`fade_at`], dithered (4x4 ordered) so the
 /// 8-bit steps of the gradient do not show as bands over the dash field. Premultiplied BGRA.
 pub fn fade_image(w: usize, h: usize) -> Vec<u8> {
@@ -727,6 +749,23 @@ mod tests {
         let bright = buf.chunks(4).filter(|p| p[3] == 255 && p[0] > 150).count();
         assert!(bright as f32 > inside * 0.1, "{bright}");
         let _ = (cx, cy);
+    }
+
+    #[test]
+    fn gpu_data_packs_header_bands_and_columns() {
+        let cols = columns(40);
+        let d = gpu_data(1280.0, 800.0, 2.0, 12.0, &cols);
+        assert_eq!(d.len(), GPU_COLS_AT + 40);
+        assert_eq!(&d[..6], &[1280.0, 800.0, 2.0, 12.0, shift_at(12.0) as f32, 40.0]);
+        assert!(d[6] > 1000.0 && d[7] > 0.0 && d[8] > 0.0, "moon");
+        for k in 0..N_BANDS {
+            let o = GPU_BANDS_AT + k * 10;
+            assert!((d[o + 7] - band_phase(12.0, k)).abs() < 1e-6);
+            assert!((d[o + 8] - r_max(1280.0, 800.0) * d[o + 7].powf(BAND_GAMMA)).abs() < 1e-2);
+            assert!(d[o + 1] > 3.0 && d[o + 1] < 6.0, "span");
+        }
+        assert!(GPU_BANDS_AT + N_BANDS * 10 <= GPU_COLS_AT);
+        for (i, c) in cols.iter().enumerate() { assert_eq!(d[GPU_COLS_AT + i] as u32 >> 1, c.id); assert_eq!(d[GPU_COLS_AT + i] as u32 & 1 == 1, c.sep); }
     }
 
     /// Not a test: `cargo test bench_waves --release -- --ignored --nocapture` prints the time of one frame of the wave overlay.

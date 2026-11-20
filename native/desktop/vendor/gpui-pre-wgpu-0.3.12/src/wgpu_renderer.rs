@@ -5,7 +5,7 @@ use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    ScaledPixels, Scene, ShaderQuad, Size, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -195,6 +195,10 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    /// RUNE PATCH: pipelines and buffers of app-registered shaders.
+    custom: crate::custom_shader::CustomShaders,
+    /// RUNE PATCH: colour target of the main pass, and whether the surface wants premultiplied alpha (custom pipelines are built for them).
+    custom_target: Option<(wgpu::ColorTargetState, bool)>,
 }
 
 struct CachedTextureBindGroup {
@@ -1378,6 +1382,8 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                custom: Default::default(),
+                custom_target: None,
             },
             atlas,
             path_globals_offset,
@@ -1493,6 +1499,14 @@ impl WgpuRendererCore {
             bytemuck::bytes_of(&gamma_params),
         );
 
+        self.resources.custom_target = Some((
+            wgpu::ColorTargetState {
+                format: self.target_format,
+                blend: Some(if premultiplied_alpha { wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING } else { wgpu::BlendState::ALPHA_BLENDING }),
+                write_mask: wgpu::ColorWrites::ALL,
+            },
+            premultiplied_alpha,
+        ));
         self.record_frame(scene, target_view, clear_color)
             .inspect_err(|_| {
                 // Queue writes are staged before encoding; flush them even if the frame fails.
@@ -1522,6 +1536,7 @@ impl WgpuRendererCore {
                 )
             })?;
         self.prepare_texture_bind_groups(scene);
+        let mut custom_index = 0usize;
 
         let mut encoder =
             self.resources()
@@ -1637,6 +1652,11 @@ impl WgpuRendererCore {
                     // Surfaces are macOS-only for video playback and are not
                     // implemented by the WGPU renderer.
                     PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::ShaderQuads(range) => {
+                        for quad in &scene.shader_quads[range] {
+                            self.draw_shader_quad(quad, &mut custom_index, &mut pass);
+                        }
+                    }
                 }
             }
         }
@@ -1646,6 +1666,32 @@ impl WgpuRendererCore {
             .queue
             .submit(std::iter::once(encoder.finish()));
         Ok(submission)
+    }
+
+    /// RUNE PATCH: draws one quad of an app-registered shader (nothing when the shader is unknown or failed to build).
+    fn draw_shader_quad(&mut self, quad: &ShaderQuad, index: &mut usize, pass: &mut wgpu::RenderPass<'_>) {
+        if self.uses_webgl_instance_data {
+            return;
+        }
+        let res = &mut self.resources;
+        let Some((target, premultiplied)) = res.custom_target.clone() else { return };
+        let (device, queue) = (res.device.clone(), res.queue.clone());
+        let (instances_layout, globals_layout) = (res.bind_group_layouts.instances.clone(), res.bind_group_layouts.globals.clone());
+        if res.custom.pipeline(&device, &instances_layout, &globals_layout, target, premultiplied, quad.shader).is_none() {
+            return;
+        }
+        let buffer = res.custom.upload(&device, &queue, *index, quad).clone();
+        *index += 1;
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("custom_shader_bind_group"),
+            layout: &instances_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+        });
+        let Some(Some(pipeline)) = self.resources.custom.pipeline_ref(quad.shader, premultiplied) else { return };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.resources.globals_bind_group, &[]);
+        pass.set_bind_group(1, &bind_group, &[]);
+        pass.draw(0..4, 0..1);
     }
 
     fn write_instances(

@@ -1,7 +1,9 @@
 //! The page backdrop (web `Ambient.tsx` + `FoilBackdrop.tsx`): "Foil waves", crisp at device resolution.
 //!
-//! GPUI has no custom shaders, so the picture is put together from what it does well (see [`crate::foil`]), all at device
-//! resolution and moved or swapped as whole images:
+//! Default: ONE custom shader (`shaders/foil.wgsl` / `foil.metal`, through the shader hook of the vendored GPUI, see
+//! vendor/PATCH.md) draws the whole picture per device pixel on the GPU, at the display's frame rate. The CPU path below is the
+//! fallback (Prefs::software, `RUNE_DESKTOP_FOIL=software`, or no renderer support): the picture is put together from what GPUI
+//! does without shaders (see [`crate::foil`]), all at device resolution and moved or swapped as whole images:
 //!  * the background (a field woven of fine dark diagonal dashes, stray pixels) is ONE pre-rendered image, made once per window
 //!    size on a worker thread and then only slid by whole device pixels (up and to the right, as the field drifts),
 //!  * the wave bands (soft glow + strips with separators, ragged tops and bottoms, brightness that varies along each strip, glints)
@@ -14,6 +16,8 @@ use crate::foil;
 use crate::theme::*;
 use futures::StreamExt;
 use gpui_kit::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,15 +31,44 @@ pub struct Prefs {
     pub reduce: bool,
     /// Battery saver: hold still while another window has focus.
     pub saver: bool,
+    /// Draw on the CPU (the worker thread and images below) instead of the GPU shader. Also the fallback when the shader
+    /// cannot be used. Default off; `RUNE_DESKTOP_FOIL=software` forces it.
+    pub software: bool,
 }
 
-impl Default for Prefs { fn default() -> Self { Prefs { on: true, reduce: false, saver: true } } }
+impl Default for Prefs { fn default() -> Self { Prefs { on: true, reduce: false, saver: true, software: false } } }
 
 /// Should frames be drawn right now? The one rule the whole backdrop follows (unit tested).
 pub fn animating(p: Prefs, window_active: bool) -> bool { p.on && !p.reduce && (!p.saver || window_active) }
 
 /// Should a frame be drawn although nothing moves (first paint, resize, a setting changed)? Only the backdrop being on matters.
 pub fn needs_still(p: Prefs, shown: Option<Sig>, want: Sig) -> bool { p.on && shown != Some(want) }
+
+/// `RUNE_DESKTOP_FOIL_BARE=1` (test tool): only the backdrop, without the app, the tint and the edge shading.
+pub fn bare() -> bool { std::env::var_os("RUNE_DESKTOP_FOIL_BARE").is_some() }
+
+/// The GPU shader of the backdrop (registered once at start, see [`register_shaders`]).
+pub const FOIL_SHADER: ShaderId = ShaderId(0x464F_494C);
+
+/// Registers the app's custom shaders with the (patched) GPUI. Call once, before the first window.
+pub fn register_shaders() {
+    register_shader(FOIL_SHADER, ShaderSource { wgsl: include_str!("shaders/foil.wgsl"), msl: include_str!("shaders/foil.metal") });
+}
+
+/// The animation state of the GPU path, shared with the paint closure (the clock advances while frames are painted).
+struct Anim {
+    t: f32,
+    last: Option<Instant>,
+    was_live: bool,
+    /// frames are being requested right now (so the timer need not wake the view)
+    running: bool,
+    /// the shader cannot be used (build failed, or the renderer does not know custom shaders): use the CPU path
+    failed: bool,
+    first_paint: Option<Instant>,
+    frozen: bool,
+    cols_w: usize,
+    cols: Vec<foil::Col>,
+}
 
 /// What a drawn frame was made for: physical size, scale (bits), still or moving.
 pub type Sig = (u32, u32, u32, bool);
@@ -66,6 +99,7 @@ pub struct Backdrop {
     scale: f32,
     /// frames handed to the screen (tests / measurements)
     pub drawn: u64,
+    anim: Rc<RefCell<Anim>>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -94,7 +128,7 @@ impl Backdrop {
         });
         Backdrop {
             prefs, dust: None, fade: None, dust_for: None, waves: None, waves_in_flight: false, cols: Arc::new(vec![]), tx, t: t0, last: Instant::now(),
-            was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, _tasks: vec![recv, tick],
+            was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, anim: Rc::new(RefCell::new(Anim { t: t0, last: None, was_live: false, running: false, failed: false, first_paint: None, frozen: std::env::var_os("RUNE_DESKTOP_FOIL_FREEZE").is_some(), cols_w: 0, cols: vec![] })), _tasks: vec![recv, tick],
         }
     }
 
@@ -140,7 +174,25 @@ impl Backdrop {
 
     /// Called on a timer: keeps the images for the current size, advances the clock, asks for a repaint when one is wanted,
     /// and says how long to sleep.
+    /// Is the backdrop drawn by the GPU shader (the default) rather than by the CPU path?
+    fn gpu(&self) -> bool {
+        !self.prefs.software && !self.anim.borrow().failed && std::env::var("RUNE_DESKTOP_FOIL").map(|v| v != "software").unwrap_or(true)
+    }
+
+    /// The timer of the GPU path: frames are requested by the painter itself while it can be seen; this only starts them again
+    /// (window active again, a setting changed) and notices a shader that cannot be used.
+    fn tick_gpu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Duration {
+        if self.dust.is_some() || self.waves.is_some() || self.fade.is_some() { self.drop_images(window); }
+        let live = animating(self.prefs, window.is_window_active());
+        let running = self.anim.borrow().running;
+        if live && !running { cx.notify(); }
+        if !live && running { self.anim.borrow_mut().running = false; }
+        Duration::from_millis(500)
+    }
+
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Duration {
+        if self.prefs.on && self.gpu() { return self.tick_gpu(window, cx); }
+        if self.prefs.on && self.anim.borrow().failed { cx.notify(); }
         let now = Instant::now();
         let dt = now.duration_since(self.last).as_secs_f32();
         self.last = now;
@@ -179,9 +231,49 @@ impl Backdrop {
     }
 }
 
+impl Backdrop {
+    /// The GPU path: one shader quad over the whole window; the tint and edge shading go on top as before.
+    fn render_gpu(&mut self, root: Div) -> Div {
+        let (anim, prefs) = (self.anim.clone(), self.prefs);
+        let quad = shader_quad(FOIL_SHADER, move |bounds, window| {
+            let scale = window.scale_factor();
+            let (pw, ph) = ((f32::from(bounds.size.width) * scale).round(), (f32::from(bounds.size.height) * scale).round());
+            let mut a = anim.borrow_mut();
+            let now = Instant::now();
+            // a shader that is not ready after a moment (an old or unsupported renderer) or failed: the CPU path takes over
+            let first = *a.first_paint.get_or_insert(now);
+            match shader_status(FOIL_SHADER) {
+                ShaderStatus::Failed(_) => a.failed = true,
+                ShaderStatus::Pending if now.duration_since(first) > Duration::from_millis(1500) => a.failed = true,
+                _ => {}
+            }
+            let live = animating(prefs, window.is_window_active());
+            let dt = a.last.map(|l| now.duration_since(l).as_secs_f32()).unwrap_or(0.0);
+            a.last = Some(now);
+            if live && a.was_live && !a.frozen { a.t = foil::clock(a.t + dt.min(0.5)); }
+            a.was_live = live;
+            a.running = live;
+            if live { window.request_animation_frame(); } else if a.failed { window.request_animation_frame(); }
+            if a.cols_w != pw as usize { a.cols = foil::columns(pw as usize); a.cols_w = pw as usize; }
+            let t = if prefs.reduce { foil::STILL_T } else { a.t };
+            foil::gpu_data(pw, ph, scale, t, &a.cols).into()
+        });
+        let root = root.child(quad.absolute().top_0().left_0().size_full());
+        if bare() { return root; }
+        root
+            // the plain tint that keeps text readable, and a dark vignette at the edges
+            .child(div().absolute().top_0().left_0().size_full().bg(ca(0x030612, 0.28)))
+            .child(div().absolute().top_0().left_0().w_full().h(relative(0.3)).bg(linear_gradient(180., linear_color_stop(ca(0x05091a, 0.5), 0.), linear_color_stop(ca(0x05091a, 0.), 1.))))
+            .child(div().absolute().bottom_0().left_0().w_full().h(relative(0.3)).bg(linear_gradient(0., linear_color_stop(ca(0x05091a, 0.5), 0.), linear_color_stop(ca(0x05091a, 0.), 1.))))
+            .child(div().absolute().top_0().left_0().h_full().w(relative(0.25)).bg(linear_gradient(90., linear_color_stop(ca(0x05091a, 0.5), 0.), linear_color_stop(ca(0x05091a, 0.), 1.))))
+            .child(div().absolute().top_0().right_0().h_full().w(relative(0.25)).bg(linear_gradient(270., linear_color_stop(ca(0x05091a, 0.5), 0.), linear_color_stop(ca(0x05091a, 0.), 1.))))
+    }
+}
+
 impl Render for Backdrop {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let root = div().absolute().top_0().left_0().size_full().overflow_hidden();
+        if self.prefs.on && self.gpu() { return self.render_gpu(root); }
         if !self.prefs.on || self.size.0 == 0. { return root; }
         let t = if self.prefs.reduce { foil::STILL_T } else { self.t };
         let (w, h, scale) = (self.size.0, self.size.1, self.scale);
@@ -237,11 +329,12 @@ fn paint(window: &mut Window, bounds: Bounds<Pixels>, scale: f32, t: f32, dust: 
 pub struct Root { pub rune: Entity<crate::rune::Rune>, pub backdrop: Entity<Backdrop> }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
         let mut full = StyleRefinement::default();
         full.size.width = Some(relative(1.).into());
         full.size.height = Some(relative(1.).into());
-        div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(AnyView::from(self.rune.clone()).cached(full))
+        if bare() { return div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).into_any_element(); }
+        div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(AnyView::from(self.rune.clone()).cached(full)).into_any_element()
     }
 }
 
@@ -272,6 +365,6 @@ mod tests {
 
     #[test]
     fn defaults_are_on_and_saving() {
-        assert_eq!(Prefs::default(), Prefs { on: true, reduce: false, saver: true });
+        assert_eq!(Prefs::default(), Prefs { on: true, reduce: false, saver: true, software: false });
     }
 }

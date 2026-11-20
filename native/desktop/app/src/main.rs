@@ -59,6 +59,7 @@ fn main() {
     let (ww, wh) = std::env::var("RUNE_DESKTOP_SIZE").ok().and_then(|v| { let (a, b) = v.split_once('x')?; Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?)) }).unwrap_or((1280., 800.));
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx: &mut App| {
         gpui_kit::init(cx);
+        backdrop::register_shaders();
         let fonts: Vec<std::borrow::Cow<'static, [u8]>> = vec![
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/inter-latin-wght-normal.ttf").as_slice()),
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/source-serif-4-latin-wght-normal.ttf").as_slice()),
