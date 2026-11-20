@@ -1,9 +1,9 @@
 //! Keyboard first: which key does what. Pure, so the same table can be tested here and mirrored in Swift (native/mac).
 //!
 //! Compact view (the queue closed): Space play/pause, Left/Right previous/next, Shift+Left/Right seek 10 s, Up/Down
-//! volume 5, S shuffle, R repeat, Q or Tab opens the queue, Esc hides.
+//! volume 5, S shuffle, R repeat, Q or Tab opens the queue (Ctrl/Cmd+Q toggles it from anywhere; some desktops keep Tab for themselves), Esc hides.
 //! Queue view: typing filters, Up/Down pick, Enter plays the pick, Backspace erases, Tab closes the queue, Esc clears
-//! the filter, then closes the queue, then hides. Ctrl/Cmd+S and Ctrl/Cmd+R still toggle shuffle/repeat. With an empty
+//! the filter, then closes the queue, then hides. Delete removes the pick from the queue. Ctrl/Cmd+S and Ctrl/Cmd+R still toggle shuffle/repeat. With an empty
 //! filter Space, Left and Right still play/pause and skip (they are not words).
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -39,6 +39,7 @@ pub enum Action {
     PickUp,
     PickDown,
     PlayPicked,
+    RemovePicked,
 }
 
 pub const SEEK_MS: f64 = 10_000.;
@@ -54,6 +55,7 @@ pub fn map_key(k: &Key, queue_open: bool, filter_empty: bool) -> Option<Action> 
         return match n {
             "s" => Some(ToggleShuffle),
             "r" => Some(ToggleRepeat),
+            "q" => Some(if queue_open { CloseQueue } else { OpenQueue }),
             "up" => Some(VolumeUp),
             "down" => Some(VolumeDown),
             _ => None,
@@ -79,6 +81,7 @@ pub fn map_key(k: &Key, queue_open: bool, filter_empty: bool) -> Option<Action> 
         ("up", _) => Some(PickUp),
         ("down", _) => Some(PickDown),
         ("enter", _) => Some(PlayPicked),
+        ("delete", _) => Some(RemovePicked),
         ("backspace", _) => Some(Backspace),
         ("space", _) if filter_empty => Some(PlayPause),
         ("left", false) if filter_empty => Some(Prev),
@@ -127,6 +130,9 @@ mod tests {
         assert_eq!(map_key(&k("tab"), true, false), Some(CloseQueue));
         assert_eq!(map_key(&k("backspace"), true, false), Some(Backspace));
         assert_eq!(map_key(&Key { name: "s".into(), cmd: true, ..Default::default() }, true, false), Some(ToggleShuffle));
+        let ctrl_q = Key { name: "q".into(), cmd: true, ..Default::default() };
+        assert_eq!(map_key(&ctrl_q, true, false), Some(CloseQueue));
+        assert_eq!(map_key(&ctrl_q, false, true), Some(OpenQueue));
     }
 
     #[test]

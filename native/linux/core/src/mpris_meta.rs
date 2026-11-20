@@ -70,6 +70,16 @@ pub fn from_model(m: &Model, base: &str, now: u64) -> MprisMeta {
     out
 }
 
+/// Did the position jump (a seek, a new song) rather than just advance? Then MPRIS wants a `Seeked` signal.
+/// `elapsed_ms` is the time between the two readings; playing, the position is expected to advance by it.
+pub fn seek_jump(old: &MprisMeta, new: &MprisMeta, elapsed_ms: u64) -> bool {
+    if old.track_id != new.track_id {
+        return false; // a new song is announced by its metadata
+    }
+    let expected = old.position_us + if old.playback_status == "Playing" { elapsed_ms as i64 * 1000 } else { 0 };
+    (new.position_us - expected).abs() > 1_500_000
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +129,19 @@ mod tests {
         assert_eq!(t.playback_status, "Stopped");
         assert_eq!(t.track_id, "/org/mpris/MediaPlayer2/TrackList/NoTrack");
         assert!(!t.can_play && t.title.is_empty() && t.art_url.is_none());
+    }
+
+    #[test]
+    fn seeked_only_for_real_jumps() {
+        let a = from_model(&playing(), "http://x", 1000);
+        let mut b = a.clone();
+        b.position_us += 1_000_000; // one second later while playing: normal
+        assert!(!seek_jump(&a, &b, 1000));
+        b.position_us = a.position_us + 60_000_000;
+        assert!(seek_jump(&a, &b, 1000));
+        let mut other = b.clone();
+        other.track_id = "/x".into();
+        assert!(!seek_jump(&a, &other, 1000), "a new song is not a seek");
     }
 
     #[test]

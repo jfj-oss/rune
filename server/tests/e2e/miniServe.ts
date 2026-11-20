@@ -1,0 +1,21 @@
+// A real silent rune server (temp data dir, own port) for looking at the rune mini panel by hand or in screenshots:
+// `npx tsx tests/e2e/miniServe.ts` prints the URL and keeps a paused queue with cover art. Ctrl-C / SIGTERM stops it.
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { startServer, until } from './rig.js';
+
+process.env.LOG_LEVEL = 'silent';
+const srv = await startServer();
+for (const [i, album] of ['Alpha', 'Bravo', 'Charlie'].entries()) {
+  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=600x600:r=1,hue=h=${i * 90}`, '-frames:v', '1', join(srv.library.root, 'E2E Artist', album, 'folder.jpg')]);
+}
+await fetch(`${srv.base}/api/scan`, { method: 'POST' });
+await until('covers', async () => (await fetch(`${srv.base}/api/cover/${encodeURIComponent(srv.library.alpha.id)}?size=200`)).headers.get('content-type')?.startsWith('image'), 20_000).catch(() => undefined);
+const ids = [...srv.library.bravo.tracks, ...srv.library.alpha.tracks, ...srv.library.charlie.tracks].map((t) => t.id);
+await srv.send('pc', { type: 'play', trackIds: ids, startIndex: 0, paused: true });
+await srv.send('pc', { type: 'volume', volume: 70 });
+console.log(`READY ${srv.base}`);
+const stop = async () => { await srv.stop(); process.exit(0); };
+process.on('SIGTERM', stop);
+process.on('SIGINT', stop);
+setInterval(() => undefined, 1 << 30);

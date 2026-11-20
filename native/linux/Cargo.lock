@@ -5295,6 +5295,7 @@ dependencies = [
  "image",
  "libc",
  "rune-mini-core",
+ "serde",
  "serde_json",
  "smallvec",
  "tokio",
