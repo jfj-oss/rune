@@ -1,7 +1,7 @@
 //! The panel: one borderless window drawn in Claude Summon's look. Nothing animates; it draws when the state changes
 //! and once a second while visible and playing.
 use crate::look::{self, c, mmss};
-use crate::state::{initial_dot, status_word, Cover, Mini, ROWS, ROW_H};
+use crate::state::{playlist_dot, status_word, Cover, Mini, ROWS, ROW_H};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -155,17 +155,28 @@ impl Render for Panel {
         let status = player.map(|p| p.status.clone()).unwrap_or(Status::Stopped);
         let playing = matches!(status, Status::Playing | Status::Loading);
 
-        // ---- the dots on the left edge: one per zone
-        let mut dots = v_flex().flex_none().w(px(22.)).pt(px(14.)).gap(px(5.)).items_center();
-        for (id, name) in m.zone_list() {
-            let on = id == m.model.zone;
-            let d = if on { 9. } else { 7. };
-            let (id2, id3, name2) = (id.clone(), id.clone(), name.clone());
+        // ---- the dots on the left edge: one per chosen playlist; a click shuffle-plays it on the zone shown
+        let playing_pl = m.model.playing_playlist().map(str::to_string);
+        let wide = m.model.minis.len() > 6;
+        let mut dots = div().flex().flex_wrap().content_start().flex_none().w(px(if wide { 38. } else { 22. })).pt(px(8.)).gap(px(5.)).justify_center().items_start();
+        if m.model.minis.is_empty() {
+            // nothing chosen yet: one dim "+" says where to choose
             dots = dots.child(
-                div().id(SharedString::from(format!("dot-{id}"))).w(px(14.)).h(px(14.)).flex().items_center().justify_center().cursor_pointer()
-                    .child(div().size(px(d)).rounded_full().bg(initial_dot(&id3)).opacity(if on { 1. } else { 0.7 }))
-                    .on_hover(lst(&me, move |this, h: &bool, _, cx| { this.mini.update(cx, |m, cx| { m.hover = if *h { Some(name2.clone()) } else { None }; cx.notify(); }); }))
-                    .on_click(lst(&me, move |this, _, _, cx| { let z = id2.clone(); this.mini.update(cx, |m, cx| m.set_zone(&z, cx)); })),
+                div().id("dot-none").w(px(14.)).h(px(14.)).flex().items_center().justify_center().rounded_full().border_1().border_color(c(look::RULE))
+                    .font_family(look::MONO).text_size(px(11.)).text_color(c(look::DIM)).child("+")
+                    .on_hover(lst(&me, move |this, h: &bool, _, cx| { this.mini.update(cx, |m, cx| { m.hover = if *h { Some("choose playlists in rune \u{2192} Show in rune mini".into()) } else { None }; cx.notify(); }); })),
+            );
+        }
+        for (i, p) in m.model.minis.iter().enumerate() {
+            let on = playing_pl.as_deref() == Some(p.id.as_str());
+            let label = if i < 8 { format!("{} \u{b7} key {}", p.name, i + 1) } else { p.name.clone() };
+            dots = dots.child(
+                div().id(SharedString::from(format!("dot-{}", p.id))).w(px(14.)).h(px(14.)).flex().items_center().justify_center().cursor_pointer().rounded_full()
+                    .when(on, |d| d.border_1().border_color(c(look::INK)))
+                    .child(div().size(px(if on { 7. } else { 9. })).rounded_full().bg(playlist_dot(p.color)).opacity(if on { 1. } else { 0.75 }))
+                    .hover(|s| s.opacity(1.))
+                    .on_hover(lst(&me, move |this, h: &bool, _, cx| { let t = label.clone(); this.mini.update(cx, |m, cx| { m.hover = if *h { Some(t) } else { None }; cx.notify(); }); }))
+                    .on_click(lst(&me, move |this, _, _, cx| { this.mini.update(cx, |m, cx| m.play_mini(i, cx)); })),
             );
         }
 
@@ -222,10 +233,22 @@ impl Render for Panel {
             div().id(id).cursor_pointer().text_color(if on { c(look::ACCENT) } else { c(look::DIM) }).hover(|s| s.text_color(c(look::INK))).child(text)
                 .on_click(lst(&me, move |this, _, _, cx| { let k = cmd.clone(); this.mini.update(cx, |m, cx| m.command(k, cx)); }))
         };
-        let left_note: String = m.notice.clone().or_else(|| m.hover.clone()).unwrap_or_else(|| format!("{} \u{b7} {}", status_word(&status), m.zone_name()));
         let err = m.notice.is_some();
+        let note: Option<String> = m.notice.clone().or_else(|| m.hover.clone());
+        let zones_n = m.zone_list().len();
+        let left: AnyElement = match note {
+            Some(t) => div().overflow_hidden().whitespace_nowrap().text_color(if err { c(look::ERROR) } else { c(look::DIM) }).child(t).into_any_element(),
+            // "playing \u{b7} Linux PC speakers": the zone name cycles through the zones when there are several
+            None => h_flex().gap(px(0.)).text_color(c(look::DIM)).whitespace_nowrap()
+                .child(format!("{} \u{b7} ", status_word(&status)))
+                .child(
+                    div().id("zone").text_color(c(look::DIM)).when(zones_n > 1, |d| d.cursor_pointer().hover(|s| s.text_color(c(look::INK)))).child(if zones_n > 1 { format!("{} \u{203a}", m.zone_name()) } else { m.zone_name() })
+                        .when(zones_n > 1, |d| d.on_click(lst(&me, move |this, _, _, cx| { this.mini.update(cx, |m, cx| m.cycle_zone(cx)); }))),
+                )
+                .into_any_element(),
+        };
         let footer = h_flex().items_center().gap(px(12.)).font_family(look::MONO).text_size(px(11.))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(if err { c(look::ERROR) } else { c(look::DIM) }).child(left_note))
+            .child(div().flex_1().min_w_0().overflow_hidden().child(left))
             .child(tog("sh", "shuffle".into(), shuffle, UiCommand::ToggleShuffle, &me))
             .child(tog("rp", format!("repeat {}", repeat.as_str()), repeat != Repeat::Off, UiCommand::CycleRepeat, &me))
             .child({

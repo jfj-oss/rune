@@ -1,5 +1,5 @@
 //! Claude Summon's look (Sources/ClaudeSummon/Theme.swift), dark variant: a warm near-black paper, parchment ink, one
-//! copper accent, monospace type, small coloured dots on the edge.
+//! copper accent, monospace type, small coloured dots on the edge (one per chosen playlist).
 use gpui_kit::*;
 
 pub const PAPER: u32 = 0x1C1B18;
@@ -16,12 +16,9 @@ pub const MONO: &str = "IBM Plex Mono Medium";
 
 pub fn c(v: u32) -> Hsla { rgb(v).into() }
 
-/// Theme.dotColor: FNV-1a of the id picks one of the eight muted dot colours (the same function as the Mac app).
-pub fn dot_color(id: &str) -> u32 {
-    let mut h: u32 = 2166136261;
-    for b in id.bytes() { h = (h ^ b as u32).wrapping_mul(16777619); }
-    DOTS[(h % DOTS.len() as u32) as usize]
-}
+/// The dot colour for a playlist's colour key (the server hands out 0..7 and keeps one per playlist; the Mac app has
+/// the same eight in Theme.swift). Any number is accepted and wraps.
+pub fn dot_color(key: u8) -> u32 { DOTS[key as usize % DOTS.len()] }
 
 pub fn mmss(ms: f64) -> String {
     let s = (ms.max(0.) / 1000.).floor() as u64;
@@ -33,8 +30,13 @@ mod tests {
     use super::*;
     #[::core::prelude::v1::test]
     fn dot_colours_are_stable() {
-        assert_eq!(dot_color("pc"), dot_color("pc"));
-        assert!(DOTS.contains(&dot_color("spotify:abc")));
+        assert_eq!(dot_color(0), DOTS[0]);
+        assert_eq!(dot_color(7), DOTS[7]);
+        assert_eq!(dot_color(8), DOTS[0], "wraps");
+        let mut seen = DOTS.to_vec();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 8, "eight distinct colours");
     }
     #[::core::prelude::v1::test]
     fn times() {

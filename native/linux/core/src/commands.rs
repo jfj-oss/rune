@@ -40,6 +40,12 @@ impl Request {
     }
 }
 
+/// The body of "shuffle-play this playlist": what the web's Shuffle button sends (store/player.ts `startOn`): the whole list,
+/// shuffle on, the zone mixes it itself (first song included).
+pub fn play_playlist_body(track_ids: &[String]) -> Value {
+    json!({"type": "play", "trackIds": track_ids, "startIndex": 0, "shuffle": true})
+}
+
 /// Percent-encode a path segment (zone ids contain ':' and Spotify device ids may contain more).
 pub fn encode(s: &str) -> String {
     let mut out = String::new();
@@ -167,6 +173,13 @@ mod tests {
         assert_eq!(map(&m, &UiCommand::Jump(3), 0).unwrap().body, json!({"type": "jump", "index": 3}));
         assert_eq!(map(&m, &UiCommand::Remove("q2".into()), 0).unwrap().body, json!({"type": "remove", "queueId": "q2"}));
         assert_eq!(map(&m, &UiCommand::Move { queue_id: "q2".into(), to: 0 }, 0).unwrap().body, json!({"type": "move", "queueId": "q2", "toIndex": 0}));
+    }
+
+    #[test]
+    fn a_playlist_dot_sends_the_shuffle_play_the_web_sends() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(play_playlist_body(&ids), json!({"type": "play", "trackIds": ["a", "b"], "startIndex": 0, "shuffle": true}));
+        assert_eq!(encode("pl:rune:1b2-c"), "pl%3Arune%3A1b2-c");
     }
 
     #[test]

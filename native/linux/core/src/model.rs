@@ -129,6 +129,21 @@ pub struct ZoneInfo {
     pub spotify_zone: Option<String>,
 }
 
+/// A playlist chosen for the mini (GET /api/mini/playlists): a coloured dot that shuffle-plays it.
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MiniPlaylist {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// Dot colour index into the panel's eight-colour palette; the server keeps it stable and distinct.
+    #[serde(default)]
+    pub color: u8,
+}
+
+/// The most dots (and number keys) there are.
+pub const MINI_MAX: usize = 8;
+
 /// websocket /api/ws, server -> client. Anything else (scan progress, library-changed) is `Other`.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -142,8 +157,19 @@ pub enum ServerEvent {
         #[serde(default, rename = "queueRev")]
         queue_rev: Option<String>,
     },
+    /// The chosen playlists changed: read GET /api/mini/playlists again (handled by the caller, not the reducer).
+    MiniPlaylists,
     #[serde(other)]
     Other,
+}
+
+/// The zone after `current` in `ids` (wrapping); the first one when `current` is not in the list.
+pub fn next_zone(ids: &[String], current: &str) -> Option<String> {
+    if ids.is_empty() {
+        return None;
+    }
+    let at = ids.iter().position(|i| i == current);
+    Some(ids[at.map(|i| (i + 1) % ids.len()).unwrap_or(0)].clone())
 }
 
 /// The zones the picker offers: what the web offers (browser zones are not listed by the server; the PC's own Spotify
@@ -206,6 +232,10 @@ pub enum Msg {
     Fetched { state: WireState, rev: Option<String> },
     Conn(Conn),
     Zones(Vec<ZoneInfo>),
+    /// The chosen playlists, in order.
+    Minis(Vec<MiniPlaylist>),
+    /// The answer to "shuffle-play this playlist": the new state of the zone, and which playlist made the queue.
+    Started { playlist: String, state: WireState },
 }
 
 /// Things the reducer wants done; the caller does them.
@@ -225,6 +255,11 @@ pub struct Model {
     queues: HashMap<String, (String, Vec<QueueItem>)>,
     /// A fetch is out for this zone: do not ask twice.
     fetching: Option<String>,
+    /// The playlists on the left edge, in order (at most `MINI_MAX`).
+    pub minis: Vec<MiniPlaylist>,
+    /// The queue a playlist dot made: (zone, playlist id, first queue id, length). It stops matching as soon as the queue
+    /// is replaced or edited, so the ring on a dot means "this queue came from it", not "it was clicked once".
+    origin: Option<(String, String, String, usize)>,
 }
 
 impl Model {
@@ -238,6 +273,13 @@ impl Model {
 
     pub fn online(&self) -> bool {
         self.conn() == Conn::Online
+    }
+
+    /// The playlist whose shuffled play made the queue now shown, if the queue is still that one.
+    pub fn playing_playlist(&self) -> Option<&str> {
+        let (zone, id, first, len) = self.origin.as_ref()?;
+        let p = self.player.as_ref()?;
+        (*zone == self.zone && p.queue.len() == *len && p.queue.first().map(|q| &q.queue_id) == Some(first)).then_some(id.as_str())
     }
 
     /// Show another zone: its state is unknown until read.
@@ -278,6 +320,21 @@ impl Model {
             }
             Msg::Zones(z) => {
                 self.zones = z;
+                vec![]
+            }
+            Msg::Minis(mut l) => {
+                l.truncate(MINI_MAX);
+                self.minis = l;
+                vec![]
+            }
+            Msg::Started { playlist, state } => {
+                if state.zone != self.zone {
+                    return vec![];
+                }
+                let q = state.queue.clone().unwrap_or_default();
+                self.origin = q.first().map(|f| (state.zone.clone(), playlist, f.queue_id.clone(), q.len()));
+                self.fetching = None;
+                self.apply(state, q, now);
                 vec![]
             }
             Msg::Ws(ServerEvent::Player { state, queue_rev }) => {
@@ -402,5 +459,67 @@ mod tests {
         let list = vec![z("spotify:phone", "spotify"), z("spotify:dev", "spotify"), z("browser:x", "browser"), soloist, pc];
         let ids: Vec<String> = pickable_zones(&list).into_iter().map(|z| z.id).collect();
         assert_eq!(ids, vec!["pc", "soloist", "spotify:phone"], "browser zones and the PC's own Spotify device are left out");
+    }
+
+    fn started(zone: &str, ids: &[&str]) -> WireState {
+        WireState { zone: zone.into(), status: Status::Playing, queue: Some(ids.iter().map(|i| item(i, i)).collect()), shuffle: true, ..Default::default() }
+    }
+
+    #[test]
+    fn the_chosen_playlists_come_from_the_server_and_are_capped() {
+        let mut m = Model::new("pc");
+        let l: Vec<MiniPlaylist> = serde_json::from_str(r#"[{"id":"pl:a","name":"Alpha","color":3},{"id":"pl:b","name":"Beta","color":0}]"#).unwrap();
+        assert_eq!(l[0], MiniPlaylist { id: "pl:a".into(), name: "Alpha".into(), color: 3 });
+        m.update(Msg::Minis(l), 0);
+        assert_eq!(m.minis.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Alpha", "Beta"]);
+        let many = (0..12).map(|i| MiniPlaylist { id: format!("pl:{i}"), ..Default::default() }).collect();
+        m.update(Msg::Minis(many), 0);
+        assert_eq!(m.minis.len(), MINI_MAX);
+    }
+
+    #[test]
+    fn the_server_push_is_recognised_and_needs_no_reducer_work() {
+        let mut m = Model::new("pc");
+        let e: ServerEvent = serde_json::from_str(r#"{"type":"mini-playlists"}"#).unwrap();
+        assert!(matches!(e, ServerEvent::MiniPlaylists));
+        assert!(m.update(Msg::Ws(e), 0).is_empty());
+        assert!(matches!(serde_json::from_str::<ServerEvent>(r#"{"type":"library-changed"}"#).unwrap(), ServerEvent::Other));
+    }
+
+    #[test]
+    fn a_dot_rings_only_while_the_queue_it_made_is_unchanged() {
+        let mut m = Model::new("pc");
+        assert_eq!(m.playing_playlist(), None);
+        m.update(Msg::Started { playlist: "pl:a".into(), state: started("pc", &["q1", "q2", "q3"]) }, 0);
+        assert_eq!(m.playing_playlist(), Some("pl:a"));
+        assert_eq!(m.player.as_ref().unwrap().queue.len(), 3, "the answer is shown at once");
+        // the same queue again (a position update, a slim event): still ringed
+        m.update(Msg::Fetched { state: started("pc", &["q1", "q2", "q3"]), rev: None }, 5);
+        assert_eq!(m.playing_playlist(), Some("pl:a"));
+        // a song removed: it is no longer the playlist's queue
+        m.update(Msg::Fetched { state: started("pc", &["q1", "q3"]), rev: None }, 6);
+        assert_eq!(m.playing_playlist(), None);
+        // another queue entirely
+        m.update(Msg::Started { playlist: "pl:b".into(), state: started("pc", &["z1", "z2"]) }, 7);
+        assert_eq!(m.playing_playlist(), Some("pl:b"));
+        m.update(Msg::Fetched { state: started("pc", &["y1", "y2"]), rev: None }, 8);
+        assert_eq!(m.playing_playlist(), None);
+        // another zone shows nothing ringed, and a Started for a zone not shown is ignored
+        let mut n = Model::new("pc");
+        n.update(Msg::Started { playlist: "pl:a".into(), state: started("pc", &["q1"]) }, 0);
+        n.set_zone("spotify:x");
+        assert_eq!(n.playing_playlist(), None);
+        n.update(Msg::Started { playlist: "pl:a".into(), state: started("pc", &["q1"]) }, 1);
+        assert_eq!(n.playing_playlist(), None);
+    }
+
+    #[test]
+    fn the_zone_name_cycles_through_the_zones_and_wraps() {
+        let ids: Vec<String> = ["pc", "soloist", "spotify:x"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(next_zone(&ids, "pc").as_deref(), Some("soloist"));
+        assert_eq!(next_zone(&ids, "spotify:x").as_deref(), Some("pc"));
+        assert_eq!(next_zone(&ids, "gone").as_deref(), Some("pc"));
+        assert_eq!(next_zone(&[], "pc"), None);
+        assert_eq!(next_zone(&ids[..1], "pc").as_deref(), Some("pc"));
     }
 }

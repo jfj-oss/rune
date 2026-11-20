@@ -1,7 +1,7 @@
 //! Keyboard first: which key does what. Pure, so the same table can be tested here and mirrored in Swift (native/mac).
 //!
 //! Compact view (the queue closed): Space play/pause, Left/Right previous/next, Shift+Left/Right seek 10 s, Up/Down
-//! volume 5, S shuffle, R repeat, Q or Tab opens the queue (Ctrl/Cmd+Q toggles it from anywhere; some desktops keep Tab for themselves), Esc hides.
+//! volume 5, 1-8 shuffle-play the playlist with that number (Ctrl/Cmd+1-8 from anywhere, the queue view included), S shuffle, R repeat, Q or Tab opens the queue (Ctrl/Cmd+Q toggles it from anywhere; some desktops keep Tab for themselves), Esc hides.
 //! Queue view: typing filters, Up/Down pick, Enter plays the pick, Backspace erases, Tab closes the queue, Esc clears
 //! the filter, then closes the queue, then hides. Delete removes the pick from the queue. Ctrl/Cmd+S and Ctrl/Cmd+R still toggle shuffle/repeat. With an empty
 //! filter Space, Left and Right still play/pause and skip (they are not words).
@@ -40,16 +40,33 @@ pub enum Action {
     PickDown,
     PlayPicked,
     RemovePicked,
+    /// Shuffle-play playlist N (0-based: key 1 is 0).
+    PlayPlaylist(usize),
 }
 
 pub const SEEK_MS: f64 = 10_000.;
 pub const VOLUME_STEP: f64 = 5.;
+
+/// "1".."8" -> 0..7
+fn digit_index(name: &str) -> Option<usize> {
+    let mut ch = name.chars();
+    match (ch.next(), ch.next()) {
+        (Some(c @ '1'..='8'), None) => Some(c as usize - '1' as usize),
+        _ => None,
+    }
+}
 
 pub fn map_key(k: &Key, queue_open: bool, filter_empty: bool) -> Option<Action> {
     use Action::*;
     let n = k.name.as_str();
     if n == "escape" {
         return Some(if queue_open && !filter_empty { ClearFilter } else if queue_open { CloseQueue } else { Hide });
+    }
+    if let Some(i) = digit_index(n) {
+        // Ctrl/Cmd+digit works from anywhere; a bare digit only while the queue is closed (open, it types into the filter)
+        if k.cmd || (!queue_open && !k.shift && !k.alt) {
+            return Some(PlayPlaylist(i));
+        }
     }
     if k.cmd {
         return match n {
@@ -133,6 +150,19 @@ mod tests {
         let ctrl_q = Key { name: "q".into(), cmd: true, ..Default::default() };
         assert_eq!(map_key(&ctrl_q, true, false), Some(CloseQueue));
         assert_eq!(map_key(&ctrl_q, false, true), Some(OpenQueue));
+    }
+
+    #[test]
+    fn number_keys_play_playlists() {
+        for (n, i) in [("1", 0), ("2", 1), ("8", 7)] {
+            assert_eq!(map_key(&k(n), false, true), Some(PlayPlaylist(i)), "{n}");
+            assert_eq!(map_key(&Key { cmd: true, ..k(n) }, false, true), Some(PlayPlaylist(i)));
+            assert_eq!(map_key(&Key { cmd: true, ..k(n) }, true, false), Some(PlayPlaylist(i)), "Ctrl+digit works with the queue open");
+        }
+        assert_eq!(map_key(&k("9"), false, true), None);
+        assert_eq!(map_key(&k("0"), false, true), None);
+        assert_eq!(map_key(&k("1"), true, true), Some(Type("1".into())), "the queue filter takes digits");
+        assert_eq!(map_key(&shift("1"), false, true), None);
     }
 
     #[test]
