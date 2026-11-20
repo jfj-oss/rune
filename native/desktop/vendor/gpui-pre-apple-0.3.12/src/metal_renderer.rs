@@ -47,6 +47,28 @@ const PATH_SAMPLE_COUNT: u32 = 4;
 const INSTANCE_BUFFER_ALIGNMENT: usize = 256;
 const MAX_INSTANCE_BUFFER_SIZE: usize = 256 * 1024 * 1024;
 
+/// RUNE PATCH: Metal source put in front of (and after) an app's `float4 custom_fs(float2 pos, constant float* U)`.
+const CUSTOM_SHADER_PRELUDE: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+#define SHADER_HEADER_LEN 12
+struct CustomVarying { float4 position [[position]]; };
+vertex CustomVarying vs_custom(uint vid [[vertex_id]], constant float* U [[buffer(0)]], constant float2& viewport [[buffer(1)]]) {
+    float2 unit_vertex = float2(float(vid & 1u), float((vid >> 1u) & 1u));
+    float2 origin = float2(U[0], U[1]);
+    float2 size = float2(U[2], U[3]);
+    float2 lo = max(origin, float2(U[4], U[5]));
+    float2 hi = min(origin + size, float2(U[4], U[5]) + float2(U[6], U[7]));
+    float2 pos = mix(lo, hi, unit_vertex);
+    CustomVarying out;
+    out.position = float4(pos / viewport * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+    return out;
+}
+"#;
+const CUSTOM_SHADER_SUFFIX: &str = "
+fragment float4 fs_custom(CustomVarying in [[stage_in]], constant float* U [[buffer(0)]]) { return custom_fs(in.position.xy, U); }
+";
+
 pub type Context = Arc<Mutex<InstanceBufferPool>>;
 pub type Renderer = MetalRenderer;
 
@@ -143,6 +165,8 @@ pub struct MetalRenderer {
     monochrome_sprites_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     polychrome_sprites_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
     surfaces_pipeline_state: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    /// RUNE PATCH: pipelines of app-registered shaders, built on first use (`None`: failed, see `gpui::shader_status`).
+    custom_pipelines: std::collections::HashMap<gpui::ShaderId, Option<Retained<ProtocolObject<dyn MTLRenderPipelineState>>>>,
     unit_vertices: Retained<ProtocolObject<dyn MTLBuffer>>,
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     sprite_atlas: Arc<MetalAtlas>,
@@ -431,6 +455,7 @@ impl MetalRenderer {
             monochrome_sprites_pipeline_state,
             polychrome_sprites_pipeline_state,
             surfaces_pipeline_state,
+            custom_pipelines: Default::default(),
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -938,6 +963,11 @@ impl MetalRenderer {
                         return Err(error);
                     }
                 }
+                PrimitiveBatch::ShaderQuads(range) => {
+                    for quad in &scene.shader_quads[range] {
+                        self.draw_shader_quad(quad, viewport_size, &command_encoder);
+                    }
+                }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }
         }
@@ -1118,6 +1148,67 @@ impl MetalRenderer {
                 quads.len(),
                 quads.start,
             );
+        }
+    }
+
+    /// RUNE PATCH: the pipeline of an app-registered shader (see `gpui::register_shader`), built on first use.
+    fn custom_pipeline(&mut self, id: gpui::ShaderId) -> Option<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
+        if let Some(p) = self.custom_pipelines.get(&id) {
+            return p.clone();
+        }
+        let built = (|| -> Result<Retained<ProtocolObject<dyn MTLRenderPipelineState>>> {
+            let source = gpui::shader_source(id).context("shader not registered")?;
+            let text = format!("{CUSTOM_SHADER_PRELUDE}\n{}\n{CUSTOM_SHADER_SUFFIX}", source.msl);
+            let library = self
+                .device
+                .newLibraryWithSource_options_error(&NSString::from_str(&text), Some(&objc2_metal::MTLCompileOptions::new()))
+                .context("building the custom Metal library")?;
+            build_pipeline_state(&self.device, &library, "custom_shader", "vs_custom", "fs_custom", MTLPixelFormat::BGRA8Unorm)
+        })();
+        let pipeline = match built {
+            Ok(p) => {
+                gpui::set_shader_status(id, gpui::ShaderStatus::Ready);
+                Some(p)
+            }
+            Err(e) => {
+                log::error!("custom shader {id:?}: {e:#}");
+                gpui::set_shader_status(id, gpui::ShaderStatus::Failed(format!("{e:#}")));
+                None
+            }
+        };
+        self.custom_pipelines.insert(id, pipeline.clone());
+        pipeline
+    }
+
+    /// RUNE PATCH: draws one quad of an app-registered shader. Its floats (`ShaderQuad::pack`) go to buffer 0 of both stages.
+    fn draw_shader_quad(
+        &mut self,
+        quad: &gpui::ShaderQuad,
+        viewport_size: Size<DevicePixels>,
+        command_encoder: &ProtocolObject<dyn MTLRenderCommandEncoder>,
+    ) {
+        let Some(pipeline) = self.custom_pipeline(quad.shader) else { return };
+        let floats = quad.pack();
+        let bytes = floats.len() * mem::size_of::<f32>();
+        let viewport = [viewport_size.width.0 as f32, viewport_size.height.0 as f32];
+        let Some(data) = ptr::NonNull::new(floats.as_ptr() as *mut std::ffi::c_void) else { return };
+        command_encoder.setRenderPipelineState(&pipeline);
+        // SAFETY: `floats` and `viewport` are live for the calls, which copy their bytes; the buffer (for data over the
+        // 4 KB limit of set*Bytes) is retained by the encoder; buffer 0 and bytes 1 match the prelude's entry points.
+        unsafe {
+            if bytes <= 4096 {
+                command_encoder.setVertexBytes_length_atIndex(data, bytes, 0);
+                command_encoder.setFragmentBytes_length_atIndex(data, bytes, 0);
+            } else {
+                let Some(buffer) = self.device.newBufferWithBytes_length_options(data, bytes, MTLResourceOptions::StorageModeShared) else {
+                    log::error!("custom shader: allocating {bytes} bytes failed");
+                    return;
+                };
+                command_encoder.setVertexBuffer_offset_atIndex(Some(&buffer), 0, 0);
+                command_encoder.setFragmentBuffer_offset_atIndex(Some(&buffer), 0, 0);
+            }
+            command_encoder.setVertexBytes_length_atIndex(ptr::NonNull::from(&viewport).cast(), mem::size_of_val(&viewport), 1);
+            command_encoder.drawPrimitives_vertexStart_vertexCount_instanceCount_baseInstance(MTLPrimitiveType::TriangleStrip, 0, 4, 1, 0);
         }
     }
 
