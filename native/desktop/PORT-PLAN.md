@@ -54,7 +54,7 @@ Native modules live in `native/desktop/app/src/`.
 | `Toast.tsx` | `toast.rs` | done |
 | `Popover.tsx` / `TrackMenu.tsx` context + dropdown menus | `menu.rs` (one overlay menu, anchored, keyboard + click-away) | done |
 | `Dialog.tsx`, `PlaylistDialogs.tsx` (new / rename / delete) | `dialog.rs` | done: new playlist, confirm delete; smart-playlist builder phase 4 |
-| `Ambient.tsx`, `DitherBackdrop.tsx`, `lib/dither.ts`, glass blur | `backdrop.rs`, `foil.rs` | the native-only "Foil waves" backdrop is built (device-resolution images, no web twin); the dither modes are **phase 6**; phase 1 draws the flat `#0f1013` (the web's "Off" setting) with the glass tint |
+| `Ambient.tsx`, `DitherBackdrop.tsx`, `lib/dither.ts`, glass blur | `backdrop.rs`, `foil.rs`, `gen.rs` | **done**: the native-only "Foil waves" backdrop (GPU shader), the glass is the plain dark tint (no blur, decided); the web's dither colours are web-only |
 | `Logo.tsx` (dot logo) | `logo.rs` | done (static dots) |
 | `MobileTabs`, `MiniPlayer`, `MobileBack`, `UpdateChip` mobile bits | - | web-only |
 | `FirstRunGate`, `Setup.tsx` | `setup.rs`: a first-run "server address" screen only | next (phase 1 reads `--url`/config; no screen yet) |
@@ -67,11 +67,11 @@ Native modules live in `native/desktop/app/src/`.
 | `parts.tsx` `Transport`, `PlayPause`, `SeekBar`, `VolumeControl`, `SignalDot`, `ZonePicker` | `playerbar.rs`, `slider.rs` | done (seek is the plain slider; the **waveform seek** is phase 3) |
 | `Slider.tsx`, `VolumeSlider.tsx` | `slider.rs` (drag, click, wheel, keyboard) | done |
 | `Queue.tsx` drawer (380 px; click row = jump, x = remove, Clear, drag reorder) | `queue.rs` | done: jump, remove, clear, current row; **drag reorder** next (phase 2) |
-| `NowPlaying.tsx` full screen (huge cover, up next, About excerpt) | `nowplaying.rs` | phase 2 |
+| `NowPlaying.tsx` full screen (huge cover, up next, reception / about / artist cards) | `nowplaying.rs` | done |
 | `Waveform.tsx`, `usePeaks` | `waveform.rs` | phase 3 |
 | `store/player.ts` zone routing: `ownCopies`, `routeItems`, twins, Spotify fallbacks, `PlayOnSheet` | `playroute.rs` | phase 1 sends `play` to the chosen zone (pc by default, local + Spotify tracks as the server accepts them); the twin/fallback logic is phase 4 |
 | `player/engine.ts`, `tabPlayer.ts`, `browser.ts`, `zoneEngine.ts`, `hybrid.ts`, `oneTab.ts`, `phoneSoloist.ts` (a browser tab that **sounds** a `browser:<id>` zone) | `audio/` (symphonia + cpal, `TabPlan`/`TabReport`) | **phase 9, needed on the MacBook** (see "Open decision") |
-| `MediaSession.tsx` | MPRIS (Linux) / `MPRemoteCommandCenter` (Mac); reuse `core/mpris_meta.rs` and the mini app's `desktop.rs` pattern | phase 7 |
+| `MediaSession.tsx` | `os/linux.rs` MPRIS `org.mpris.MediaPlayer2.rune_desktop` / `os/mac.rs` `MPRemoteCommandCenter` + now playing | **done** (phase 7) |
 
 ### Library pages
 | Web | Native | Status |
@@ -93,7 +93,7 @@ Native modules live in `native/desktop/app/src/`.
 | `Duplicates.tsx` | `pages/duplicates.rs` | phase 5 |
 | `Settings.tsx`, `UpdateCard/UpdateChip` | `pages/settings.rs` | phase 5 (update card: the native app updates by the release process, not the server's self-update) |
 | `album/Reception.tsx`, `Notes`, `Credits`, `Editions`, `Connections`, `GlassStars`, `ReviewPreview` | `album/*.rs` + markdown-ish prose (serif) | phase 5 |
-| `AsciiWaves`, `WaveCover`, `lib/waveCover.ts`, `dotLogo` | `ascii.rs` (the mega port's glyph-sprite technique) | phase 6 |
+| `AsciiWaves`, `WaveCover`, `lib/waveCover.ts` | `gen.rs` + `shaders/gen.wgsl` / `gen.metal` (one GPU shader, the web's maths and blue-noise table) | **done** (phase 6); the animated dot logo (`dotLogo`) stays a still frame |
 
 ### Actions and state
 | Web | Native | Status |
@@ -247,3 +247,59 @@ drag / up / down / remove, Playback with volume levelling and auto-radio, and th
 server address, checked against `/api/health` before it is saved, shown on a first run and from Settings; folders, Spotify and
 Soloist stay on the server's own setup page, one click away). Pairs checked: People, Person (native only: the web route differs),
 Stats, Settings, Duplicates. Known differences: Settings has no Background card (phase 6), the self-update card is not ported.
+
+## Phase 6 results: the look (backdrop was done before)
+
+One GPU shader (`shaders/gen.wgsl` + `gen.metal` through the shader hook, `gen.rs`) draws the web's generative art with the web's own maths
+(`lib/waveCover.ts`) and its blue-noise table (`assets/bluenoise64.bin`, baked from `blueNoise(64)`; `bluenoise.rs` ports the generator and a
+test keeps the two within 3 %): the dithered wave / ripple / aurora / dunes covers of albums with no picture (and the two wave playlists), and
+the sparse ASCII sea behind every album hero (`x o`, `. o`, `: |`, `- ~` glyphs drawn per pixel, the header's fade and wash folded in). The
+pattern of an album is fixed by its id exactly as on the web (`kind_for` is tested against `genKindFor`). Colours are the opposite of the web's
+default backdrop (teal), so pairs match. `GenArt` is a small view with its own clock and timer: 20 / 24 frames a second only while it is
+painted and the window is active, still under Reduce effects, thumbnails under 64 px still. The tinted playlist hero (`tint.rs`) is the first
+song's cover blown up and very soft (an 8 x 8 mean, saturate 1.4, the header mask, the wash), made once per size as a 64 px image the GPU
+stretches; Liked Songs has the web's two glows. Glass is the plain dark tint: the web's section scrims (`.asec::before`, `.ahero__txt::before`)
+are drawn behind album sections and hero text. Checked in web | native pairs (all four kinds of cover and ASCII header, playlist hero,
+`WEB_BLOCK_COVERS=1` on the web / `RUNE_DESKTOP_GEN_COVERS=1` natively make every cover a generative one). Known differences: colours of the
+backdrop (foil vs the web's `ambient=off` flat page), Person page section panels and its title width, Now Playing has no tinted backdrop of its own.
+
+## Phase 7 results: OS integration
+
+`os/` (one interface, `OsEvent` / `OsCtl`). Linux: one D-Bus thread with MPRIS `org.mpris.MediaPlayer2.rune_desktop` (media keys, KDE widget, playerctl;
+play / pause / next / previous / seek / volume / shuffle / loop), a StatusNotifierItem tray with a small menu (show, zones, config folder, quit),
+`org.rune.Desktop` (a second launch calls `Raise` and exits), and `org.freedesktop.Notifications` for the track-change note (Settings ->
+Playback, **off by default**, only while the window is in the background). **Media keys: the desktop app owns them while it runs.** rune mini
+(`org.mpris.MediaPlayer2.rune`) watches the bus and releases its name while `rune_desktop` is there and takes it back when it goes (a 20-line
+change in `native/linux/app/src/desktop.rs`, tested live on a private bus both ways; its tests stay green). macOS: `MPRemoteCommandCenter`
+(play, pause, toggle, next, previous, scrub) and `MPNowPlayingInfoCenter` (title, artists, album, length, position, rate, state) through objc2;
+the notification goes through `osascript`; a second launch is LaunchServices' job. Window size, position and maximised are remembered in
+`state.json` (position is only honoured where the system lets an app place windows, and only if a screen still shows it). `packaging/`: the
+desktop file and icon with `install-linux.sh`, `Info.plist`, `build-mac.sh` (release build under caffeinate, ad-hoc signed `rune.app`, `install`
+puts it in /Applications) and `mac-update.sh` (rsync + build from the Linux box). The e2e runs with `RUNE_DESKTOP_OS=off`.
+
+## Phase 8 results: hardening
+
+Offline / error states on every page: a slim "Can't reach the rune server" bar under the top bar (from the second failed attempt, with "Try now"),
+"Try again" on every "Could not load ..." page (albums, artists, genres, tracks, stats, duplicates, people, playlists, discover, radio, home, search;
+album / artist / playlist show it instead of "not found" when the server is simply not answering). Crash safety: `state.json` is written
+atomically (temp file, fsync, rename, folder fsync; tested), core's `config.json` is fsynced and the token is renamed into place instead of
+deleted and recreated. `panic.log` in the data folder (`~/.local/share/rune-desktop`, `~/Library/Application Support/rune-desktop`; entries with
+time, thread, place, message and backtrace, cut at 256 KB; tested with a real panic). Accessibility: GPUI's accesskit hooks are used (role + label)
+on every icon-only button, the transport, zone, signal and volume / seek sliders (role, value, range) and the settings switches (role, toggled).
+Soak and idle numbers: see the last section.
+
+## Gaps closed from earlier phases
+
+"Play on" remembers the choice for the session (per kind of song, while that zone can still play it); the playlist hero has the web's "Newest first /
+Playlist order" toggle (ordering ported from `orderPlaylist`, rows stay draggable only in the playlist's own order, positions map back for removal) and
+"Show in rune mini" (PUT / DELETE `/mini/playlists/:id`, the nine-dot limit with the web's sentence); Settings has the Background card (Foil waves,
+Reduce effects, Battery saver); Now Playing has Critical reception, About this album (the song's own note first, background) and About the artist
+under the player; radio station logos checked in a pair (they match); the Person page was checked against the web (hero, roles, sections match;
+section panels and the title width differ).
+
+### Idle and soak (release build, private headless KWin 1280x800, Ryzen 7 7800X3D / RTX 4090)
+Idle with the foil backdrop animating (60 fps by design) on the Albums grid: 197 MB PSS, 4.8 % of a core; on an album page with the animated
+ASCII header 198 MB and 8.5 % (the header's shader runs inside the same frames; the timer only keeps it alive while painted). Soak on a generated
+10,000-album / 65,000-track library: the grid pages in as it scrolls, 300 frames at 40 px/frame p50/p95/max 16.7 / 16.8 / 33.3 ms, at 200 px/frame
+16.7 / 16.8 / 50.0 ms (7 frames over 20 ms, covers arriving), 283 MB PSS after 1,200 albums with the cover budget holding at 87 MB. Tests: `cargo test`
+in native/desktop (97) and native/linux (core 36, app), desktop e2e (19), tsc and vitest per package.

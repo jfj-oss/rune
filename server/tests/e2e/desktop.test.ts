@@ -55,7 +55,7 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     child = spawn(bin, [], {
       stdio: 'ignore',
       env: { PATH: process.env.PATH, HOME: process.env.HOME, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, WAYLAND_DISPLAY: sock, DBUS_SESSION_BUS_ADDRESS: bus, XDG_CONFIG_HOME: join(work, 'cfg'), RUNE_DESKTOP_CONFIG_DIR: join(work, 'cfg/rune-desktop'),
-        RUNE_DESKTOP_AUDIO: 'null', RUNE_DESKTOP_URL: srv.base, RUNE_DESKTOP_TEST_PORT: String(port), RUNE_DESKTOP_ROUTE: '/albums', RUNE_DESKTOP_SIZE: '1280x800' },
+        RUNE_DESKTOP_AUDIO: 'null', RUNE_DESKTOP_OS: 'off', RUNE_DESKTOP_DATA_DIR: join(work, 'data'), RUNE_DESKTOP_URL: srv.base, RUNE_DESKTOP_TEST_PORT: String(port), RUNE_DESKTOP_ROUTE: '/albums', RUNE_DESKTOP_SIZE: '1280x800' },
     });
     app = new App(port);
     await app.connect();
