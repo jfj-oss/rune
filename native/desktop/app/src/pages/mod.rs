@@ -6,6 +6,7 @@ pub mod albums;
 pub mod artist;
 pub mod artists;
 pub mod discover;
+pub mod duplicates;
 pub mod genres;
 pub mod home;
 pub mod tracks;
@@ -59,6 +60,7 @@ impl Rune {
             Route::People => self.people_page(cw, window, cx),
             Route::Stats => self.stats_page(cw, window, cx),
             Route::Settings => self.settings_page(cw, window, cx),
+            Route::Duplicates => self.duplicates_page(cw, window, cx),
             Route::Person(id) => self.person_page(id, cw, window, cx),
             Route::Tracks => self.tracks_page(cw, window, cx),
             Route::Genres => self.genres_page(cw, window, cx),

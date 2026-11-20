@@ -131,6 +131,7 @@ impl Rune {
                 self.spawn_send(cx, "POST", "/playlists/smart".into(), Some(body), |me, r, cx| { match r { Ok(v) => { me.data.playlists = None; if let Some(id) = v.get("id").and_then(|x| x.as_str()) { me.go(crate::route::Route::Playlist(id.to_string()), cx); } } Err(e) => me.say(e, cx) } });
                 json!({"ok": true})
             }
+            "setup" => { cx.spawn(async move |this, cx| { let _ = cx.update(|app| { if let Some(w) = app.active_window() { let _ = w.update(app, |root, window, cx| { if let Ok(me) = root.downcast::<Rune>() { me.update(cx, |m, cx| m.open_setup(window, cx)); } }); } }); let _ = this.update(cx, |_, _| {}); }).detach(); json!({"ok": true}) }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

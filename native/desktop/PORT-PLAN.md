@@ -236,3 +236,14 @@ server; the Hotkey button on a playlist page listens, refuses taken keys with th
 song asked for cannot play on the zone). Known gaps: the "Play on" sheet does not yet remember the choice for the session, there
 is no Soloist / phone path (not applicable on desktop), Discover rows and the song-radio sheet could only be exercised against
 parsing and states (no Spotify on the test server), the playlist hero lacks the web's sort toggle and "Show in rune mini".
+
+## Phase 5 results: the rest of the pages
+
+People (find, role buckets, cards) and Person (hero, roles, albums as artist, every credit with its tracks, "often works with");
+Stats (period switch, tiles, daily sparkline, hour and weekday bars, top albums / tracks / artists, genres, new discoveries,
+lossless and hi-res share; all charts are GPUI paths in `charts.rs`); Duplicates (groups, recommended pick, Hide the others /
+Keep all, hidden list with Unhide); Settings (Set up rune, Keyboard with the album key and playlist keys, the rune mini card with
+drag / up / down / remove, Playback with volume levelling and auto-radio, and the server status cards); the setup screen (the
+server address, checked against `/api/health` before it is saved, shown on a first run and from Settings; folders, Spotify and
+Soloist stay on the server's own setup page, one click away). Pairs checked: People, Person (native only: the web route differs),
+Stats, Settings, Duplicates. Known differences: Settings has no Background card (phase 6), the self-update card is not ported.

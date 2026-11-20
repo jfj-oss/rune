@@ -55,6 +55,7 @@ impl Render for Rune {
             .children(self.preview.is_some().then(|| self.preview_overlay(window, cx)))
             .children(self.zone_open.then(|| self.zone_menu(vw, cx)))
             .children(self.signal_open.then(|| self.signal_menu(vw, cx)))
+            .children(self.setup.is_some().then(|| self.setup_overlay(cx)))
             .children(self.dialog.is_some().then(|| self.dialog_overlay(window, cx)))
             .children(self.menu.is_some().then(|| self.menu_overlay(window, vw, cx)))
             .children(self.toast.as_ref().map(|t| {

@@ -226,6 +226,16 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await app.send({ cmd: 'go', route: '/albums' });
   });
 
+  it('phase 5 pages load: People, a Person, Stats, Duplicates, Settings, and the setup screen opens', async () => {
+    for (const r of ['/people', '/stats', '/duplicates', '/settings']) { await app.send({ cmd: 'go', route: r }); await new Promise((res) => setTimeout(res, 400)); }
+    const people = (await (await fetch(`${srv.base}/api/people`)).json()) as { id: string }[];
+    if (people[0]) { await app.send({ cmd: 'go', route: `/people/${encodeURIComponent(people[0].id)}` }); await new Promise((res) => setTimeout(res, 400)); }
+    await app.send({ cmd: 'setup' });
+    await new Promise((res) => setTimeout(res, 400));
+    expect((await app.state())['online']).toBe(true);
+    await app.send({ cmd: 'go', route: '/albums' });
+  });
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();

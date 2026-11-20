@@ -60,7 +60,7 @@ impl Rune {
 
         // ---- set up
         let setup = card("Set up rune", "wrench").child(muted("Music folders, Spotify, Soloist and phone access are set up once on the server, in a browser."))
-            .child(div().id("st-open").child(btn("Open server setup", Some("external-link"), false)).on_click(cx.listener(|this, _, _, _| { let u = this.cfg.url.trim_end_matches('/').to_string(); crate::text::open_url(&format!("{u}/setup")); })));
+            .child(h_flex().gap(px(10.)).child(div().id("st-addr").self_start().child(btn("Server address", Some("server"), false)).on_click(cx.listener(|this, _, window, cx| this.open_setup(window, cx)))).child(div().id("st-open").self_start().child(btn("Open server setup", Some("external-link"), false)).on_click(cx.listener(|this, _, _, _| { let u = this.cfg.url.trim_end_matches('/').to_string(); crate::text::open_url(&format!("{u}/setup")); }))));
         // ---- keyboard
         let sel_key = |this: &Rune, cx: &mut Context<Rune>| {
             let cur = this.album_key.clone();
