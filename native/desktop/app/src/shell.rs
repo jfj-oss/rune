@@ -50,6 +50,7 @@ impl Render for Rune {
             // the page column: top bar, then the page under the glass player bar
             .child(div().absolute().top_0().bottom_0().left(px(sw)).right_0().flex().flex_col()
                 .child(self.topbar(window, cx))
+                .children(self.offline_bar(cx))
                 .child(div().flex_1().min_h_0().relative().child(page)))
             .child(self.sidebar(window, cx))
             .child(self.playerbar(window, cx))
@@ -70,6 +71,16 @@ impl Render for Rune {
 }
 
 impl Rune {
+    /// A slim bar under the top bar while the server cannot be reached (the web shows its "offline" state the same way): the page below
+    /// keeps what it had, and everything refetches by itself when the connection is back.
+    fn offline_bar(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+        if !matches!(self.model.conn(), rune_mini_core::model::Conn::Offline { attempt } if attempt >= 2) { return None; }
+        Some(h_flex().w_full().h(px(34.)).flex_none().px(px(PAD)).gap(px(12.)).items_center().bg(ca(WARN, 0.16)).border_b_1().border_color(ca(WARN, 0.4)).text_size(px(13.5)).text_color(c(0xf3d38f))
+            .child(icon("wifi-off", 16., c(WARN)))
+            .child(div().flex_1().child("Can\u{2019}t reach the rune server. Trying again\u{2026}"))
+            .child(div().id("offline-retry").px(px(12.)).py(px(3.)).rounded_full().cursor_pointer().bg(ca(WARN, 0.25)).hover(|s| s.bg(ca(WARN, 0.4))).child("Try now").on_click(cx.listener(|this, _, _, cx| this.retry_all(cx)))))
+    }
+
     // ------------------------------------------------------------------ sidebar
 
     fn nav_item(&self, id: &'static str, label: &'static str, icon_name: &'static str, active: bool, to: Route, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -128,7 +139,7 @@ impl Rune {
     fn topbar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (cb, cf) = (self.hist.can_back(), self.hist.can_forward());
         let nav = |id: &'static str, name: &'static str, on: bool| {
-            div().id(id).when(!on, |d| d.opacity(0.35)).child(btn_icon(name, 20., c(TEXT2), false)).when(on, |d| d.cursor_pointer())
+            div().id(id).role(Role::Button).aria_label(if name == "chevron-left" { "Back" } else { "Forward" }).when(!on, |d| d.opacity(0.35)).child(btn_icon(name, 20., c(TEXT2), false)).when(on, |d| d.cursor_pointer())
         };
         let has_text = !self.search_input.read(cx).value().is_empty();
         h_flex().flex_none().h(px(TOPBAR_H)).px(px(20.)).gap(px(12.)).items_center().border_b_1().border_color(wh(0.06))
@@ -146,7 +157,7 @@ impl Rune {
                     div().px(px(6.)).py(px(1.)).rounded(px(4.)).border_1().border_color(line()).text_size(px(11.)).font_weight(w(500.)).text_color(c(TEXT3)).child("/").into_any_element()
                 }))
             .child(div().flex_1())
-            .child(div().id("settings").child(btn_icon("settings", 19., c(TEXT2), false))
+            .child(div().id("settings").role(Role::Button).aria_label("Settings").child(btn_icon("settings", 19., c(TEXT2), false))
                 .on_click(cx.listener(|this, ev: &ClickEvent, window, cx| this.open_top_menu(ev, window, cx))))
     }
 
@@ -156,7 +167,7 @@ impl Rune {
         let b = bounds.clone();
         let active = self.drag == Some(which);
         let fill = if active || hover_fill { c(ACCENT2) } else { c(TEXT2) };
-        h_flex().id(id).group(id).relative().w_full().h(px(if which == Drag::Volume { 28. } else { 18. })).items_center().cursor_pointer()
+        h_flex().id(id).role(Role::Slider).aria_label(match id { "seek" => "Seek", "vol" => "Volume", other => other }).aria_min_numeric_value(0.).aria_max_numeric_value(100.).aria_numeric_value((frac.clamp(0., 1.) * 100.) as f64).group(id).relative().w_full().h(px(if which == Drag::Volume { 28. } else { 18. })).items_center().cursor_pointer()
             .child(div().relative().w_full().h(px(track_h)).rounded(px(track_h / 2.)).bg(wh(0.16))
                 .child(div().absolute().left_0().top_0().h_full().w(relative(frac.clamp(0.0005, 1.))).rounded(px(track_h / 2.)).bg(fill)))
             .child(div().absolute().top(px(0.)).left(relative(frac.clamp(0., 1.))).ml(px(-thumb / 2.)).h_full().w(px(thumb)).flex().items_center()
@@ -226,12 +237,12 @@ impl Rune {
                 "skip-forward" => h_flex().size(px(36.)).items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).child(glyph(G::Next, size, c(TEXT2_GLASS))).into_any_element(),
                 _ => btn_icon(name, size, c(TEXT2_GLASS), on).into_any_element(),
             };
-            div().id(id).cursor_pointer().when(!enabled, |d| d.opacity(0.35)).child(inner)
+            div().id(id).role(Role::Button).aria_label(match name { "shuffle" => "Shuffle", "skip-back" => "Previous", "skip-forward" => "Next", "repeat-1" => "Repeat one", _ => "Repeat" }).cursor_pointer().when(!enabled, |d| d.opacity(0.35)).child(inner)
         };
         let transport = h_flex().gap(px(12.)).items_center()
             .child(tbtn("sh", "shuffle", 16., shuffle, true).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::ToggleShuffle, cx))))
             .child(tbtn("prev", "skip-back", 20., false, has_queue).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Prev, cx))))
-            .child(div().id("pp").size(px(40.)).flex_none().rounded_full().bg(c(TEXT)).flex().items_center().justify_center().cursor_pointer().when(!has_queue, |d| d.opacity(0.4))
+            .child(div().id("pp").role(Role::Button).aria_label(if playing { "Pause" } else { "Play" }).size(px(40.)).flex_none().rounded_full().bg(c(TEXT)).flex().items_center().justify_center().cursor_pointer().when(!has_queue, |d| d.opacity(0.4))
                 .child(glyph(if playing { G::Pause } else { G::Play }, 18., c(0x101014)))
                 .on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::PlayPause, cx))))
             .child(tbtn("next", "skip-forward", 20., false, has_queue).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Next, cx))))
@@ -247,21 +258,21 @@ impl Rune {
         let tone = signal_tone(&self.signal_path);
         let vol_icon = if volume <= 0. { "volume-x" } else if volume < 40. { "volume-1" } else { "volume-2" };
         let right = h_flex().flex_none().gap(px(6.)).items_center().justify_end()
-            .child(div().id("signal").h(px(36.)).px(px(10.)).flex().items_center().rounded_full().cursor_pointer().hover(|s| s.bg(wh(0.08)))
+            .child(div().id("signal").role(Role::Button).aria_label("Signal path").h(px(36.)).px(px(10.)).flex().items_center().rounded_full().cursor_pointer().hover(|s| s.bg(wh(0.08)))
                 .child(div().size(px(10.)).rounded_full().bg(match tone { 2 => c(OK), 1 => c(WARN), _ => c(TEXT3_GLASS) }).when(tone == 2, |d| d.shadow(vec![BoxShadow { inset: false, color: ca(OK, 0.7), offset: point(px(0.), px(0.)), blur_radius: px(10.), spread_radius: px(0.) }])))
                 .on_click(cx.listener(|this, _, _, cx| { this.signal_open = !this.signal_open; this.zone_open = false; cx.notify(); })))
-            .child(h_flex().id("zone").h(px(36.)).px(px(12.)).gap(px(8.)).items_center().max_w(px(170.)).rounded_full().cursor_pointer().hover(|s| s.bg(wh(0.08)).text_color(c(TEXT)))
+            .child(h_flex().id("zone").role(Role::Button).aria_label("Play on").h(px(36.)).px(px(12.)).gap(px(8.)).items_center().max_w(px(170.)).rounded_full().cursor_pointer().hover(|s| s.bg(wh(0.08)).text_color(c(TEXT)))
                 .text_size(px(13.)).text_color(c(TEXT2_GLASS))
                 .child(icon("speaker", 16., c(TEXT2_GLASS)))
                 .child(div().min_w_0().truncate().child(self.zone_name()))
                 .on_click(cx.listener(|this, _, _, cx| { this.zone_open = !this.zone_open; this.signal_open = false; cx.notify(); })))
             .child(h_flex().w(px(vw_slider)).flex_none().gap(px(4.)).items_center()
-                .child(div().id("mute").child(btn_icon(vol_icon, 18., c(TEXT2_GLASS), false)).on_click(cx.listener(move |this, _, _, cx| {
+                .child(div().id("mute").role(Role::Button).aria_label("Mute").child(btn_icon(vol_icon, 18., c(TEXT2_GLASS), false)).on_click(cx.listener(move |this, _, _, cx| {
                     let to = if volume > 0. { 0. } else { 60. };
                     this.vol_hold = Some((std::time::Instant::now(), to)); this.cmd(UiCommand::Volume(to), cx);
                 })))
                 .child(div().flex_1().child(self.slider("vol", (volume / 100.) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx))))
-            .child(div().id("queue-btn").child(btn_icon("list-music", 20., c(TEXT2_GLASS), self.queue_open)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = !this.queue_open; cx.notify(); })));
+            .child(div().id("queue-btn").role(Role::Button).aria_label("Queue").child(btn_icon("list-music", 20., c(TEXT2_GLASS), self.queue_open)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = !this.queue_open; cx.notify(); })));
 
         h_flex().absolute().left_0().right_0().bottom_0().h(px(NPBAR_H)).px(px(20.)).gap(px(20.)).items_center()
             .bg(ca(0x020208, 0.97)).border_t_1().border_color(wh(0.16))

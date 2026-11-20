@@ -27,7 +27,7 @@ impl Rune {
         self.ensure_playlist(&id, cx);
         let d = match self.data.playlist.get(&id).map(|c| c.slot.clone()) {
             Some(crate::data::Slot::Ready(d)) => d,
-            Some(crate::data::Slot::Err(_)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(empty("Playlist not found", "It may have been deleted, removed from Spotify, or hasn\u{2019}t synced yet.")).into_any_element(),
+            Some(crate::data::Slot::Err(e)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(if unreachable(&e) { fail(cx, "Could not load this playlist", "The rune server did not answer.") } else { empty("Playlist not found", "It may have been deleted, removed from Spotify, or hasn\u{2019}t synced yet.") }).into_any_element(),
             _ => return div().size_full().pt(px(44.)).px(px(PAD)).child(div().size(px(300.)).rounded(px(6.)).bg(surface())).into_any_element(),
         };
         let mut rows = vec![Row::Hero];
@@ -84,9 +84,9 @@ impl Rune {
                     let (hid2, cur2) = (hid.clone(), current.clone());
                     h_flex().gap(px(6.)).child(div().id("p-hotkey").child(btn(&if listening { "Press a key\u{2026}".to_string() } else { match &current { Some(k) => format!("Hotkey  {}", k.to_uppercase()), None => "Hotkey".into() } }, Some("keyboard"), listening))
                         .on_click(cx.listener(move |this, _, _, cx| { this.hotkey_listen = if this.hotkey_listen.is_some() { None } else { Some((hid.clone(), hname.clone())) }; cx.notify(); })))
-                        .children(cur2.filter(|_| !listening).map(|_| div().id("p-hotkey-x").child(btn_icon40("x")).on_click(cx.listener(move |this, _, _, cx| { let nm = this.data.playlist.get(&hid2).and_then(|c| c.slot.ready()).map(|d| d.summary.name.clone()).unwrap_or_default(); this.set_playlist_key(&hid2, &nm, "", cx); }))))
+                        .children(cur2.filter(|_| !listening).map(|_| div().id("p-hotkey-x").role(Role::Button).aria_label("Clear hotkey").child(btn_icon40("x")).on_click(cx.listener(move |this, _, _, cx| { let nm = this.data.playlist.get(&hid2).and_then(|c| c.slot.ready()).map(|d| d.summary.name.clone()).unwrap_or_default(); this.set_playlist_key(&hid2, &nm, "", cx); }))))
                 }))
-                .child(div().id("p-more").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                .child(div().id("p-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     let p = ev.position();
                     let mut its = items.clone();
                     if rune { its.push(PopItem { icon: "trash", label: "Delete playlist".into(), act: MenuAct::DeletePlaylist { id: sid.clone(), name: sname.clone() }, danger: true, chevron: false, dot: false, sub: false }); }
@@ -227,7 +227,7 @@ impl Rune {
             .child(div().flex_grow(1.).flex_basis(relative(0.4)).min_w_0().flex().child(div().id(SharedString::from(format!("pa-{i}"))).min_w_0().truncate().text_size(px(13.)).text_color(c(TEXT2)).hover(|s| s.text_color(c(TEXT)).underline()).child(album.title.clone())
                 .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.go(Route::Album(aid.clone()), cx); }))))
             .child(div().w(px(56.)).flex_none().text_right().pr(px(8.)).text_size(px(13.)).text_color(c(TEXT3)).child(format_duration(t.duration_ms)))
-            .child(div().id(SharedString::from(format!("pm-{i}"))).w(px(40.)).flex_none().flex().justify_center().opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(btn_icon("ellipsis", 18., c(TEXT2), false))
+            .child(div().id(SharedString::from(format!("pm-{i}"))).role(Role::Button).aria_label("More actions").w(px(40.)).flex_none().flex().justify_center().opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).child(btn_icon("ellipsis", 18., c(TEXT2), false))
                 .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
             .drag_over::<PlDrag>(|st, _, _, _| st.border_t_2().border_color(c(ACCENT)))

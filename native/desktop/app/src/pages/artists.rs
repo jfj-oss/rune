@@ -27,7 +27,7 @@ impl Rune {
         let sub = if loaded { plural(list.len(), "artist") } else { " ".into() };
         let row: RowFn = Box::new(move |this, ix, _w, cx| {
             if ix == 0 { return padded(page_head("Artists", &sub, None)).into_any_element(); }
-            if err { return if ix == 1 { padded(empty("Could not load artists", "")).into_any_element() } else { bottom_space() }; }
+            if err { return if ix == 1 { padded(fail(cx, "Could not load artists", "")).into_any_element() } else { bottom_space() }; }
             if ix > rows { return bottom_space(); }
             let start = (ix - 1) * cols;
             let mut r = h_flex().items_start().gap(px(GAP_X)).h(px(row_h));

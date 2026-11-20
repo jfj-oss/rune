@@ -10,6 +10,7 @@ mod shader_hook_tests;
 mod charts;
 mod audio_zone;
 mod covers;
+mod crashlog;
 mod data;
 mod foil;
 mod logo;
@@ -48,6 +49,7 @@ fn config_dir() -> PathBuf {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    crashlog::install(crashlog::data_dir());
     let dir = config_dir();
     let mut cfg = config::load(&dir);
     let had_saved = dir.join("config.json").exists();

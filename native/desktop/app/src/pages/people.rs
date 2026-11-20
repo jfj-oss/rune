@@ -51,7 +51,7 @@ impl Rune {
                     div().id(SharedString::from(format!("pb-{id}"))).h(px(30.)).px(px(14.)).flex().items_center().rounded_full().cursor_pointer().text_size(px(12.5)).font_weight(w(500.)).bg(if on { ca(ACCENT, 0.22) } else { wh(0.08) }).text_color(if on { c(ACCENT2) } else { c(TEXT2) }).hover(|s| s.bg(wh(0.14))).child(label.to_string())
                         .on_click(cx.listener(move |this, _, _, cx| { this.people_bucket = id; cx.notify(); }))
                 })))).into_any_element(),
-            Row::State(s) => padded(match *s { "error" => empty("Could not load people", "Is the rune server running?"), "empty" => empty("No people match", &if q.is_empty() { "No credits have been stored for this role yet.".to_string() } else { format!("Nothing for \u{201c}{q}\u{201d} in this role.") }), _ => div().h(px(120.)) }).into_any_element(),
+            Row::State(s) => padded(match *s { "error" => fail(cx, "Could not load people", "Is the rune server running?"), "empty" => empty("No people match", &if q.is_empty() { "No credits have been stored for this role yet.".to_string() } else { format!("Nothing for \u{201c}{q}\u{201d} in this role.") }), _ => div().h(px(120.)) }).into_any_element(),
             Row::Grid(r) => {
                 let mut line_ = h_flex().items_start().gap(px(16.)).h(px(84.));
                 for p in list.iter().skip(r * cols).take(cols) {

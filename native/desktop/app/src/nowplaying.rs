@@ -35,7 +35,7 @@ impl Rune {
 
         // ---- top bar
         let top = h_flex().flex_none().h(px(64.)).px(px(20.)).pt(px(10.)).items_center().justify_between()
-            .child(div().w(px(160.)).child(div().id("np-close").child(btn_icon("chevron-down", 26., c(TEXT), false)).on_click(cx.listener(|this, _, _, cx| { this.np_open = false; cx.notify(); }))))
+            .child(div().w(px(160.)).child(div().id("np-close").role(Role::Button).aria_label("Close now playing").child(btn_icon("chevron-down", 26., c(TEXT), false)).on_click(cx.listener(|this, _, _, cx| { this.np_open = false; cx.notify(); }))))
             .child(v_flex().items_center().min_w_0().max_w(px(vw * 0.5)).child(eyebrow("Now playing")).children(cur.as_ref().map(|q| {
                 let aid = q.album.id.clone();
                 div().id("np-top-album").truncate().text_size(px(13.5)).font_weight(w(600.)).cursor_pointer().hover(|s| s.underline()).child(q.album.title.clone())
@@ -44,7 +44,7 @@ impl Rune {
             .child(h_flex().w(px(160.)).justify_end().gap(px(4.))
                 .children(cur.as_ref().map(|q| {
                     let m = self.track_menu_ids(vec![q.track.id.clone()], q.track.title.clone(), Some(q.album.id.clone()), q.track.artists.first().map(|a| a.id.clone()), q.track.id.starts_with("sp:"), q.track.id.clone());
-                    div().id("np-addpl").child(btn_icon("list-plus", 22., c(TEXT), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                    div().id("np-addpl").role(Role::Button).aria_label("Add to playlist").child(btn_icon("list-plus", 22., c(TEXT), false)).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                         let p = ev.position();
                         let mut mm = m.clone(); mm.x = f32::from(p.x) - 200.; mm.y = f32::from(p.y) + 20.; mm.add_open = true;
                         this.open_menu(mm, cx);
@@ -84,16 +84,16 @@ impl Rune {
             .child(div().flex_1().min_w_0().child(match peaks { Some((p, approx)) => self.waveform("np-seek", p, approx, frac, 54., cx).into_any_element(), None => self.slider("np-seek", frac, 4., 12., false, self.seek_bounds.clone(), Drag::Seek, cx).into_any_element() }))
             .child(div().min_w(px(34.)).text_right().text_size(px(11.5)).text_color(c(TEXT3)).child(format_duration(dur)));
         let has_queue = player.as_ref().is_some_and(|p| !p.queue.is_empty());
-        let tb = |id: &'static str, name: &'static str, on: bool, cx: &mut Context<Self>, cmd: UiCommand| div().id(id).child(btn_icon(name, 18., c(TEXT2), on)).on_click(cx.listener(move |this, _, _, cx| this.cmd(cmd.clone(), cx)));
+        let tb = |id: &'static str, name: &'static str, on: bool, cx: &mut Context<Self>, cmd: UiCommand| div().id(id).role(Role::Button).aria_label(match name { "shuffle" => "Shuffle", "repeat-1" => "Repeat one", _ => "Repeat" }).child(btn_icon(name, 18., c(TEXT2), on)).on_click(cx.listener(move |this, _, _, cx| this.cmd(cmd.clone(), cx)));
         let transport = h_flex().justify_center().items_center().gap(px(18.)).pt(px(6.))
             .child(tb("np-sh", "shuffle", shuffle, cx, UiCommand::ToggleShuffle))
-            .child(div().id("np-prev").size(px(44.)).flex().items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(G::Prev, 22., c(TEXT))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Prev, cx))))
-            .child(div().id("np-pp").size(px(60.)).flex_none().rounded_full().bg(c(TEXT)).flex().items_center().justify_center().cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(if playing { G::Pause } else { G::Play }, 26., c(0x101014))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::PlayPause, cx))))
-            .child(div().id("np-next").size(px(44.)).flex().items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(G::Next, 22., c(TEXT))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Next, cx))))
+            .child(div().id("np-prev").role(Role::Button).aria_label("Previous").size(px(44.)).flex().items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(G::Prev, 22., c(TEXT))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Prev, cx))))
+            .child(div().id("np-pp").role(Role::Button).aria_label(if playing { "Pause" } else { "Play" }).size(px(60.)).flex_none().rounded_full().bg(c(TEXT)).flex().items_center().justify_center().cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(if playing { G::Pause } else { G::Play }, 26., c(0x101014))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::PlayPause, cx))))
+            .child(div().id("np-next").role(Role::Button).aria_label("Next").size(px(44.)).flex().items_center().justify_center().rounded_full().hover(|s| s.bg(wh(0.08))).cursor_pointer().when(!has_queue, |d| d.opacity(0.4)).child(glyph(G::Next, 22., c(TEXT))).on_click(cx.listener(|this, _, _, cx| this.cmd(UiCommand::Next, cx))))
             .child(tb("np-rp", if repeat == Repeat::One { "repeat-1" } else { "repeat" }, repeat != Repeat::Off, cx, UiCommand::CycleRepeat));
         let vol_icon = if volume <= 0. { "volume-x" } else if volume < 40. { "volume-1" } else { "volume-2" };
         let vol = h_flex().w_full().pt(px(4.)).gap(px(4.)).items_center()
-            .child(div().id("np-mute").child(btn_icon(vol_icon, 18., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { let to = if volume > 0. { 0. } else { 60. }; this.vol_hold = Some((std::time::Instant::now(), to)); this.cmd(UiCommand::Volume(to), cx); })))
+            .child(div().id("np-mute").role(Role::Button).aria_label("Mute").child(btn_icon(vol_icon, 18., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { let to = if volume > 0. { 0. } else { 60. }; this.vol_hold = Some((std::time::Instant::now(), to)); this.cmd(UiCommand::Volume(to), cx); })))
             .child(div().flex_1().child(self.slider("np-vol", (volume / 100.) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx)));
         let tone = crate::shell::signal_tone(&self.signal_path);
         let signal = h_flex().flex_wrap().items_center().gap(px(10.)).text_size(px(12.5)).text_color(c(TEXT3))

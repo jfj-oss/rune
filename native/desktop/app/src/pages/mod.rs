@@ -185,3 +185,12 @@ impl Rune {
 pub fn sec_head(title: &str, see_all: Option<AnyElement>) -> Div {
     h_flex().w_full().justify_between().items_baseline().mb(px(14.)).pb(px(10.)).border_b_1().border_color(wh(0.07)).child(eyebrow(title)).children(see_all)
 }
+
+/// Was the failure that the server could not be reached (as opposed to the server saying no)?
+pub fn unreachable(err: &str) -> bool { err.starts_with("cannot reach the server") }
+
+/// An empty state for a load that failed, with a way out: "Try again" forgets what was cached and fetches again.
+pub fn fail(cx: &mut Context<Rune>, title: &str, body: &str) -> Div {
+    v_flex().items_center().w_full().gap(px(14.)).child(empty(title, body))
+        .child(div().id("retry").child(btn("Try again", Some("refresh-cw"), false)).on_click(cx.listener(|this, _, _, cx| this.retry_all(cx))))
+}

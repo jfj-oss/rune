@@ -17,7 +17,7 @@ impl Rune {
         let slot = self.data.album.get(&id).map(|c| c.slot.clone());
         let album = match slot {
             Some(crate::data::Slot::Ready(a)) => a,
-            Some(crate::data::Slot::Err(_)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(empty("Album not found", "It may have been removed from the library.")).into_any_element(),
+            Some(crate::data::Slot::Err(e)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(if unreachable(&e) { fail(cx, "Could not load this album", "The rune server did not answer.") } else { empty("Album not found", "It may have been removed from the library.") }).into_any_element(),
             _ => return div().size_full().child(div().pt(px(44.)).px(px(PAD)).child(h_flex().gap(px(40.)).child(div().size(px(300.)).rounded(px(6.)).bg(surface()))
                 .child(v_flex().gap(px(12.)).child(div().h(px(14.)).w(px(80.)).rounded(px(6.)).bg(surface())).child(div().h(px(40.)).w(px(360.)).rounded(px(6.)).bg(surface()))))).into_any_element(),
         };
@@ -188,7 +188,7 @@ impl Rune {
                 .child(div().id("a-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_album(&i1, false, 0, cx))))
                 .child(div().id("a-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| this.play_album(&i2, true, 0, cx))))
                 .child(div().id("a-queue").child(btn("Queue", Some("plus"), false)).on_click(cx.listener(move |this, _, _, cx| this.enqueue_album(&i3, false, cx))))
-                .child(div().id("a-more").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { let p = ev.position(); let mut m = menu.clone(); m.x = f32::from(p.x) - 20.; m.y = f32::from(p.y) + 24.; this.open_menu(m, cx); }))))
+                .child(div().id("a-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { let p = ev.position(); let mut m = menu.clone(); m.x = f32::from(p.x) - 20.; m.y = f32::from(p.y) + 24.; this.open_menu(m, cx); }))))
             .children(scores);
         let _ = cw;
         // every album's header is an ASCII sea (wave, ripple, aurora or dunes, fixed by the album), as on the web

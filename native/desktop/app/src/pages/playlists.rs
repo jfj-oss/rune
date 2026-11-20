@@ -90,7 +90,7 @@ impl Rune {
                 for p in list.iter().skip(r * cols).take(cols) { row = row.child(this.playlist_card(p, card_w, window, cx)); }
                 padded(row).into_any_element()
             }
-            R_::Empty => padded(if !find2.is_empty() { empty("No playlists match", &format!("Nothing is called \u{201c}{find2}\u{201d}.")) } else if err { empty("Could not load playlists", "Is the rune server running?") } else { empty("Make your first playlist", "Playlists in rune can mix local files and Spotify tracks. Create one here, or use \u{201c}Add to playlist\u{201d} on any track or album.") }).into_any_element(),
+            R_::Empty => padded(if !find2.is_empty() { empty("No playlists match", &format!("Nothing is called \u{201c}{find2}\u{201d}.")) } else if err { fail(cx, "Could not load playlists", "Is the rune server running?") } else { empty("Make your first playlist", "Playlists in rune can mix local files and Spotify tracks. Create one here, or use \u{201c}Add to playlist\u{201d} on any track or album.") }).into_any_element(),
             R_::Space => bottom_space(),
         });
         self.list_page("playlists".into(), (cols as u64) << 4, n, rowfn, cx)

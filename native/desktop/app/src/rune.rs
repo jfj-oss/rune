@@ -371,6 +371,15 @@ impl Rune {
         cx.notify();
     }
 
+    /// "Try again" on an error page and on the offline bar: forget what was cached and fetch it all again.
+    pub fn retry_all(&mut self, cx: &mut Context<Self>) {
+        self.data.library_changed();
+        for l in self.data.albums.values_mut() { l.at = None; }
+        self.net.fetch_zones();
+        self.net.fetch_state(&self.model.zone.clone(), None);
+        cx.notify();
+    }
+
     /// What the system asked for (media keys, tray, a second launch).
     pub fn os_event(&mut self, ev: crate::os::OsEvent, window: &mut Window, cx: &mut Context<Self>) {
         use crate::os::OsEvent;

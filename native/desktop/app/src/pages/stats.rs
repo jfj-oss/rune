@@ -51,7 +51,7 @@ impl Rune {
                     div().id(SharedString::from(format!("sp-{id}"))).h(px(30.)).px(px(14.)).flex().items_center().rounded_full().cursor_pointer().text_size(px(13.)).font_weight(w(500.)).text_color(if on { c(TEXT) } else { c(TEXT2) }).when(on, |d| d.bg(surface3())).child(label.to_string())
                         .on_click(cx.listener(move |this, _, _, cx| { this.stats_period = id; cx.notify(); }))
                 })).into_any_element()),
-                R::State(st) => wrap(if *st == "error" { empty("Could not load your stats", "Is the rune server running?").into_any_element() } else { div().h(px(120.)).into_any_element() }),
+                R::State(st) => wrap(if *st == "error" { fail(cx, "Could not load your stats", "Is the rune server running?").into_any_element() } else { div().h(px(120.)).into_any_element() }),
                 R::Tiles => {
                     let d = d.clone().unwrap();
                     let tile = |ic: &'static str, label: &str, v: String| v_flex().flex_1().min_w_0().gap(px(2.)).px(px(18.)).pt(px(18.)).pb(px(16.)).rounded(px(16.)).bg(linear_gradient(140., linear_color_stop(ca(ACCENT, 0.12), 0.), linear_color_stop(surface(), 1.))).border_1().border_color(line())
