@@ -7,6 +7,8 @@ pub const INK: u32 = 0xD8D1C2;
 pub const DIM: u32 = 0x7A7468;
 pub const ACCENT: u32 = 0xD9905F;
 pub const BOX: u32 = 0x262420;
+/// Corner radius of the panel (the window itself is transparent outside it).
+pub const RADIUS: f32 = 14.;
 pub const RULE: u32 = 0x35322C;
 pub const ERROR: u32 = 0xE07A6E;
 pub const DOTS: [u32; 8] = [0xC9785A, 0xC9A45A, 0x8FAE6B, 0x5FA89A, 0x6B93C0, 0x9483C4, 0xC07BA8, 0x9A9488];

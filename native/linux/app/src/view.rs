@@ -56,6 +56,8 @@ pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWind
         } else {
             WindowKind::Floating
         },
+        // Opened opaque and switched to transparent just below: gpui applies transparency only when the setting changes,
+        // and a layer-shell surface never gets the decoration event that would apply it (white showed past the round corners).
         window_background: WindowBackgroundAppearance::Opaque,
         is_resizable: false,
         app_id: Some("rune-mini".into()),
@@ -67,13 +69,16 @@ pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWind
             continue;
         }
         let m = mini.clone();
-        match gpui_kit::open_window(make(attempt), cx, move |window, cx| {
+        // Opened bare, not through gpui_kit::open_window: its Root wraps every window in a client-decoration frame (a 20 px
+        // shadow margin it re-asserts each frame, a border, the theme's light background), which showed around the panel.
+        match cx.open_window(make(attempt), move |window, cx| {
             let v = cx.new(|cx| Panel::new(m, window, cx));
+            window.set_background_appearance(WindowBackgroundAppearance::Transparent);
             let f = v.read(cx).focus.clone();
             window.focus(&f, cx);
             v
         }) {
-            Ok((h, _)) => return Some(h),
+            Ok(h) => return Some(h.into()),
             Err(e) => eprintln!("rune-mini: window ({}): {e}", if attempt { "layer shell" } else { "plain" }),
         }
         if !layer {
@@ -309,7 +314,7 @@ impl Render for Panel {
         });
 
         div().size_full().p(px(0.)).child(
-            h_flex().size_full().items_start().bg(c(look::PAPER)).border_1().border_color(c(look::RULE)).overflow_hidden()
+            h_flex().size_full().items_start().bg(c(look::PAPER)).rounded(px(look::RADIUS)).overflow_hidden()
                 .track_focus(&self.focus)
                 .key_context("RuneMini")
                 .on_key_down(lst(&me, move |this, ev: &KeyDownEvent, _, cx| {
