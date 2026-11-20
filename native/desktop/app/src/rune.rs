@@ -142,6 +142,10 @@ pub struct Rune {
     pub model: Model,
     pub data: Data,
     pub covers: Covers,
+    /// the soft cover behind the open playlist's hero, and what it was made from
+    pub hero_tint: Option<((String, usize), Arc<RenderImage>)>,
+    /// animated generative art by key (album heroes, big wave covers): one small view each, with its own clock
+    pub arts: HashMap<String, Entity<crate::gen::GenArt>>,
     pub hist: History,
     pub lists: HashMap<String, ListState>,
     pub list_sigs: HashMap<String, u64>,
@@ -319,7 +323,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
+            cfg, dir, net, client, model, data: Data::default(), covers, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -745,6 +749,14 @@ impl Rune {
     }
 
     /// The scale-aware cover request: the server sizes are 200 and 600 (the web's srcset).
+    /// The animated generative art for `key`, created on first use.
+    pub fn art(&mut self, key: &str, mode: crate::gen::Mode, kind: crate::gen::Kind, seed: u32, cx: &mut Context<Self>) -> Entity<crate::gen::GenArt> {
+        if let Some(a) = self.arts.get(key) { let a = a.clone(); a.update(cx, |g, _| g.set(mode, kind, seed)); return a; }
+        let a = cx.new(|_| crate::gen::GenArt::new(mode, kind, seed));
+        self.arts.insert(key.to_string(), a.clone());
+        a
+    }
+
     pub fn cover(&mut self, id: &str, url: Option<&str>, logical_px: f32, window: &Window) -> Option<Arc<RenderImage>> {
         let device = logical_px * window.scale_factor();
         let size: u16 = if device <= 210. { 200 } else { 600 };

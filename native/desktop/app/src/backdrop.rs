@@ -105,6 +105,7 @@ pub struct Backdrop {
 
 impl Backdrop {
     pub fn new(prefs: Prefs, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::gen::set_effects(prefs.on, prefs.reduce);
         let (tx, rx) = channel::<Job>();
         let (dtx, mut drx) = futures::channel::mpsc::unbounded::<Done>();
         std::thread::Builder::new().name("rune-foil".into()).spawn(move || {
@@ -133,6 +134,7 @@ impl Backdrop {
     }
 
     pub fn set_prefs(&mut self, p: Prefs, cx: &mut Context<Self>) {
+        crate::gen::set_effects(p.on, p.reduce);
         if p == self.prefs { return; }
         self.prefs = p;
         cx.notify();

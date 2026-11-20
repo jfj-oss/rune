@@ -13,8 +13,13 @@ pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
 /// A square cover: the picture (never cropped), or the web's initials tile while it loads / when there is none.
 pub fn cover_el(img: Option<Arc<RenderImage>>, id: &str, title: &str, size: f32, radius: f32) -> Div {
     let base = div().relative().size(px(size)).flex_none().rounded(px(radius)).overflow_hidden().flex().items_center().justify_center();
+    let img = if crate::covers::force_gen() { None } else { img };
     match img {
         Some(i) => base.bg(surface2()).child(img_el(i, size)),
+        None if crate::covers::is_failed(id) && crate::gen::usable() => {
+            let (kind, seed) = crate::gen::kind_for(id);
+            crate::gen::still_cover(kind, seed, size, radius)
+        }
         None => {
             let (a, b) = tile_gradient(id);
             base.bg(linear_gradient(135., linear_color_stop(a, 0.), linear_color_stop(b, 1.)))

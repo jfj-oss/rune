@@ -15,6 +15,8 @@ const browser = await chromium.launch({
   args: ['--headless=new', '--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--password-store=basic', '--use-mock-keychain', '--mute-audio', '--disable-audio-output'],
 });
 const page = await browser.newPage({ viewport: { width: +W, height: +H }, deviceScaleFactor: 1 });
+// WEB_BLOCK_COVERS=1: every cover request fails, so the web shows its generative covers (the native twin: RUNE_DESKTOP_GEN_COVERS=1)
+if (process.env.WEB_BLOCK_COVERS) await page.route('**/api/cover/**', (r) => r.abort());
 await page.goto(`${base}${route}${sep}ambient=off`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(+wait);
 if (pre) { await page.evaluate(pre); await page.waitForTimeout(900); }

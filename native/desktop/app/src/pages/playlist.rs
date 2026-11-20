@@ -54,7 +54,7 @@ impl Rune {
         let s = &d.summary;
         let total_ms: f64 = d.tracks.iter().map(|t| t.duration_ms).sum();
         let (i1, i2, i3) = (s.id.clone(), s.id.clone(), s.id.clone());
-        let cover = playlist_cover(self, s, 300., window);
+        let cover = playlist_cover(self, s, 300., window, cx);
         let rune = s.is_rune();
         let kind = if s.is_smart() { "Smart playlist" } else if rune { "Playlist" } else { "Spotify playlist" };
         let pin = PopItem { icon: if s.pinned { "pin-off" } else { "pin" }, label: if s.pinned { "Unpin".into() } else { "Pin to Library".into() }, act: MenuAct::PinPlaylist { id: s.id.clone(), pin: !s.pinned }, danger: false, chevron: false, dot: false, sub: false };
@@ -64,7 +64,8 @@ impl Rune {
         let _ = &mut items;
         let (sid, sname) = (s.id.clone(), s.name.clone());
         let dot = || div().mx(px(9.)).text_color(c(TEXT3)).child("\u{b7}");
-        let text = v_flex().flex_1().min_w_0().gap(px(12.)).pb(px(4.))
+        let text = v_flex().relative().flex_1().min_w_0().gap(px(12.)).pb(px(4.))
+            .child(crate::pages::album::hero_scrim())
             .child(eyebrow(kind).text_color(ca(TEXT, 0.62)))
             .child(self.playlist_title(s, cx))
             .children(d.description.clone().filter(|x| !x.is_empty()).map(|x| div().text_size(px(14.5)).text_color(c(TEXT2)).child(x)))
@@ -91,10 +92,48 @@ impl Rune {
                     if rune { its.push(PopItem { icon: "trash", label: "Delete playlist".into(), act: MenuAct::DeletePlaylist { id: sid.clone(), name: sname.clone() }, danger: true, chevron: false, dot: false, sub: false }); }
                     this.open_menu(PopMenu { x: f32::from(p.x) - 20., y: f32::from(p.y) + 24., items: its, add_ids: vec![], add_label: String::new(), add_open: false, right_aligned: false, up: false }, cx);
                 }))));
-        div().w_full().pt(px(44.)).pb(px(30.)).pl(px(PAD)).pr(px(PAD + SCROLLBAR)).child(
+        let bg = self.playlist_hero_bg(d, window, cx);
+        let content = div().relative().w_full().pt(px(44.)).pb(px(30.)).pl(px(PAD)).pr(px(PAD + SCROLLBAR)).child(
             h_flex().w_full().max_w(px(BODY_MAX)).mx_auto().gap(px(40.)).items_end()
                 .child(div().w(px(300.)).flex_none().child(cover.shadow(vec![BoxShadow { inset: false, color: bk(0.6), offset: point(px(0.), px(30.)), blur_radius: px(70.), spread_radius: px(-10.) }])))
-                .child(text)).into_any_element()
+                .child(text));
+        div().relative().w_full().overflow_hidden().children(bg).child(content).into_any_element()
+    }
+
+    /// The header behind a playlist's hero: the ASCII sea for the two wave playlists, two glows for Liked Songs, otherwise the first
+    /// song's cover, soft and tinted (see `tint.rs`); under the dark wash in every case.
+    fn playlist_hero_bg(&mut self, d: &PlaylistDetail, window: &mut Window, cx: &mut Context<Self>) -> Option<Div> {
+        use crate::tint;
+        let s = &d.summary;
+        if let Some((kind, seed)) = crate::gen::playlist_art(&s.id) {
+            if !crate::gen::usable() { return None; }
+            let art = self.art("hero", crate::gen::Mode::Ascii, kind, seed, cx);
+            return Some(div().absolute().top_0().left_0().size_full().child(art));
+        }
+        let liked = s.id == LIKED_PLAYLIST_ID;
+        let first = d.tracks.first().map(|t| t.album_id.clone());
+        let src = if liked { None } else { first.and_then(|a| self.cover(&a, None, 200., window)) };
+        if !liked && src.is_none() { return None; }
+        let key = (s.id.clone(), src.as_ref().map(|i| Arc::as_ptr(i) as usize).unwrap_or(0));
+        if self.hero_tint.as_ref().map(|(k, _)| k) != Some(&key) {
+            let vw = f32::from(window.viewport_size().width);
+            let box_w = (vw - crate::shell::side_w(self.sidebar_collapsed)).max(400.);
+            let box_h = 374.;
+            let (ow, oh) = (64usize, ((64. * box_h / box_w).ceil() as usize).max(8));
+            let bytes = match &src {
+                Some(i) => {
+                    let sz = i.size(0);
+                    let (w_, h_) = (sz.width.0 as usize, sz.height.0 as usize);
+                    i.as_bytes(0).map(|b| tint::render(Some(&tint::Src { bgra: b, w: w_, h: h_ }), false, box_w, box_h, ow, oh))
+                }
+                None => Some(tint::render(None, true, box_w, box_h, ow, oh)),
+            }?;
+            let rgba = image::RgbaImage::from_raw(ow as u32, oh as u32, bytes)?;
+            let img = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)]));
+            if let Some((_, old)) = self.hero_tint.replace((key, img)) { let _ = window.drop_image(old); }
+        }
+        let img = self.hero_tint.as_ref().map(|(_, i)| i.clone())?;
+        Some(div().absolute().top_0().left_0().size_full().child(img_fill(img)))
     }
 
     /// The playlist's name: plain text, or for rune's own playlists a click makes it an input (Enter or leaving it saves, Esc cancels).
@@ -223,3 +262,5 @@ mod tests {
         assert_eq!(s.iter().copied().collect::<Vec<_>>(), vec![3, 4, 6]);
     }
 }
+
+fn img_fill(i: Arc<RenderImage>) -> impl IntoElement { img(ImageSource::Render(i)).size_full().object_fit(ObjectFit::Fill) }

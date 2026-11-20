@@ -3,6 +3,8 @@ mod actions;
 mod albumlogic;
 mod audio;
 mod backdrop;
+mod bluenoise;
+mod gen;
 mod gpubench;
 mod shader_hook_tests;
 mod charts;
@@ -27,6 +29,7 @@ mod smartdlg;
 mod shortcuts;
 mod testhook;
 mod text;
+mod tint;
 mod theme;
 mod util;
 mod waveform;
@@ -62,6 +65,7 @@ fn main() {
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx: &mut App| {
         gpui_kit::init(cx);
         backdrop::register_shaders();
+        gen::register_shader_source();
         let fonts: Vec<std::borrow::Cow<'static, [u8]>> = vec![
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/inter-latin-wght-normal.ttf").as_slice()),
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/source-serif-4-latin-wght-normal.ttf").as_slice()),
