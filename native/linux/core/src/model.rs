@@ -159,6 +159,8 @@ pub enum ServerEvent {
     },
     /// The chosen playlists changed: read GET /api/mini/playlists again (handled by the caller, not the reducer).
     MiniPlaylists,
+    /// The library changed (a scan finished, a like, a playlist edit): lists the client holds may be stale.
+    LibraryChanged,
     #[serde(other)]
     Other,
 }
@@ -483,7 +485,8 @@ mod tests {
         let e: ServerEvent = serde_json::from_str(r#"{"type":"mini-playlists"}"#).unwrap();
         assert!(matches!(e, ServerEvent::MiniPlaylists));
         assert!(m.update(Msg::Ws(e), 0).is_empty());
-        assert!(matches!(serde_json::from_str::<ServerEvent>(r#"{"type":"library-changed"}"#).unwrap(), ServerEvent::Other));
+        assert!(matches!(serde_json::from_str::<ServerEvent>(r#"{"type":"library-changed"}"#).unwrap(), ServerEvent::LibraryChanged));
+        assert!(matches!(serde_json::from_str::<ServerEvent>(r#"{"type":"something-new"}"#).unwrap(), ServerEvent::Other));
     }
 
     #[test]
