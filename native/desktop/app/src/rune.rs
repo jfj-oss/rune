@@ -129,6 +129,9 @@ struct Saved {
     effects_reduced: bool,
     #[serde(default)]
     saver_off: bool,
+    /// draw the backdrop on the CPU instead of the GPU shader (no switch in the UI; edit state.json, or set RUNE_DESKTOP_FOIL=software)
+    #[serde(default)]
+    foil_software: bool,
 }
 
 pub struct Rune {
@@ -253,7 +256,7 @@ impl Rune {
         }).detach();
 
         let saved: Saved = std::fs::read_to_string(state_path(&dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        let foil_prefs = crate::backdrop::Prefs { on: !saved.foil_off, reduce: saved.effects_reduced, saver: !saved.saver_off };
+        let foil_prefs = crate::backdrop::Prefs { on: !saved.foil_off, reduce: saved.effects_reduced, saver: !saved.saver_off, software: saved.foil_software };
         let foil_entity = cx.new(|cx| crate::backdrop::Backdrop::new(foil_prefs, window, cx));
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search albums, artists, tracks"));
         let albums_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in albums"));
@@ -338,7 +341,7 @@ impl Rune {
     }
 
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software };
         let _ = std::fs::create_dir_all(&self.dir);
         if let Ok(j) = serde_json::to_string(&s) { let _ = std::fs::write(state_path(&self.dir), j); }
     }

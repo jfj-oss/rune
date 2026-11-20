@@ -15,7 +15,26 @@
 pub const FPS: f32 = 10.0;
 /// The still frame (reduced motion).
 pub const STILL_T: f32 = 40.0;
-pub const T_WRAP: f32 = 100000.0;
+/// Seconds of one loop of the waves: a band travels from the middle to the edge in about this time; the dust drift (2.5 px/s) repeats after 3 loops.
+pub const T_LOOP: f32 = 25.6;
+pub const T_WRAP: f32 = 76800.0; // 3000 loops
+pub const N_BANDS: usize = 8;
+/// A band's radius grows as phase^BAND_GAMMA (spacing grows outward, as in the reference).
+pub const BAND_GAMMA: f32 = 1.25;
+/// The largest radius is this much of the window's half diagonal, so a wavefront has left every corner before it restarts.
+pub const RMAX_K: f32 = 1.3;
+/// Half thickness (css px) at the middle and at the window's corners.
+pub const HW_MIN: f32 = 1.0;
+pub const HW_MAX: f32 = 9.5;
+/// Ragged top and bottom of a strip: device px, 1 + 0.05 x half thickness, at most 2.
+pub const JIT_BASE: f32 = 1.0;
+pub const JIT_SLOPE: f32 = 0.05;
+pub const JIT_MAX: f32 = 2.0;
+/// Share of a band's strips lit at its birth, and the radius share (of the half diagonal) from which all are lit.
+pub const FILL_MIN: f32 = 0.06;
+pub const FILL_FULL_AT: f32 = 0.62;
+pub const GLOW_K: f32 = 1.8;
+pub const N_DASH: f32 = 110.0;
 
 pub const BASE: [f32; 3] = [6.0, 10.0, 26.0];
 pub const WAVE: [f32; 3] = [105.0, 125.0, 255.0];
@@ -28,11 +47,8 @@ pub const STRAY: [f32; 3] = [130.0, 145.0, 255.0];
 pub const DUST_BLACK: f32 = 0.3;
 pub const DUST_LIGHT: f32 = 0.1;
 pub const MOON: [f32; 3] = [120.0, 135.0, 255.0];
-pub const BAND_HALF: f32 = 6.0;
-pub const STRIP_JITTER: f32 = 7.0;
 /// A separator column between two strips is this much as bright as the strip before it (0.4 = 60% dimmer, never black).
 pub const SEP_GAIN: f32 = 0.4;
-pub const GLOW_SIG: f32 = 11.0;
 pub const GLOW_AMP: f32 = 0.2;
 /// Gain of the band body (as in the shader).
 pub const BODY_GAIN: f32 = 3.6;
@@ -60,11 +76,14 @@ pub fn hash3(x: f32, y: f32) -> [f32; 3] {
     [fract((a + b) * c), fract((b + c) * a), fract((c + a) * b)]
 }
 
-/// Brightness of a strip at time t from its hash (irregular, drifting very slowly).
-pub fn strip_bright(h: [f32; 3], t: f32) -> f32 { (0.45 + 0.55 * h[0].powf(1.2)) * (0.88 + 0.12 * (t * 0.5 + h[1] * 6.2832).sin()) }
-/// How far (css px) a strip reaches above and below the band's centre line: a wide hashed spread, so some strips are much
-/// shorter and some much taller than the band's nominal edge (never under 2.4 px).
-pub fn strip_extent(h: [f32; 3]) -> (f32, f32) { ((BAND_HALF + (h[1] * 2.0 - 1.0) * STRIP_JITTER).max(2.4), (BAND_HALF + (h[2] * 2.0 - 1.0) * STRIP_JITTER).max(2.4)) }
+/// Brightness of a strip at time t from its hash (irregular, drifting slowly; two full swings per loop).
+pub fn strip_bright(h: [f32; 3], t: f32) -> f32 { (0.45 + 0.55 * h[0].powf(1.2)) * (0.88 + 0.12 * (TAU * 2.0 * t / T_LOOP + h[1] * TAU).sin()) }
+/// Raggedness of a strip's top and bottom, in -1..1 (scaled by [`jitter_px`]): hashed per strip.
+pub fn strip_jitter(h: [f32; 3]) -> (f32, f32) { (h[1] * 2.0 - 1.0, h[2] * 2.0 - 1.0) }
+/// How far (device px) a strip's ends may stray from the band's edge: about 1 px at the thin middle, up to 2 px at the thick edge.
+pub fn jitter_px(hw: f32) -> f32 { (JIT_BASE + JIT_SLOPE * hw).min(JIT_MAX) }
+/// Reach (device px) of a strip above (`top`) and below its band's centre line, for the band's half thickness `hw` (device px).
+pub fn strip_reach(hw: f32, jt: f32, jb: f32) -> (f32, f32) { let j = jitter_px(hw); ((hw + jt * j).max(1.0), (hw + jb * j).max(1.0)) }
 /// Brightness along a strip's own height: five control points (top .. bottom, the last equal to the first so that the
 /// profile can slowly travel down the strip as a loop) of hashed, contrasty values.
 pub fn strip_profile(h: [[f32; 3]; 2]) -> [f32; 5] {
@@ -78,129 +97,132 @@ pub fn profile_at(p: [f32; 5], y01: f32) -> f32 {
     let f = u - i as f32;
     p[i] + (p[i + 1] - p[i]) * f * f * (3.0 - 2.0 * f)
 }
+/// How many times (1-3) the brightness profile of a strip travels down it in one loop.
+pub fn travel_loops(h0: f32) -> f32 { 1.0 + (h0 * 3.0).floor().min(2.0) }
 
 /// One device column of the wave bands. The columns run as: a strip (1 or 2 device px, hashed per strip), then a 1 px
-/// separator, then the next strip, and so on. Every strip keeps its own look (brightness, top and bottom reach, profile);
-/// its separator column shares them at [`SEP_GAIN`] of the brightness.
+/// separator, then the next strip, and so on. Every strip keeps its own look (brightness, ragged ends, profile); its
+/// separator column shares them at [`SEP_GAIN`] of the brightness. `id` numbers the strips (it seeds which strips are lit).
 #[derive(Clone, Copy, Debug)]
-pub struct Col { pub sep: bool, pub bright_h: [f32; 3], pub top: f32, pub bottom: f32, pub prof: [f32; 5] }
+pub struct Col { pub id: u32, pub sep: bool, pub bright_h: [f32; 3], pub jt: f32, pub jb: f32, pub prof: [f32; 5] }
 
 pub fn columns(ncols: usize) -> Vec<Col> {
     let mut out = Vec::with_capacity(ncols + 4);
     let mut i = 0f32;
     while out.len() < ncols {
         let h = hash3(i, 7.0);
-        let (top, bottom) = strip_extent(h);
+        let (jt, jb) = strip_jitter(h);
         let prof = strip_profile([hash3(i, 11.0), hash3(i, 12.0)]);
         let w = 1 + (hash3(i, 13.0)[0] >= 0.5) as usize;
-        for _ in 0..w { out.push(Col { sep: false, bright_h: h, top, bottom, prof }); }
-        out.push(Col { sep: true, bright_h: h, top, bottom, prof });
+        for _ in 0..w { out.push(Col { id: i as u32, sep: false, bright_h: h, jt, jb, prof }); }
+        out.push(Col { id: i as u32, sep: true, bright_h: h, jt, jb, prof });
         i += 1.0;
     }
     out.truncate(ncols);
     out
 }
 
-pub fn lump(a: f32, k: i32, t: f32) -> f32 { let k = k as f32; 0.78 + 0.22 * (a * 0.07 + k * 1.9 + t * 0.35 + (a * 0.03 + k).sin() * 1.5).sin() }
+/// Is strip `id` lit in band `k` where the band is `fill` full (0..1)? A hashed scatter: the same strips stay lit as `fill` grows.
+pub fn strip_lit(id: u32, k: usize, fill: f32) -> bool { hash3(id as f32, 20.0 + k as f32)[0] < fill }
 
-// ------------------------------------------------------------------------------------------ the composition of the reference
+pub fn lump(a: f32, k: i32, t: f32) -> f32 { let k = k as f32; 0.78 + 0.22 * (a * 0.07 + k * 1.9 + TAU * t / T_LOOP + (a * 0.03 + k).sin() * 1.5).sin() }
+
+// ------------------------------------------------------------------------------------------ the waves
 //
-// Two families of nested curves, read off the reference photo (coordinates below are that photo's pixels, 1500 x 2000 as shown;
-// they are mapped onto the window as u = (x - 20) / 1430, v = (y - 130) / 1770):
-//  * the UPPER family: six nested arcs shaped like a "⊃" lying on its side. Each starts low at the left, sweeps up and to the right,
-//    rounds a bulge, and comes back left across the top, where its end breaks into dashes. Each is bigger than the one inside it,
-//    with spacing that grows towards the outer ones.
-//  * the LOWER family: five long lines that start at the right edge, sweep left and down, and end at the bottom left in a hook
-//    (a "J" curling up at its end); each hook is nested inside the next, spacing again growing outwards.
-//  * one low "floor" curve along the bottom left.
-// Every curve is a Catmull-Rom spline through points that are blended between an inner and an outer template.
+// A family of N_BANDS wavefronts that travel outward from the middle of the window and repeat exactly every T_LOOP seconds.
+// Band k is born at the centre when (t / T_LOOP + k / N_BANDS) crosses a whole number, grows outward, thicker and fuller the
+// further out it is, and leaves the window at the edge. Each is an ARC (not a closed ring) of a wobbly polar curve
+// r = R(theta), with the ends of the reference's composition: one end breaks up into dashes, every other band's end curls into
+// a hook. Everything about band k that is random is hashed from k, so the loop is exact.
 
+pub const TAU: f32 = std::f32::consts::TAU;
 type P = (f32, f32);
-const UP_IN: [P; 10] = [(45., 800.), (110., 735.), (190., 665.), (270., 600.), (335., 540.), (352., 490.), (330., 452.), (280., 436.), (215., 440.), (150., 452.)];
-const UP_OUT: [P; 10] = [(330., 955.), (520., 930.), (700., 865.), (850., 760.), (945., 615.), (975., 470.), (935., 368.), (860., 300.), (720., 232.), (630., 214.)];
-const LO_OUT: [P; 10] = [(1395., 560.), (1290., 680.), (1140., 790.), (960., 890.), (760., 980.), (560., 1060.), (400., 1150.), (310., 1270.), (272., 1400.), (272., 1520.)];
-const LO_IN: [P; 10] = [(1450., 1245.), (1350., 1268.), (1220., 1305.), (1090., 1345.), (960., 1390.), (850., 1430.), (770., 1470.), (727., 1515.), (740., 1558.), (775., 1565.)];
-const FLOOR: [P; 6] = [(20., 1590.), (150., 1640.), (300., 1670.), (450., 1700.), (600., 1740.), (680., 1750.)];
-pub const N_UPPER: usize = 6;
-pub const N_LOWER: usize = 5;
 
-fn uv(p: P) -> P { ((p.0 - 20.0) / 1430.0, (p.1 - 130.0) / 1770.0) }
+/// The fixed look of band slot `k`: where its arc starts and how far it runs (radians), its hook (0 = none, else how far the
+/// end curls inward as a share of the radius), and four phases for the wobble.
+#[derive(Clone, Copy, Debug)]
+pub struct Band { pub th0: f32, pub span: f32, pub hook: f32, pub ph: [f32; 4], pub rot: f32 }
 
-/// One curve of the composition, in device pixels, as a dense polyline with what the painter needs along it.
-pub struct Curve { pub pts: Vec<[f32; 2]>, pub s: Vec<f32>, pub ev: Vec<f32>, pub th: Vec<f32>, pub idx: i32 }
+pub fn band(k: usize) -> Band {
+    let (h, g, q) = (hash3(k as f32 + 0.5, 101.0), hash3(k as f32 + 0.5, 102.0), hash3(k as f32 + 0.5, 103.0));
+    Band { th0: h[0] * TAU, span: 3.4 + 2.4 * h[1], hook: if k % 2 == 1 { 0.14 + 0.14 * h[2] } else { 0.0 }, ph: [g[0] * TAU, g[1] * TAU, g[2] * TAU, q[0] * TAU], rot: q[1] * TAU }
+}
 
-fn crom(p0: P, p1: P, p2: P, p3: P, t: f32) -> P {
-    let (t2, t3) = (t * t, t * t * t);
-    let f = |a: f32, b: f32, c: f32, d: f32| 0.5 * ((2.0 * b) + (-a + c) * t + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2 + (-a + 3.0 * b - 3.0 * c + d) * t3);
-    (f(p0.0, p1.0, p2.0, p3.0), f(p0.1, p1.1, p2.1, p3.1))
+/// Where band slot `k` is in its life, 0 (born at the centre) .. 1 (gone), at time t.
+pub fn band_phase(t: f32, k: usize) -> f32 { fract(t / T_LOOP + k as f32 / N_BANDS as f32) }
+
+/// The window's centre and the largest radius a band reaches (a band is gone once its smallest radius passes every corner).
+pub fn centre(w: f32, h: f32) -> P { (w * 0.5, h * 0.5) }
+pub fn half_diag(w: f32, h: f32) -> f32 { 0.5 * w.hypot(h) }
+pub fn r_max(w: f32, h: f32) -> f32 { half_diag(w, h) * RMAX_K }
+
+/// Angle at which band `k`'s arc starts at phase p (it also rotates a little, and back, over a life).
+pub fn start_angle(b: &Band, p: f32) -> f32 { b.th0 + 0.35 * (TAU * p + b.rot).sin() }
+
+/// The radius of band `b` at phase `p`, in direction `th`, for the largest radius `rmax`, and the arc fraction `u` (0..1 inside
+/// the arc; outside it is >= 1). The wobble (speed and bend vary smoothly around the band) travels along the band.
+pub fn band_r(b: &Band, p: f32, th: f32, rmax: f32) -> (f32, f32) {
+    let tp = TAU * p;
+    let wob = 0.10 * (3.0 * th + b.ph[0] + tp).sin() + 0.06 * (5.0 * th + b.ph[1] - tp).sin() + 0.03 * (8.0 * th + b.ph[2] + 2.0 * tp).sin() + 0.012 * (14.0 * th + b.ph[3] - 3.0 * tp).sin();
+    let u = pmod(th - start_angle(b, p), TAU) / b.span;
+    let hk = sstep(0.74, 1.0, u.min(1.0));
+    (rmax * p.powf(BAND_GAMMA) * (1.0 + wob) * (1.0 - b.hook * hk * hk), u)
+}
+
+/// Half thickness (device px) of a band at radius r (the window's half diagonal is 1): thin in the middle, thicker outward.
+pub fn half_thick(rn: f32, scale: f32) -> f32 { scale * (HW_MIN + (HW_MAX - HW_MIN) * rn.clamp(0.0, 1.35).powf(1.2)) }
+/// How much of a band's strips are lit at radius share `rn`: a few scattered ones in the middle, all of them further out.
+pub fn fill_at(rn: f32) -> f32 { FILL_MIN + (1.0 - FILL_MIN) * sstep(0.06, FILL_FULL_AT, rn) }
+/// Glow width (device px) for a band of half thickness `hw`.
+pub fn glow_sigma(hw: f32, scale: f32) -> f32 { (GLOW_K * hw).max(3.0 * scale) }
+/// Brightness of a band along its arc (0..1 fraction `u`, radians `span`), without the fade: lumps, and the ends: the far end
+/// breaks into dashes.
+pub fn arc_ev(u: f32, span: f32, k: usize, t: f32) -> f32 {
+    let dz = ((1.0 - u) / 0.22).min(1.0);
+    let dashed = if dz >= 1.0 || fract(u * N_DASH) < 0.25 + 0.75 * dz { 1.0 } else { 0.0 };
+    lump(u * span * 60.0, k as i32, t) * dashed
 }
 
 /// Fade of the backdrop towards black: 0 in the middle of the window, 1 at the top-right corner, smooth.
 pub fn fade_at(u: f32, v: f32) -> f32 { sstep(0.0, 0.85, (u - 0.5) + (0.5 - v)) }
+/// Brightness base by position (window fractions): dimmer towards the upper left.
+pub fn base_ev(u: f32, v: f32) -> f32 { 0.75 + 0.35 * ((u + v - 0.6) / 1.2).clamp(0.0, 1.0) }
 
-/// Thickness multiplier at (u, v): thin towards the upper left, heaviest in the lower right sweep.
-pub fn thickness_at(u: f32, v: f32, lower: bool) -> f32 { (0.75 + 0.55 * ((u + v - 0.5) / 1.1).clamp(0.0, 1.0)) * if lower { 1.1 } else { 1.0 } }
+/// One band of the waves, in device pixels, as a dense polyline with what the painter needs along it.
+pub struct Curve {
+    pub pts: Vec<[f32; 2]>,
+    /// distance along the arc from its start / to its end (device px; R x angle)
+    pub s: Vec<f32>, pub se: Vec<f32>,
+    pub ev: Vec<f32>, pub hw: Vec<f32>, pub fill: Vec<f32>,
+    pub idx: i32,
+}
 
-/// All curves of the composition at time t for a w x h device-pixel window (`scale` device px per logical px).
-/// The whole composition sways a few pixels, the arcs flex slightly, and the hooks curl and uncurl a little.
+/// All bands at time t for a w x h device-pixel window (`scale` device px per logical px) that are on the window.
 pub fn curves(w: f32, h: f32, scale: f32, t: f32) -> Vec<Curve> {
-    let mut out = Vec::with_capacity(N_UPPER + N_LOWER + 1);
-    let sway = (0.005 * (t * 0.07).sin(), 0.007 * (t * 0.05 + 1.0).cos());
-    let mut push = |mut pts: Vec<P>, idx: i32, upper: bool, hook: bool| {
-        // flex: every control point wanders a little, each on its own phase
-        for (k, p) in pts.iter_mut().enumerate() {
-            let (k, i) = (k as f32, idx as f32);
-            p.0 += 0.004 * (t * 0.13 + k * 0.9 + i * 1.7).sin() + sway.0;
-            p.1 += 0.004 * (t * 0.11 + k * 1.3 + i * 2.3).cos() + sway.1;
+    let (cx, cy) = centre(w, h);
+    let (hd, rmax) = (half_diag(w, h), r_max(w, h));
+    let mut out = Vec::with_capacity(N_BANDS);
+    for k in 0..N_BANDS {
+        let (b, p) = (band(k), band_phase(t, k));
+        let th0 = start_angle(&b, p);
+        let mut c = Curve { pts: vec![], s: vec![], se: vec![], ev: vec![], hw: vec![], fill: vec![], idx: k as i32 };
+        let mut a = 0.0f32; // angle travelled from the start
+        while a <= b.span {
+            let th = th0 + a;
+            let (r, u) = band_r(&b, p, th, rmax);
+            let (x, y) = (cx + r * th.cos(), cy + r * th.sin());
+            let (fu, fv) = (x / w, y / h);
+            let rn = r / hd;
+            c.pts.push([x, y]);
+            c.s.push(r * a);
+            c.se.push(r * (b.span - a));
+            c.ev.push(base_ev(fu, fv) * arc_ev(u, b.span, k, t) * (1.0 - fade_at(fu, fv)));
+            c.hw.push(half_thick(rn, scale));
+            c.fill.push(fill_at(rn));
+            a += (2.0 / r.max(2.0)).clamp(1e-4, 0.05); // about 2 px along the arc
         }
-        if hook {
-            // the last three points swing about the one before them: the hook curls and uncurls
-            let n = pts.len();
-            let c = pts[n - 4];
-            let ang = 0.16 * (t * 0.21 + idx as f32 * 1.3).sin();
-            let (sa, ca) = ang.sin_cos();
-            for p in pts.iter_mut().skip(n - 3) { let (dx, dy) = (p.0 - c.0, (p.1 - c.1) * h / w); *p = (c.0 + dx * ca - dy * sa, c.1 + (dx * sa + dy * ca) * w / h); }
-        }
-        // dense spline in device pixels
-        let dev: Vec<P> = pts.iter().map(|p| (p.0 * w, p.1 * h)).collect();
-        let n = dev.len();
-        let mut line: Vec<[f32; 2]> = Vec::new();
-        for k in 0..n - 1 {
-            let (p0, p1, p2, p3) = (dev[k.saturating_sub(1)], dev[k], dev[k + 1], dev[(k + 2).min(n - 1)]);
-            let steps = (((p2.0 - p1.0).hypot(p2.1 - p1.1) / 2.0).ceil() as usize).max(2);
-            for j in 0..steps { let q = crom(p0, p1, p2, p3, j as f32 / steps as f32); line.push([q.0, q.1]); }
-        }
-        let last = dev[n - 1];
-        line.push([last.0, last.1]);
-        let mut s = Vec::with_capacity(line.len());
-        let mut acc = 0.0;
-        for (j, p) in line.iter().enumerate() { if j > 0 { acc += (p[0] - line[j - 1][0]).hypot(p[1] - line[j - 1][1]); } s.push(acc); }
-        let total = acc.max(1.0);
-        let (mut ev, mut th) = (Vec::with_capacity(line.len()), Vec::with_capacity(line.len()));
-        for (j, p) in line.iter().enumerate() {
-            let (u, v) = (p[0] / w, p[1] / h);
-            let sf = s[j] / total;
-            // the ends of the upper arcs (and the far end of the floor curve) break into dashes
-            let z = (sf.min(1.0 - sf) / 0.2).min(1.0);
-            let dashed = if upper || idx == 99 { if z >= 1.0 { 1.0 } else if fract(s[j] / (13.0 * scale)) < 0.25 + 0.75 * z { 1.0 } else { 0.0 } } else { 1.0 };
-            let base_ev = 0.75 + 0.35 * ((u + v - 0.6) / 1.2).clamp(0.0, 1.0);
-            ev.push(base_ev * lump(s[j] / scale, idx, t) * dashed * (1.0 - fade_at(u, v)));
-            th.push(thickness_at(u, v, !upper));
-        }
-        out.push(Curve { pts: line, s, ev, th, idx });
-    };
-    for i in 0..N_UPPER {
-        let tau = (i as f32 / (N_UPPER - 1) as f32).powf(1.35);
-        let pts: Vec<P> = (0..10).map(|k| { let (a, b) = (uv(UP_IN[k]), uv(UP_OUT[k])); (a.0 + (b.0 - a.0) * tau, a.1 + (b.1 - a.1) * tau) }).collect();
-        push(pts, i as i32, true, false);
+        if c.pts.len() > 1 && c.pts.iter().any(|q| q[0] > -60.0 && q[0] < w + 60.0 && q[1] > -60.0 && q[1] < h + 60.0) { out.push(c); }
     }
-    for i in 0..N_LOWER {
-        let tau = (i as f32 / (N_LOWER - 1) as f32).powf(1.1); // 0: the innermost hook .. 1: the outermost
-        let mut pts: Vec<P> = (0..10).map(|k| { let (a, b) = (uv(LO_IN[k]), uv(LO_OUT[k])); (a.0 + (b.0 - a.0) * tau, a.1 + (b.1 - a.1) * tau) }).collect();
-        pts.insert(0, (1.08, pts[0].1 - 0.02)); // start off the right edge
-        push(pts, 10 + i as i32, false, true);
-    }
-    push(FLOOR.iter().map(|p| uv(*p)).collect(), 99, false, false);
     out
 }
 
@@ -272,7 +294,7 @@ pub fn glint_at(x: i32, yr: i32, t: f32, share: f32) -> f32 {
     let off = (fract(hg[2] * 7.3) * (4 - len) as f32).floor() as i32;
     let r = yr.rem_euclid(3);
     if r < off || r >= off + len { return 0.0; }
-    let period = 2.5 + 3.0 * hg[1];
+    let period = T_LOOP / (T_LOOP / (2.5 + 3.0 * hg[1])).round().max(1.0); // a whole number of flashes per loop
     let dur = 0.3 + 0.7 * fract(hg[1] * 5.1);
     let phase = (t + hg[1] * 17.0).rem_euclid(period);
     if phase >= dur { return 0.0; }
@@ -338,21 +360,23 @@ pub fn render_waves(w: usize, h: usize, scale: f32, t: f32, cols: &[Col], buf: &
 }
 
 /// What the painter needs for one pixel of a band (see [`render_bands`]).
-struct Painter<'a> { w: usize, h: usize, scale: f32, t: f32, cols: &'a [Col], sbs: Vec<f32>, lut: Vec<f32>, lut_k: f32 }
+struct Painter<'a> { w: usize, h: usize, scale: f32, t: f32, cols: &'a [Col], sbs: Vec<f32>, lut: Vec<f32> }
 
 const GLOW_R: f32 = 1.5;
 const LUT: usize = 128;
 
 impl Painter<'_> {
-    /// One pixel (xi, y) at signed perpendicular distance `sd` (device px, positive down / to the right) from the curve centre.
+    /// One pixel (xi, y) at signed perpendicular distance `sd` (device px, positive down / to the right) from the band's centre
+    /// line; `hw`: the band's half thickness there, `fill`: how full the band is there (see [`strip_lit`]), `k` the band.
     #[allow(clippy::too_many_arguments)]
-    fn pixel(&self, buf: &mut [u8], xi: usize, y: usize, sd: f32, th: f32, ev: f32, travel: f32, gk: (i32, i32)) {
+    fn pixel(&self, buf: &mut [u8], xi: usize, y: usize, sd: f32, hw: f32, fill: f32, ev: f32, travel: f32, gk: (i32, i32), k: usize) {
         let col = &self.cols[xi];
-        let (ht, hb) = (col.top * self.scale * th, col.bottom * self.scale * th);
+        if !strip_lit(col.id, k, fill) { return; }
+        let (ht, hb) = strip_reach(hw, col.jt, col.jb);
         let sb = self.sbs[xi];
         let sep = if col.sep { SEP_GAIN } else { 1.0 };
-        let qi = (sd.abs() * self.lut_k / th) as usize;
-        let mut a = if qi < LUT { GLOW_AMP * ev * self.lut[qi] } else { 0.0 };
+        let q = sd.abs() / glow_sigma(hw, self.scale);
+        let mut a = if q < GLOW_R { GLOW_AMP * ev * fill * self.lut[(q / GLOW_R * LUT as f32) as usize] } else { 0.0 };
         let cov = (sd + ht).min(hb - sd) + 0.5;
         let (mut m, mut glint) = (0.0, 0.0);
         if cov > 0.0 {
@@ -369,47 +393,47 @@ impl Painter<'_> {
         let (mut cr, mut cg, mut cb) = (WAVE[0] + (HOT[0] - WAVE[0]) * m, WAVE[1] + (HOT[1] - WAVE[1]) * m, WAVE[2] + (HOT[2] - WAVE[2]) * m);
         if glint > 0.0 { cr += (GLINT[0] - cr) * glint; cg += (GLINT[1] - cg) * glint; cb += (GLINT[2] - cb) * glint; a = a.max(glint); }
         let i = (y * self.w + xi) * 4;
-        // premultiplied; where curves meet the brighter one wins
+        // premultiplied; where bands meet the brighter one wins
         buf[i] = buf[i].max((cb * a) as u8); buf[i + 1] = buf[i + 1].max((cg * a) as u8); buf[i + 2] = buf[i + 2].max((cr * a) as u8); buf[i + 3] = buf[i + 3].max((a * 255.0) as u8);
     }
 }
 
-/// Draws every curve of the composition (strips with separators, ragged ends, brightness profiles, glints, glow) into `buf`.
-/// A shallow piece of a curve is painted column by column (a vertical dash per column), a steep piece row by row (the band's
+/// Draws every band (strips with separators, ragged ends, brightness profiles, glints, glow) into `buf`.
+/// A shallow piece of a band is painted column by column (a vertical dash per column), a steep piece row by row (the band's
 /// width spread over the columns it crosses, each column its own strip): the same strips either way.
 fn render_bands(w: usize, h: usize, scale: f32, t: f32, cols: &[Col], buf: &mut [u8]) {
-    let sig_dev = GLOW_SIG * scale;
     let lut: Vec<f32> = (0..=LUT).map(|i| { let q = i as f32 / LUT as f32 * GLOW_R; (-q * q / 2.0).exp() }).collect();
     let sbs: Vec<f32> = cols.iter().map(|c| strip_bright(c.bright_h, t)).collect(); // (a power and a sine per column: once a frame, not once a pixel)
-    let p = Painter { w, h, scale, t, cols, sbs, lut, lut_k: LUT as f32 / (GLOW_R * sig_dev) };
+    let p = Painter { w, h, scale, t, cols, sbs, lut };
     let (wf, hf) = (w as f32, h as f32);
     for c in curves(wf, hf, scale, t) {
-        let total = *c.s.last().unwrap();
-        // every strip stops a little short of the curve's ends, each at its own place: ragged, comb-like ends
-        let ragged = |xi: usize, s: f32| { let h = hash3(xi as f32 + 0.5, 3.3); s < h[0] * 12.0 * scale || total - s < h[1] * 12.0 * scale };
-        let travel_of = |xi: usize| (0.05 + 0.1 * cols[xi.min(cols.len() - 1)].bright_h[0]) * t;
+        let k = c.idx as usize;
+        // every strip stops a little short of the arc's ends, each at its own place: ragged, comb-like ends
+        let ragged = |xi: usize, s: f32, se: f32| { let h = hash3(xi as f32 + 0.5, 3.3); s < h[0] * 12.0 * scale || se < h[1] * 12.0 * scale };
+        let travel_of = |xi: usize| travel_loops(cols[xi.min(cols.len() - 1)].bright_h[0]) * t / T_LOOP;
         for j in 0..c.pts.len() - 1 {
             let (a, b) = (c.pts[j], c.pts[j + 1]);
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             let len = dx.hypot(dy);
             if len < 1e-3 { continue; }
-            let (ev0, ev1, th0, th1) = (c.ev[j], c.ev[j + 1], c.th[j], c.th[j + 1]);
+            let (ev0, ev1, hw0, hw1, fl0, fl1) = (c.ev[j], c.ev[j + 1], c.hw[j], c.hw[j + 1], c.fill[j], c.fill[j + 1]);
             if ev0.max(ev1) < 0.02 { continue; }
-            let reach_of = |xi: usize, th: f32| { let col = &cols[xi.min(cols.len() - 1)]; (GLOW_R * sig_dev * th).max(col.top.max(col.bottom) * scale * th) + 1.0 };
+            let reach_of = |hw: f32| (GLOW_R * glow_sigma(hw, scale)).max(hw + JIT_MAX) + 1.0;
             if dy.abs() <= dx.abs() {
                 // shallow: one vertical dash per column
                 let (x0, x1) = (a[0].min(b[0]), a[0].max(b[0]));
                 let (i0, i1) = (((x0 - 0.5).ceil().max(0.0)) as i64, ((x1 - 0.5).ceil() as i64 - 1).min(w as i64 - 1));
                 for xi in i0..=i1 {
                     let f = ((xi as f32 + 0.5) - a[0]) / dx;
-                    let (y, ev, th) = (a[1] + dy * f, ev0 + (ev1 - ev0) * f, th0 + (th1 - th0) * f);
-                    if ev < 0.02 || ragged(xi as usize, c.s[j] + (c.s[j + 1] - c.s[j]) * f) { continue; }
+                    let (y, ev, hw, fl) = (a[1] + dy * f, ev0 + (ev1 - ev0) * f, hw0 + (hw1 - hw0) * f, fl0 + (fl1 - fl0) * f);
+                    let (s, se) = (c.s[j] + (c.s[j + 1] - c.s[j]) * f, c.se[j] + (c.se[j + 1] - c.se[j]) * f);
+                    if ev < 0.02 || ragged(xi as usize, s, se) { continue; }
                     let inv_c = 1.0 / (1.0 + (dy / dx) * (dy / dx)).sqrt();
-                    let reach = reach_of(xi as usize, th) / inv_c;
+                    let reach = reach_of(hw) / inv_c;
                     let (y0, y1) = ((y - reach).floor().max(0.0) as usize, (y + reach).ceil().min(hf - 1.0).max(0.0) as usize);
                     for yy in y0..=y1 {
                         let sd = (yy as f32 + 0.5 - y) * inv_c;
-                        p.pixel(buf, xi as usize, yy, sd, th, ev, travel_of(xi as usize), (xi as i32 + c.idx * 131, yy as i32 - y as i32));
+                        p.pixel(buf, xi as usize, yy, sd, hw, fl, ev, travel_of(xi as usize), (xi as i32 + c.idx * 131, yy as i32 - y as i32), k);
                     }
                 }
             } else {
@@ -419,19 +443,42 @@ fn render_bands(w: usize, h: usize, scale: f32, t: f32, cols: &[Col], buf: &mut 
                 let cos_phi = dy.abs() / len;
                 for yy in r0..=r1 {
                     let f = ((yy as f32 + 0.5) - a[1]) / dy;
-                    let (x, ev, th) = (a[0] + dx * f, ev0 + (ev1 - ev0) * f, th0 + (th1 - th0) * f);
+                    let (x, ev, hw, fl) = (a[0] + dx * f, ev0 + (ev1 - ev0) * f, hw0 + (hw1 - hw0) * f, fl0 + (fl1 - fl0) * f);
+                    let (s, se) = (c.s[j] + (c.s[j + 1] - c.s[j]) * f, c.se[j] + (c.se[j + 1] - c.se[j]) * f);
                     if ev < 0.02 { continue; }
-                    let reach = reach_of(x.max(0.0) as usize, th) / cos_phi;
+                    let reach = reach_of(hw) / cos_phi;
                     let (x0, x1) = ((x - reach).floor().max(0.0) as usize, (x + reach).ceil().min(wf - 1.0).max(0.0) as usize);
                     for xi in x0..=x1 {
                         let sd = (xi as f32 + 0.5 - x) * cos_phi;
-                        if ragged(xi, c.s[j] + (c.s[j + 1] - c.s[j]) * f) { continue; }
-                        p.pixel(buf, xi, yy as usize, sd, th, ev, travel_of(xi), (xi as i32 - x as i32 + 7000 + c.idx * 131, yy as i32));
+                        if ragged(xi, s, se) { continue; }
+                        p.pixel(buf, xi, yy as usize, sd, hw, fl, ev, travel_of(xi), (xi as i32 - x as i32 + 7000 + c.idx * 131, yy as i32), k);
                     }
                 }
             }
         }
     }
+}
+
+/// Where the band slots start in the float array of the GPU shader (see `shaders/foil.wgsl`), and the column table after them.
+pub const GPU_BANDS_AT: usize = 16;
+pub const GPU_COLS_AT: usize = 96;
+
+/// The app's floats for the GPU shader of a w x h device-pixel window: 0 width, 1 height, 2 scale, 3 t, 4 dust shift, 5 columns,
+/// 6-8 the moon (x, y, radius); from 16 the bands (10 floats each: start angle, span, hook, four phases, phase p, r_max x p^gamma,
+/// 0); from 96 one float per device column (strip id x 2 + 1 for a separator). Everything per-frame that the shader cannot
+/// cheaply derive: a few hundred floats and the column table (cached by the caller, copied here).
+pub fn gpu_data(w: f32, h: f32, scale: f32, t: f32, cols: &[Col]) -> Vec<f32> {
+    let mut d = vec![0.0f32; GPU_COLS_AT + cols.len()];
+    let (mx, my, mr) = (w * MOON_X, MOON_V * h, MOON_R * h);
+    d[..9].copy_from_slice(&[w, h, scale, t, shift_at(t) as f32, cols.len() as f32, mx, my, mr]);
+    let rmax = r_max(w, h);
+    for k in 0..N_BANDS {
+        let (b, p) = (band(k), band_phase(t, k));
+        let o = GPU_BANDS_AT + k * 10;
+        d[o..o + 9].copy_from_slice(&[start_angle(&b, p), b.span, b.hook, b.ph[0], b.ph[1], b.ph[2], b.ph[3], p, rmax * p.powf(BAND_GAMMA)]);
+    }
+    for (i, c) in cols.iter().enumerate() { d[GPU_COLS_AT + i] = (c.id * 2 + c.sep as u32) as f32; }
+    d
 }
 
 /// The fade to black as an image of w x h device pixels: black with an alpha from [`fade_at`], dithered (4x4 ordered) so the
@@ -454,61 +501,81 @@ pub fn fade_image(w: usize, h: usize) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// the pixel position of the right-most point of a curve, and its lowest point
-    fn extent(c: &Curve) -> (f32, f32, f32) { c.pts.iter().fold((0f32, 0f32, 0f32), |(mx, my, ly), p| (mx.max(p[0]), if p[0] >= mx { p[1] } else { my }, ly.max(p[1]))) }
-
     #[test]
-    fn the_composition_has_the_two_nested_families_of_the_reference() {
+    fn the_waves_repeat_exactly_every_loop() {
         let (w, h) = (1280.0, 800.0);
-        let cs = curves(w, h, 1.0, 40.0);
-        assert_eq!(cs.len(), N_UPPER + N_LOWER + 1);
-        // upper arcs: each one bulges further right than the one inside it, and spacing grows outwards
-        let ups: Vec<f32> = cs[..N_UPPER].iter().map(|c| extent(c).0).collect();
-        for k in 1..ups.len() { assert!(ups[k] > ups[k - 1] + 20.0, "{ups:?}"); }
-        let gaps: Vec<f32> = ups.windows(2).map(|p| p[1] - p[0]).collect();
-        assert!(gaps.last().unwrap() > gaps.first().unwrap(), "spacing grows towards the outer arcs: {gaps:?}");
-        // upper arcs fold back: they are not graphs of x (the top arm returns left of the bulge)
-        for c in &cs[..N_UPPER] {
-            let (rx, ry, _) = extent(c);
-            let end = c.pts.last().unwrap();
-            assert!(end[0] < rx - 20.0 && end[1] < ry, "the top arm ends up and to the left of the bulge");
+        for t in [0.0f32, 3.3, 17.0, 40.0] {
+            let (a, b) = (curves(w, h, 1.0, t), curves(w, h, 1.0, t + T_LOOP));
+            assert_eq!(a.len(), b.len());
+            for (x, y) in a.iter().zip(&b) { assert_eq!(x.idx, y.idx); for (p, q) in x.pts.iter().zip(&y.pts).step_by(9) { assert!((p[0] - q[0]).hypot(p[1] - q[1]) < 0.05, "{p:?} {q:?}"); } }
         }
-        // lower lines: hooks end lower and further right the closer they sit to the inside, each nested in the next
-        let los: Vec<&Curve> = cs[N_UPPER..N_UPPER + N_LOWER].iter().collect();
-        let hook_x: Vec<f32> = los.iter().map(|c| c.pts.last().unwrap()[0]).collect();
-        for k in 1..hook_x.len() { assert!(hook_x[k] < hook_x[k - 1] - 20.0, "hooks nest: {hook_x:?}"); }
-        for c in &los { let first = c.pts[0]; assert!(first[0] > w * 1.0, "starts off the right edge"); let last = c.pts.last().unwrap(); assert!(last[0] < w * 0.65 && last[1] > h * 0.45, "ends in a hook at the lower left"); }
-        // a hook curls up: its last points rise again after the lowest point
-        for c in &los { let (_, _, low) = extent(c); assert!(c.pts.last().unwrap()[1] <= low + 0.01); }
-        // the floor curve lies low at the left
-        assert!(cs.last().unwrap().pts[0][0] < 40.0 && cs.last().unwrap().pts[0][1] > h * 0.7);
-        // lines are thin at the upper left and heavier in the lower right
-        assert!(thickness_at(0.9, 0.8, true) > thickness_at(0.2, 0.3, false) * 1.5);
+        // bands are spaced a whole slot apart: one slot later, the picture is the same set of phases
+        for k in 0..N_BANDS { assert!((band_phase(5.0, k) - band_phase(5.0 + T_LOOP / N_BANDS as f32, (k + N_BANDS - 1) % N_BANDS)).abs() < 1e-4 || (band_phase(5.0, k) - band_phase(5.0 + T_LOOP / N_BANDS as f32, (k + N_BANDS - 1) % N_BANDS)).abs() > 0.999); }
+        // per-band randomness depends only on the slot
+        assert_eq!(band(3).th0, band(3).th0);
+        // the strips and glints loop too
+        let c = columns(50);
+        for x in &c { assert!((strip_bright(x.bright_h, 2.0) - strip_bright(x.bright_h, 2.0 + T_LOOP)).abs() < 1e-3); }
+        for x in 0..200 { for yr in -5..5 { assert!((glint_at(x, yr, 1.7, 0.2) - glint_at(x, yr, 1.7 + T_LOOP, 0.2)).abs() < 1e-3); } }
     }
 
     #[test]
-    fn the_composition_is_deterministic_and_sways_gently() {
-        let a = curves(1280.0, 800.0, 1.0, 40.0);
-        let b = curves(1280.0, 800.0, 1.0, 40.0);
-        assert_eq!(a.len(), b.len());
-        for (x, y) in a.iter().zip(&b) { assert_eq!(x.pts, y.pts); }
-        // half a second later nothing has moved by more than a few pixels, but something has
-        let c = curves(1280.0, 800.0, 1.0, 40.5);
-        let (mut mx, mut tot) = (0f32, 0f32);
-        for (x, y) in a.iter().zip(&c) { for (p, q) in x.pts.iter().zip(&y.pts).step_by(7) { let d = (p[0] - q[0]).hypot(p[1] - q[1]); mx = mx.max(d); tot += d; } }
-        assert!(mx > 0.01 && mx < 6.0, "{mx}");
-        assert!(tot > 1.0);
-        // over a longer time the sway stays within a few tens of pixels
-        let far = curves(1280.0, 800.0, 1.0, 40.0 + 30.0);
-        for (x, y) in a.iter().zip(&far) { for (p, q) in x.pts.iter().zip(&y.pts).step_by(11) { assert!((p[0] - q[0]).hypot(p[1] - q[1]) < 60.0); } }
+    fn the_waves_travel_outward_from_the_middle() {
+        let (w, h) = (1280.0, 800.0);
+        let (cx, cy) = centre(w, h);
+        let mean_r = |t: f32, k: usize| { let c = curves(w, h, 1.0, t).into_iter().find(|c| c.idx == k as i32); c.map(|c| c.pts.iter().map(|p| (p[0] - cx).hypot(p[1] - cy)).sum::<f32>() / c.pts.len() as f32) };
+        // a band born at phase 0 is tiny, and phase p puts it at rmax * p^gamma (in its mean direction)
+        let t0 = 0.0;
+        let b0: Vec<(f32, usize)> = (0..N_BANDS).map(|k| (band_phase(t0, k), k)).collect();
+        let young = b0.iter().min_by(|a, b| a.0.partial_cmp(&b.0).unwrap()).unwrap();
+        let old = b0.iter().filter(|b| b.0 < 0.7).max_by(|a, b| a.0.partial_cmp(&b.0).unwrap()).unwrap();
+        let (ry, ro) = (mean_r(t0, young.1), mean_r(t0, old.1));
+        if let (Some(ry), Some(ro)) = (ry, ro) { assert!(ro > ry * 1.5, "older bands are further out: {ry} {ro}"); }
+        // radius of a fixed direction grows monotonically along a life
+        let b = band(2);
+        let mut last = -1.0;
+        for i in 1..50 { let (r, _) = band_r(&b, i as f32 / 50.0, 1.0, 1000.0); assert!(r > last * 0.8, "outward"); if i % 10 == 0 { assert!(r > last || i < 3); } last = r; }
+        // wobbly, not a circle: the radius varies by more than a few per cent around the band, but stays within +-25%
+        let (mn, mx) = (0..200).fold((9e9f32, 0f32), |(a, c), i| { let (r, _) = band_r(&b, 0.6, i as f32 * TAU / 200.0, 1000.0); (a.min(r), c.max(r)) });
+        assert!(mx / mn > 1.15 && mx / mn < 1.8, "{mn}..{mx}");
     }
 
     #[test]
-    fn the_far_ends_of_the_upper_arcs_break_into_dashes() {
-        let cs = curves(1280.0, 800.0, 1.0, 40.0);
-        let c = &cs[N_UPPER - 1];
+    fn bands_get_thicker_and_fuller_the_further_out_and_start_nearly_empty() {
+        for s in [1.0f32, 2.0] {
+            let mut last = 0.0;
+            for i in 0..=12 { let hw = half_thick(i as f32 * 0.1, s); assert!(hw >= last); last = hw; }
+            assert!(half_thick(0.0, s) <= 1.05 * s && half_thick(1.0, s) >= 9.0 * s);
+        }
+        assert!(fill_at(0.0) <= 0.07 && fill_at(0.7) >= 0.999);
+        let mut last = 0.0;
+        for i in 0..=20 { let f = fill_at(i as f32 * 0.05); assert!(f >= last); last = f; }
+        // the lit strips near the middle are a sparse scatter (5-10%) and stay lit as it fills
+        let lit = |f: f32| (0..4000u32).filter(|id| strip_lit(*id, 3, f)).count() as f32 / 4000.0;
+        assert!((lit(fill_at(0.0)) - 0.06).abs() < 0.025, "{}", lit(fill_at(0.0)));
+        assert!(lit(1.0) > 0.999);
+        for id in 0..4000u32 { if strip_lit(id, 5, 0.3) { assert!(strip_lit(id, 5, 0.6)); } }
+    }
+
+    #[test]
+    fn strip_ends_stray_by_only_a_pixel_or_two() {
+        for hw in [1.0f32, 5.0, 10.0, 20.0, 40.0] { let j = jitter_px(hw); assert!((1.0..=2.0).contains(&j), "{hw}: {j}"); }
+        assert!(jitter_px(2.0) < jitter_px(30.0));
+        for hw in [4.0f32, 12.0, 25.0] {
+            for k in 0..300 {
+                let (jt, jb) = strip_jitter(hash3(k as f32, 7.0));
+                let (top, bot) = strip_reach(hw, jt, jb);
+                assert!((top - hw).abs() <= 2.001 && (bot - hw).abs() <= 2.001, "{hw}: {top} {bot}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_far_ends_of_the_arcs_break_into_dashes() {
+        let cs = curves(1280.0, 800.0, 1.0, 12.0);
+        let c = cs.iter().max_by_key(|c| c.pts.len()).unwrap();
         let n = c.ev.len();
-        let tail: Vec<f32> = c.ev[n - n / 10..].to_vec();
+        let tail: Vec<f32> = c.ev[n - n / 12..].to_vec();
         let on = tail.iter().filter(|e| **e > 0.001).count();
         assert!(on > 0 && on < tail.len(), "dashes, not a solid line and not nothing ({on} of {})", tail.len());
     }
@@ -603,7 +670,7 @@ mod tests {
                 widths.insert(run);
                 run = 0;
                 if i + 1 < cols.len() { assert!(!cols[i + 1].sep, "never two separators in a row"); }
-                assert_eq!(c.top, cols[i - 1].top);
+                assert_eq!(c.jt, cols[i - 1].jt);
                 assert_eq!(c.prof, cols[i - 1].prof);
             } else { run += 1; }
         }
@@ -611,14 +678,12 @@ mod tests {
     }
 
     #[test]
-    fn strips_vary_a_lot_in_height_and_along_their_height() {
+    fn strips_vary_along_their_height_and_in_brightness() {
         let cols = columns(2000);
-        let tops: Vec<f32> = cols.iter().filter(|c| !c.sep).map(|c| c.top).collect();
-        let (lo, hi) = (tops.iter().cloned().fold(9.0, f32::min), tops.iter().cloned().fold(0.0, f32::max));
-        assert!(lo <= 3.0 && hi >= BAND_HALF + 5.0, "spread {lo}..{hi}");
         let mut contrast = 0;
         for c in cols.iter().filter(|c| !c.sep) {
             for v in c.prof { assert!((0.2 - 1e-4..=1.0 + 1e-4).contains(&v)); }
+            assert!((-1.0..=1.0).contains(&c.jt) && (-1.0..=1.0).contains(&c.jb));
             let (mn, mx) = (c.prof.iter().cloned().fold(9.0, f32::min), c.prof.iter().cloned().fold(0.0, f32::max));
             if mx - mn > 0.4 { contrast += 1; }
             let br = strip_bright(c.bright_h, 9.0);
@@ -635,8 +700,8 @@ mod tests {
         let cols = columns(w);
         let mut a = vec![0u8; w * h * 4];
         let mut b = vec![0u8; w * h * 4];
-        render_waves(w, h, 1.0, 40.0, &cols, &mut a, &mut MoonCache::default());
-        render_waves(w, h, 1.0, 40.0, &cols, &mut b, &mut MoonCache::default());
+        render_waves(w, h, 1.0, 12.0, &cols, &mut a, &mut MoonCache::default());
+        render_waves(w, h, 1.0, 12.0, &cols, &mut b, &mut MoonCache::default());
         assert_eq!(a, b);
         let lit = a.chunks(4).filter(|p| p[3] > 8).count();
         assert!(lit > 4000 && lit < w * h * 6 / 10, "{lit}");
@@ -686,6 +751,35 @@ mod tests {
         let _ = (cx, cy);
     }
 
+    #[test]
+    fn gpu_data_packs_header_bands_and_columns() {
+        let cols = columns(40);
+        let d = gpu_data(1280.0, 800.0, 2.0, 12.0, &cols);
+        assert_eq!(d.len(), GPU_COLS_AT + 40);
+        assert_eq!(&d[..6], &[1280.0, 800.0, 2.0, 12.0, shift_at(12.0) as f32, 40.0]);
+        assert!(d[6] > 1000.0 && d[7] > 0.0 && d[8] > 0.0, "moon");
+        for k in 0..N_BANDS {
+            let o = GPU_BANDS_AT + k * 10;
+            assert!((d[o + 7] - band_phase(12.0, k)).abs() < 1e-6);
+            assert!((d[o + 8] - r_max(1280.0, 800.0) * d[o + 7].powf(BAND_GAMMA)).abs() < 1e-2);
+            assert!(d[o + 1] > 3.0 && d[o + 1] < 6.0, "span");
+        }
+        assert!(GPU_BANDS_AT + N_BANDS * 10 <= GPU_COLS_AT);
+        for (i, c) in cols.iter().enumerate() { assert_eq!(d[GPU_COLS_AT + i] as u32 >> 1, c.id); assert_eq!(d[GPU_COLS_AT + i] as u32 & 1 == 1, c.sep); }
+    }
+
+    /// Not a test: `RUNE_FOIL_DATA=<file> RUNE_FOIL_W=.. RUNE_FOIL_H=.. RUNE_FOIL_SCALE=.. RUNE_FOIL_T=.. cargo test dump_gpu_data -- --ignored`
+    /// writes the float array of the GPU shader (little-endian f32), for the offscreen render and timing in the vendored wgpu crate.
+    #[test]
+    #[ignore]
+    fn dump_gpu_data() {
+        let Some(f) = std::env::var_os("RUNE_FOIL_DATA") else { return };
+        let g = |k: &str| std::env::var(k).unwrap().parse::<f32>().unwrap();
+        let (w, h) = (g("RUNE_FOIL_W"), g("RUNE_FOIL_H"));
+        let d = gpu_data(w, h, g("RUNE_FOIL_SCALE"), g("RUNE_FOIL_T"), &columns(w as usize));
+        std::fs::write(f, d.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    }
+
     /// Not a test: `cargo test bench_waves --release -- --ignored --nocapture` prints the time of one frame of the wave overlay.
     #[test]
     #[ignore]
@@ -713,22 +807,24 @@ mod tests {
     }
 
     /// Not a test: `RUNE_FOIL_DUMP=<dir> cargo test dump_composite --release -- --ignored` writes the bare backdrop (dust, fade,
-    /// waves, moon, the app's tint and edge shade left out) at 1280x800 for t = 40 + 0.15 i, i = 0..8, as <dir>/bare-<i>.png.
+    /// waves, moon, the app's tint and edge shade left out) at 1280x800 for t = 4 + 3.2 i, i = 0..8, as <dir>/bare-<i>.png.
     #[test]
     #[ignore]
     fn dump_composite() {
         let Some(dir) = std::env::var_os("RUNE_FOIL_DUMP") else { return };
-        let (w, h) = (1280usize, 800usize);
+        let g = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+        // RUNE_FOIL_W/H/SCALE: device size and scale (default 1280x800 at 1), RUNE_FOIL_T: one frame at that time instead of the 8
+        let (w, h, scale) = (g("RUNE_FOIL_W", 1280.0) as usize, g("RUNE_FOIL_H", 800.0) as usize, g("RUNE_FOIL_SCALE", 1.0));
+        let times: Vec<(String, f32)> = match std::env::var("RUNE_FOIL_T") { Ok(t) => vec![("one".to_string(), t.parse().unwrap())], Err(_) => (0..8).map(|i| (format!("bare-{i}"), 4.0 + i as f32 * 3.2)).collect() };
         let c = DUST_CYCLE as usize;
         let dust_img = dust_image(w + c, h + c);
         let fade = fade_image(w, h);
         let cols = columns(w);
         let mut moon = MoonCache::default();
-        for i in 0..8 {
-            let t = 40.0 + i as f32 * 0.15;
+        for (name, t) in times {
             let shift = shift_at(t) as usize;
             let mut waves = vec![0u8; w * h * 4];
-            render_waves(w, h, 1.0, t, &cols, &mut waves, &mut moon);
+            render_waves(w, h, scale, t, &cols, &mut waves, &mut moon);
             let mut out = image::RgbaImage::new(w as u32, h as u32);
             for y in 0..h { for x in 0..w {
                 let di = ((y + shift) * (w + c) + (x + c - shift)) * 4;
@@ -740,7 +836,7 @@ mod tests {
                 px[0] = px[0] * (1.0 - wa) + waves[wi + 2] as f32; px[1] = px[1] * (1.0 - wa) + waves[wi + 1] as f32; px[2] = px[2] * (1.0 - wa) + waves[wi] as f32;
                 out.put_pixel(x as u32, y as u32, image::Rgba([px[0].min(255.0) as u8, px[1].min(255.0) as u8, px[2].min(255.0) as u8, 255]));
             } }
-            out.save(std::path::Path::new(&dir).join(format!("bare-{i}.png"))).unwrap();
+            out.save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
         }
     }
 }

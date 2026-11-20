@@ -18,3 +18,10 @@ strip = true
 opt-level = 2
 [profile.test.package."*"]
 opt-level = 2
+
+# Custom-shader hook for GPUI (see vendor/PATCH.md): three crates of the pinned gpui-kit 0.9.1 stack, vendored with a small patch.
+# Same versions as the pins, so Cargo.lock only changes their source line.
+[patch.crates-io]
+gpui-pre = { path = "vendor/gpui-pre-0.3.12" }
+gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu-0.3.12" }
+gpui-pre-apple = { path = "vendor/gpui-pre-apple-0.3.12" }

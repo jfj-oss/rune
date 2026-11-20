@@ -1,6 +1,7 @@
 //! The menus (the web's `Popover`, `TrackMenu.tsx`, the top bar's settings menu), the dialogs and the heart.
 use crate::rune::*;
 use crate::theme::*;
+use crate::theme::surface; // (macOS gpui also exports a `surface`)
 use crate::widgets::*;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::{h_flex, v_flex};

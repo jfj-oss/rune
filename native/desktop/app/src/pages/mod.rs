@@ -22,6 +22,7 @@ pub mod soon;
 use crate::rune::*;
 use crate::route::*;
 use crate::theme::*;
+use crate::theme::surface; // (macOS gpui also exports a `surface`)
 use crate::util::*;
 use crate::widgets::*;
 use gpui_kit::component::{h_flex, v_flex};
