@@ -243,8 +243,8 @@ impl Backdrop {
             // a shader that is not ready after a moment (an old or unsupported renderer) or failed: the CPU path takes over
             let first = *a.first_paint.get_or_insert(now);
             match shader_status(FOIL_SHADER) {
-                ShaderStatus::Failed(_) => a.failed = true,
-                ShaderStatus::Pending if now.duration_since(first) > Duration::from_millis(1500) => a.failed = true,
+                ShaderStatus::Failed(e) => { if !a.failed { eprintln!("rune: the foil shader could not be built, drawing the backdrop on the CPU instead: {e}"); } a.failed = true }
+                ShaderStatus::Pending if now.duration_since(first) > Duration::from_millis(1500) => { if !a.failed { eprintln!("rune: this renderer does not run custom shaders, drawing the backdrop on the CPU instead"); } a.failed = true }
                 _ => {}
             }
             let live = animating(prefs, window.is_window_active());

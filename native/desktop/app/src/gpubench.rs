@@ -3,8 +3,9 @@
 //!
 //!   RUNE_FOIL_DATA=/tmp/d.bin RUNE_FOIL_W=3840 RUNE_FOIL_H=2160 RUNE_FOIL_SCALE=2 RUNE_FOIL_T=4 cargo test dump_gpu_data -- --ignored
 //!   RUNE_SHADER_DATA=/tmp/d.bin RUNE_SHADER_W=3840 RUNE_SHADER_H=2160 [RUNE_SHADER_OUT=/tmp/o.png] cargo test --release gpu_frame_time -- --ignored --nocapture
-#![cfg(all(test, target_os = "linux"))]
+#![cfg(test)]
 
+#[cfg(target_os = "linux")]
 /// The hook's WGSL prelude as the renderer builds it (kept in step with vendor/gpui-pre-wgpu-0.3.12/src/custom_shader.rs, but the
 /// vertex stage here is a plain full-target quad).
 const PRELUDE: &str = r#"
@@ -22,6 +23,7 @@ struct CustomVarying { @builtin(position) position: vec4<f32>, }
 @fragment fn fs_custom(input: CustomVarying) -> @location(0) vec4<f32> { return custom_fs(input.position.xy); }
 "#;
 
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore]
 fn gpu_frame_time() {
@@ -85,4 +87,5 @@ fn gpu_frame_time() {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn bytemuck_cast(v: &[f32]) -> &[u8] { unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, std::mem::size_of_val(v)) } }

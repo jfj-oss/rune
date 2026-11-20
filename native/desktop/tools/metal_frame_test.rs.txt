@@ -1,0 +1,33 @@
+// macOS counterpart of gpubench.rs (not built by default: its dev-dependency pulls ~40 extra crates into Cargo.lock).
+// To run it on the Mac: add to app/Cargo.toml
+//   [target.'cfg(target_os = "macos")'.dev-dependencies]
+//   gpui_apple = { package = "gpui-pre-apple", version = "=0.3.12", features = ["test-support"] }
+// append the code below to app/src/gpubench.rs (and drop its `#![cfg(...)]`-less Linux gating if needed), dump the data with
+// dump_gpu_data, then run the command in the doc comment. It renders the MSL shader through the patched Metal renderer headless.
+/// macOS: renders the MSL shader through the patched Metal renderer (headless, no window) and times it.
+///   RUNE_SHADER_DATA=<f32 file> RUNE_SHADER_W/H=<device px> [RUNE_SHADER_OUT=<png>] cargo test --release metal_frame -- --ignored --nocapture
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore]
+fn metal_frame() {
+    use gpui_kit::{point, size, Bounds, ContentMask, DevicePixels, ScaledPixels, Scene, ShaderId, ShaderQuad, ShaderSource, ShaderStatus};
+    let Some(data_path) = std::env::var_os("RUNE_SHADER_DATA") else { return };
+    let e = |k: &str| std::env::var(k).unwrap().parse::<i32>().unwrap();
+    let (w, h) = (e("RUNE_SHADER_W"), e("RUNE_SHADER_H"));
+    let data: Vec<f32> = std::fs::read(data_path).unwrap().chunks(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    gpui_kit::register_shader(ShaderId(1), ShaderSource { wgsl: "", msl: include_str!("shaders/foil.metal") });
+    let b = Bounds { origin: point(ScaledPixels(0.0), ScaledPixels(0.0)), size: size(ScaledPixels(w as f32), ScaledPixels(h as f32)) };
+    let mut scene = Scene::default();
+    scene.insert_primitive(ShaderQuad { order: 0, bounds: b, content_mask: ContentMask { bounds: b }, shader: ShaderId(1), time: 0.0, data: data.into() });
+    scene.finish();
+    use gpui_kit::PlatformHeadlessRenderer;
+    let mut r = gpui_apple::metal_renderer::MetalHeadlessRenderer::new().expect("metal");
+    let sz = size(DevicePixels(w), DevicePixels(h));
+    let img = r.render_scene_to_image(&scene, sz).expect("render");
+    assert_eq!(gpui_kit::shader_status(ShaderId(1)), ShaderStatus::Ready);
+    if let Some(out) = std::env::var_os("RUNE_SHADER_OUT") { img.save(out).unwrap(); }
+    let n = 60;
+    let t0 = std::time::Instant::now();
+    for _ in 0..n { r.render_scene_to_image(&scene, sz).unwrap(); }
+    println!("{w}x{h}: {:?} per frame (render + read back the image)", t0.elapsed() / n);
+}

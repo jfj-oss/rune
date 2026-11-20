@@ -812,17 +812,19 @@ mod tests {
     #[ignore]
     fn dump_composite() {
         let Some(dir) = std::env::var_os("RUNE_FOIL_DUMP") else { return };
-        let (w, h) = (1280usize, 800usize);
+        let g = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(d);
+        // RUNE_FOIL_W/H/SCALE: device size and scale (default 1280x800 at 1), RUNE_FOIL_T: one frame at that time instead of the 8
+        let (w, h, scale) = (g("RUNE_FOIL_W", 1280.0) as usize, g("RUNE_FOIL_H", 800.0) as usize, g("RUNE_FOIL_SCALE", 1.0));
+        let times: Vec<(String, f32)> = match std::env::var("RUNE_FOIL_T") { Ok(t) => vec![("one".to_string(), t.parse().unwrap())], Err(_) => (0..8).map(|i| (format!("bare-{i}"), 4.0 + i as f32 * 3.2)).collect() };
         let c = DUST_CYCLE as usize;
         let dust_img = dust_image(w + c, h + c);
         let fade = fade_image(w, h);
         let cols = columns(w);
         let mut moon = MoonCache::default();
-        for i in 0..8 {
-            let t = 4.0 + i as f32 * 3.2;
+        for (name, t) in times {
             let shift = shift_at(t) as usize;
             let mut waves = vec![0u8; w * h * 4];
-            render_waves(w, h, 1.0, t, &cols, &mut waves, &mut moon);
+            render_waves(w, h, scale, t, &cols, &mut waves, &mut moon);
             let mut out = image::RgbaImage::new(w as u32, h as u32);
             for y in 0..h { for x in 0..w {
                 let di = ((y + shift) * (w + c) + (x + c - shift)) * 4;
@@ -834,7 +836,7 @@ mod tests {
                 px[0] = px[0] * (1.0 - wa) + waves[wi + 2] as f32; px[1] = px[1] * (1.0 - wa) + waves[wi + 1] as f32; px[2] = px[2] * (1.0 - wa) + waves[wi] as f32;
                 out.put_pixel(x as u32, y as u32, image::Rgba([px[0].min(255.0) as u8, px[1].min(255.0) as u8, px[2].min(255.0) as u8, 255]));
             } }
-            out.save(std::path::Path::new(&dir).join(format!("bare-{i}.png"))).unwrap();
+            out.save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
         }
     }
 }
