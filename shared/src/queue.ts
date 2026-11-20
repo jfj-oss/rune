@@ -163,10 +163,10 @@ export function next(q: QueueState, opts: { auto?: boolean } = {}): NextResult {
   return { state: q, ended: true };
 }
 
-/** Go back; restarts the current track if more than 3 s have played. */
-export function prev(q: QueueState, positionMs: number): PrevResult {
+/** Go back; restarts the current track if more than 3 s have played, unless `force` (always the previous song). */
+export function prev(q: QueueState, positionMs: number, force = false): PrevResult {
   if (q.items.length === 0 || q.index < 0) return { state: q, restart: false, ended: true };
-  if (positionMs > PREV_RESTART_THRESHOLD_MS) return { state: q, restart: true, ended: false };
+  if (!force && positionMs > PREV_RESTART_THRESHOLD_MS) return { state: q, restart: true, ended: false };
   if (q.index > 0) return { state: { ...q, index: q.index - 1 }, restart: false, ended: false };
   if (q.repeat === 'all' && q.items.length > 1) return { state: { ...q, index: q.items.length - 1 }, restart: false, ended: false };
   // Already at the beginning: restart the current track.

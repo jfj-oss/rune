@@ -169,7 +169,7 @@ impl Render for Panel {
         }
         for (i, p) in m.model.minis.iter().enumerate() {
             let on = playing_pl.as_deref() == Some(p.id.as_str());
-            let label = if i < 8 { format!("{} \u{b7} key {}", p.name, i + 1) } else { p.name.clone() };
+            let label = if i < 8 { format!("{} \u{b7} shift+{}", p.name, i + 1) } else { p.name.clone() };
             dots = dots.child(
                 div().id(SharedString::from(format!("dot-{}", p.id))).w(px(14.)).h(px(14.)).flex().items_center().justify_center().cursor_pointer().rounded_full()
                     .when(on, |d| d.border_1().border_color(c(look::INK)))

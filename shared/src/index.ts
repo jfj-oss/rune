@@ -197,7 +197,8 @@ export type PlayerCommand =
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'next' }
-  | { type: 'prev' }
+  /** `force`: always the previous song, never "restart this one" after 3 s (the rune mini's key 1). */
+  | { type: 'prev'; force?: boolean }
   | { type: 'seek'; positionMs: number }
   | { type: 'jump'; index: number }
   | { type: 'remove'; queueId: string }

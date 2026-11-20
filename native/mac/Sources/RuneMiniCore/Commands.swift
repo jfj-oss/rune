@@ -5,6 +5,9 @@ import Foundation
 
 public enum UiCommand: Equatable {
     case playPause, play, pause, next, prev
+    case prevSong                // always the previous song: the server's prev with force
+    case restart                 // the song again (seek to 0)
+    case skipFraction(Double)    // forward by this fraction of the song's length; past the end, the next song
     case seekTo(Double)          // ms
     case seekBy(Double)          // ms, relative to the position now
     case volume(Double)          // 0...100
@@ -24,6 +27,7 @@ public struct Request: Equatable {
     /// The JSON body, keys sorted (so it compares and prints the same everywhere).
     public var body: String
     public var path: String { "/api/player/" + encodeSegment(zone) }
+    public init(zone: String, body: String) { self.zone = zone; self.body = body }
 }
 
 /// Percent-encode one path segment (zone ids contain ':').
@@ -45,6 +49,11 @@ private func json(_ d: [String: Any]) -> String {
     return String(decoding: data, as: UTF8.self)
 }
 
+/// The body of "shuffle-play this playlist": what the web's Shuffle button sends: the whole list, shuffle on.
+public func playPlaylistBody(_ trackIds: [String]) -> String {
+    json(["type": "play", "trackIds": trackIds, "startIndex": 0, "shuffle": true])
+}
+
 /// The request for `cmd` given what is shown now, or nil when there is nothing sensible to send.
 public func requestFor(_ model: Model, _ cmd: UiCommand, now: Double) -> Request? {
     let p = model.player
@@ -63,6 +72,12 @@ public func requestFor(_ model: Model, _ cmd: UiCommand, now: Double) -> Request
     case .pause: return req(["type": "pause"])
     case .next: return req(["type": "next"])
     case .prev: return req(["type": "prev"])
+    case .prevSong: return req(["type": "prev", "force": true])
+    case .restart: return req(["type": "seek", "positionMs": 0])
+    case .skipFraction(let f):
+        guard let p = p, let cur = p.current, cur.track.durationMs > 0 else { return nil }
+        let to = p.position(now: now) + f * cur.track.durationMs
+        return to >= cur.track.durationMs ? req(["type": "next"]) : req(["type": "seek", "positionMs": to.rounded()])
     case .seekTo(let ms): return req(["type": "seek", "positionMs": max(0, ms).rounded()])
     case .seekBy(let d):
         guard let p = p, let cur = p.current else { return nil }

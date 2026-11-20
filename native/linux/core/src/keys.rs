@@ -1,7 +1,7 @@
 //! Keyboard first: which key does what. Pure, so the same table can be tested here and mirrored in Swift (native/mac).
 //!
 //! Compact view (the queue closed): Space play/pause, Left/Right previous/next, Shift+Left/Right seek 10 s, Up/Down
-//! volume 5, 1-8 shuffle-play the playlist with that number (Ctrl/Cmd+1-8 from anywhere, the queue view included), S shuffle, R repeat, Q or Tab opens the queue (Ctrl/Cmd+Q toggles it from anywhere; some desktops keep Tab for themselves), Esc hides.
+//! volume 5, 1 previous song (always), 2 restart, 3 next, 4 skip forward 20 % of the song, Shift+1-8 shuffle-play the playlist with that number (Ctrl/Cmd+digit from anywhere, the queue view included), S shuffle, R repeat, Q or Tab opens the queue (Ctrl/Cmd+Q toggles it from anywhere; some desktops keep Tab for themselves), Esc hides.
 //! Queue view: typing filters, Up/Down pick, Enter plays the pick, Backspace erases, Tab closes the queue, Esc clears
 //! the filter, then closes the queue, then hides. Delete removes the pick from the queue. Ctrl/Cmd+S and Ctrl/Cmd+R still toggle shuffle/repeat. With an empty
 //! filter Space, Left and Right still play/pause and skip (they are not words).
@@ -40,12 +40,25 @@ pub enum Action {
     PickDown,
     PlayPicked,
     RemovePicked,
+    /// Key 1: the previous song, always (the server's `prev` with `force`).
+    PrevSong,
+    /// Key 2: start this song again.
+    Restart,
+    /// Key 4: skip forward 20 % of the song (past the end: the next song).
+    SkipFifth,
     /// Shuffle-play playlist N (0-based: key 1 is 0).
     PlayPlaylist(usize),
 }
 
+/// Key 4 skips this fraction of the song's length.
+pub const SKIP_FRACTION: f64 = 0.2;
 pub const SEEK_MS: f64 = 10_000.;
 pub const VOLUME_STEP: f64 = 5.;
+
+/// "!".."*" (Shift+1..8 on a US layout) -> 0..7
+fn shifted_index(name: &str) -> Option<usize> {
+    "!@#$%^&*".chars().position(|c| name.len() == 1 && name.starts_with(c))
+}
 
 /// "1".."8" -> 0..7
 fn digit_index(name: &str) -> Option<usize> {
@@ -62,10 +75,26 @@ pub fn map_key(k: &Key, queue_open: bool, filter_empty: bool) -> Option<Action> 
     if n == "escape" {
         return Some(if queue_open && !filter_empty { ClearFilter } else if queue_open { CloseQueue } else { Hide });
     }
-    if let Some(i) = digit_index(n) {
-        // Ctrl/Cmd+digit works from anywhere; a bare digit only while the queue is closed (open, it types into the filter)
-        if k.cmd || (!queue_open && !k.shift && !k.alt) {
-            return Some(PlayPlaylist(i));
+    // Number keys. 1 previous song, 2 restart, 3 next, 4 skip forward 20 %; Shift+1..8 shuffle-play playlist N (a US layout
+    // reports Shift+1 as "!" with shift held, so the shifted symbols count too). Ctrl/Cmd+digit works from anywhere; a bare
+    // digit or Shift+digit only while the queue is closed (open, they type into the filter).
+    let digit = digit_index(n);
+    let shifted = shifted_index(n);
+    if digit.is_some() || shifted.is_some() {
+        if k.cmd || (!queue_open && !k.alt) {
+            if k.shift || shifted.is_some() {
+                if let Some(i) = digit.or(shifted) {
+                    return Some(PlayPlaylist(i));
+                }
+            } else if let Some(i) = digit {
+                match i {
+                    0 => return Some(PrevSong),
+                    1 => return Some(Restart),
+                    2 => return Some(Next),
+                    3 => return Some(SkipFifth),
+                    _ => {}
+                }
+            }
         }
     }
     if k.cmd {
@@ -153,16 +182,26 @@ mod tests {
     }
 
     #[test]
-    fn number_keys_play_playlists() {
-        for (n, i) in [("1", 0), ("2", 1), ("8", 7)] {
-            assert_eq!(map_key(&k(n), false, true), Some(PlayPlaylist(i)), "{n}");
-            assert_eq!(map_key(&Key { cmd: true, ..k(n) }, false, true), Some(PlayPlaylist(i)));
-            assert_eq!(map_key(&Key { cmd: true, ..k(n) }, true, false), Some(PlayPlaylist(i)), "Ctrl+digit works with the queue open");
+    fn number_keys_are_transport_and_shifted_numbers_play_playlists() {
+        for (n, want) in [("1", PrevSong), ("2", Restart), ("3", Next), ("4", SkipFifth)] {
+            assert_eq!(map_key(&k(n), false, true), Some(want.clone()), "{n}");
+            assert_eq!(map_key(&Key { cmd: true, ..k(n) }, true, false), Some(want), "Ctrl+{n} works with the queue open");
         }
-        assert_eq!(map_key(&k("9"), false, true), None);
-        assert_eq!(map_key(&k("0"), false, true), None);
+        for n in ["5", "6", "7", "8", "9", "0"] {
+            assert_eq!(map_key(&k(n), false, true), None, "{n} is free");
+        }
+        for (n, i) in [("1", 0), ("2", 1), ("8", 7)] {
+            assert_eq!(map_key(&shift(n), false, true), Some(PlayPlaylist(i)), "shift-{n}");
+            assert_eq!(map_key(&Key { cmd: true, shift: true, ..k(n) }, true, false), Some(PlayPlaylist(i)));
+        }
+        // a US layout may report the symbol instead of the digit
+        for (sym, i) in [("!", 0), ("@", 1), ("#", 2), ("$", 3), ("%", 4), ("^", 5), ("&", 6), ("*", 7)] {
+            assert_eq!(map_key(&Key { shift: true, ..k(sym) }, false, true), Some(PlayPlaylist(i)), "{sym}");
+            assert_eq!(map_key(&k(sym), false, true), Some(PlayPlaylist(i)), "{sym} without the shift flag");
+        }
+        assert_eq!(map_key(&shift("9"), false, true), None);
         assert_eq!(map_key(&k("1"), true, true), Some(Type("1".into())), "the queue filter takes digits");
-        assert_eq!(map_key(&shift("1"), false, true), None);
+        assert_eq!(map_key(&k("!"), true, true), Some(Type("!".into())));
     }
 
     #[test]

@@ -24,5 +24,6 @@ enum Theme {
     static let input = NSFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
     static let dots: [NSColor] = [0xC9785A, 0xC9A45A, 0x8FAE6B, 0x5FA89A, 0x6B93C0, 0x9483C4, 0xC07BA8, 0x9A9488].map { rgb($0) }
-    static func dotColor(for id: String) -> NSColor { dots[dotColorIndex(id, count: dots.count)] }
+    /// The dot colour for a playlist's colour key (the server hands out 0...7 and keeps one per playlist).
+    static func dotColor(key: Int) -> NSColor { dots[((key % dots.count) + dots.count) % dots.count] }
 }

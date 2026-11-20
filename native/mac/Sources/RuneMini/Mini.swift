@@ -40,7 +40,11 @@ final class Mini {
         let s = RuneSocket(base: cfg.url, token: token)
         s.viewing = [model.zone]
         s.visible = visible
-        s.onEvent = { [weak self] e in self?.apply(.ws(e)) }
+        s.onEvent = { [weak self] e in
+            // the playlists on the left edge were changed in big rune: read them again
+            if case .miniPlaylists = e { self?.client?.minis { l, _ in if let l = l { self?.apply(.minis(l)) } } }
+            self?.apply(.ws(e))
+        }
         s.onConn = { [weak self] c in
             guard let self = self else { return }
             self.apply(.conn(c))
@@ -53,6 +57,7 @@ final class Mini {
     /// Read the zones and this zone's state fresh (after connecting, waking, or being shown after a long time).
     func refresh() {
         client?.zones { [weak self] z, _ in if let z = z { self?.apply(.zones(z)) } }
+        client?.minis { [weak self] l, _ in if let l = l { self?.apply(.minis(l)) } }
         fetch(zone: model.zone, rev: nil)
     }
 
@@ -130,6 +135,26 @@ final class Mini {
         }
     }
 
+    /// A playlist dot (or Shift+N): shuffle-play playlist `i` on the zone shown.
+    func playMini(_ i: Int) {
+        guard i >= 0, i < model.minis.count else { return }
+        let id = model.minis[i].id, zone = model.zone
+        notice = nil
+        client?.playlistTrackIds(id) { [weak self] ids, err in
+            guard let self = self else { return }
+            guard let ids = ids else { self.notice = err ?? "could not read that playlist"; self.onChange?(); return }
+            if ids.isEmpty { self.notice = "that playlist is empty"; self.onChange?(); return }
+            self.client?.command(Request(zone: zone, body: playPlaylistBody(ids))) { st, err in
+                if let st = st { self.apply(.started(playlist: id, st)) } else if let e = err { self.notice = e; self.onChange?() }
+            }
+        }
+    }
+
+    /// The zone name in the footer: the next zone, wrapping.
+    func cycleZone() {
+        if let z = nextZone(zoneList.map { $0.id }, current: model.zone) { setZone(z) }
+    }
+
     func setZone(_ z: String) {
         let fx = model.setZone(z)
         if fx.isEmpty { return }
@@ -151,6 +176,10 @@ final class Mini {
         case .playPause: command(.playPause)
         case .prev: command(.prev)
         case .next: command(.next)
+        case .prevSong: command(.prevSong)
+        case .restart: command(.restart)
+        case .skipFifth: command(.skipFraction(skipFraction))
+        case .playPlaylist(let i): playMini(i)
         case .seekBack: command(.seekBy(-seekMs))
         case .seekForward: command(.seekBy(seekMs))
         case .volumeUp: command(.volumeBy(volumeStep))

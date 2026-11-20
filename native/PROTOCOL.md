@@ -53,12 +53,15 @@ view at once; the websocket then confirms it).
 | UI | body |
 |---|---|
 | play/pause | `{type:'pause'}` while playing/loading, `{type:'resume'}` while paused, `{type:'jump', index}` (cursor or 0) when stopped with a queue |
-| next, previous | `{type:'next'}`, `{type:'prev'}` |
+| next, previous | `{type:'next'}`, `{type:'prev'}` (the server restarts the song instead when more than 3 s have played) |
+| key 1 | `{type:'prev', force:true}`: always the previous song (the server's `force` option; a Spotify Connect zone asks twice when past 3 s) |
+| key 2 | `{type:'seek', positionMs:0}` |
+| key 4 | `{type:'seek', positionMs: position + 0.2 * durationMs}`, or `{type:'next'}` when that passes the end |
 | seek | `{type:'seek', positionMs}`; relative seeks use the extrapolated position, clamped to `[0, duration - 500 ms]` |
 | volume | `{type:'volume', volume}` 0..100, whole numbers, clamped |
 | shuffle | `{type:'shuffle', on}` |
 | repeat | `{type:'repeat', mode}` cycling off -> all -> one -> off |
-| click a playlist dot, or key 1-8 | `GET /api/playlists/:id`, then `{type:'play', trackIds: <all of its track ids, in order>, startIndex: 0, shuffle: true}` on the zone shown (exactly what the web's Shuffle button sends). An empty playlist says so in the footer. |
+| click a playlist dot, or Shift+1-8 | `GET /api/playlists/:id`, then `{type:'play', trackIds: <all of its track ids, in order>, startIndex: 0, shuffle: true}` on the zone shown (exactly what the web's Shuffle button sends). An empty playlist says so in the footer. |
 | click / Enter on a queue row | `{type:'jump', index}` (index in the full queue, not in the filtered list) |
 | remove | `{type:'remove', queueId}` |
 | drag to reorder | `{type:'move', queueId, toIndex}` |
@@ -82,7 +85,11 @@ cycles through the zones (the picker's order, wrapping) when there is more than 
 | Left / Right | previous / next | the same with an empty filter |
 | Shift+Left / Right | seek -/+ 10 s | the same with an empty filter |
 | Up / Down | volume -/+ 5 | pick the previous / next queue row |
-| 1 - 8 | shuffle-play playlist N (dot N, left edge top to bottom) | typed into the filter (Ctrl/Cmd+1-8 still play) |
+| 1 | previous song, always (never "restart this one") | typed into the filter (Ctrl/Cmd+1 still works) |
+| 2 | restart this song (seek to 0) | the same, Ctrl/Cmd+2 |
+| 3 | next song | the same, Ctrl/Cmd+3 |
+| 4 | skip forward 20 % of the song's length; past the end, the next song | the same, Ctrl/Cmd+4 |
+| Shift+1 - 8 | shuffle-play playlist N (dot N, left edge top to bottom); a US layout's `! @ # $ % ^ & *` count as Shift+1-8 | typed (Ctrl/Cmd+Shift+1-8 still play) |
 | S, R | shuffle, repeat | typed into the filter (Ctrl/Cmd+S, Ctrl/Cmd+R still toggle) |
 | Q or Tab | open the queue | Tab closes it (Ctrl/Cmd+Q toggles it either way; some desktops keep Tab for focus) |
 | typing | | filters the queue (every word must be in the title, an artist or the album) |

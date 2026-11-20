@@ -101,14 +101,26 @@ fn main() {
                     continue;
                 }
                 "key" => {
-                    // a key as the panel gets it: {"cmd":"key","name":"2"} (only the playlist keys are acted on here)
-                    let k = rune_mini_core::keys::Key { name: s("name"), text: Some(s("name")), ..Default::default() };
-                    match rune_mini_core::keys::map_key(&k, false, true) {
-                        Some(rune_mini_core::keys::Action::PlayPlaylist(i)) => match model.minis.get(i) {
-                            Some(p) => { println!("{}", json!({"sent": {"playlist": p.id}})); net.shuffle_playlist(&model.zone, &p.id); }
-                            None => println!("{}", json!({"sent": null})),
-                        },
-                        _ => println!("{}", json!({"sent": null})),
+                    // a key as the panel gets it: {"cmd":"key","name":"2","shift":true}: the mapped action, run as the panel runs it
+                    use rune_mini_core::keys::{map_key, Action, Key, SKIP_FRACTION};
+                    let k = Key { name: s("name"), shift: v.get("shift").and_then(|x| x.as_bool()).unwrap_or(false), text: Some(s("name")), ..Default::default() };
+                    let ui = match map_key(&k, false, true) {
+                        Some(Action::PrevSong) => Some(UiCommand::PrevSong),
+                        Some(Action::Restart) => Some(UiCommand::SeekTo(0.)),
+                        Some(Action::Next) => Some(UiCommand::Next),
+                        Some(Action::SkipFifth) => Some(UiCommand::SkipFraction(SKIP_FRACTION)),
+                        Some(Action::PlayPlaylist(i)) => {
+                            match model.minis.get(i) {
+                                Some(p) => { println!("{}", json!({"sent": {"playlist": p.id}})); net.shuffle_playlist(&model.zone, &p.id); }
+                                None => println!("{}", json!({"sent": null})),
+                            }
+                            continue;
+                        }
+                        _ => None,
+                    };
+                    match ui.and_then(|c| map(&model, &c, now_ms())) {
+                        Some(r) => { println!("{}", json!({"sent": r.body})); net.send(r); }
+                        None => println!("{}", json!({"sent": null})),
                     }
                     continue;
                 }

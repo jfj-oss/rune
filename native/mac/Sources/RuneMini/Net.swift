@@ -52,6 +52,15 @@ final class RuneClient {
         run(request("/api/zones")) { d, e in done(d.flatMap(decodeZones), e) }
     }
 
+    func minis(_ done: @escaping ([MiniPlaylist]?, String?) -> Void) {
+        run(request("/api/mini/playlists")) { d, e in done(d.flatMap(decodeMinis), e) }
+    }
+
+    /// The track ids of a playlist, in its order (the page the web's Shuffle button plays from).
+    func playlistTrackIds(_ id: String, _ done: @escaping ([String]?, String?) -> Void) {
+        run(request("/api/playlists/" + encodeSegment(id))) { d, e in done(d.flatMap(decodePlaylistTrackIds), e) }
+    }
+
     func command(_ r: Request, _ done: @escaping (WireState?, String?) -> Void) {
         run(request(r.path, method: "POST", body: r.body)) { d, e in
             done(d.flatMap { decodeState(try? JSONSerialization.jsonObject(with: $0)) }, e)

@@ -486,6 +486,8 @@ export class SpotifyConnectZone implements PlaybackZone {
         await this.api.next(device);
         return this.refresh();
       case 'prev':
+        // Spotify restarts the song when it is past ~3 s; "force" asks twice then (the first restarts, the second goes back)
+        if (cmd.force === true && (this.snapshot.positionMs ?? 0) > 3000) await this.api.previous(device);
         await this.api.previous(device);
         return this.refresh();
       case 'seek':
