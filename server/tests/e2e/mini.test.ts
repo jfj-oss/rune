@@ -4,7 +4,8 @@
 //
 // Needs the probe built: `cd native/linux && cargo build -p rune-mini-core --bin rune-mini-probe`; RUNE_MINI_PROBE names it
 // (default: the agent-tmp target dir). Skipped when it is not there, so `pnpm -r test` stays green without a Rust toolchain.
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ interface View { conn: string; status?: string; index?: number; title?: string |
 
 class Probe {
   readonly lines: Record<string, unknown>[] = [];
-  private child: ChildProcessWithoutNullStreams;
+  private child: ChildProcessByStdio<Writable, Readable, null>;
   constructor(url: string, zone = 'pc') {
     this.child = spawn(probePath, [url, zone], { stdio: ['pipe', 'pipe', 'inherit'] });
     createInterface({ input: this.child.stdout }).on('line', (l) => { try { this.lines.push(JSON.parse(l)); } catch { /* not ours */ } });
