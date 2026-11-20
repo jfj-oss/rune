@@ -135,6 +135,9 @@ struct Saved {
     /// Settings -> Playback: a desktop notification when the song changes (off by default)
     #[serde(default)]
     notify_track: bool,
+    /// playlists listed in their own order instead of newest first
+    #[serde(default)]
+    playlist_own_order: bool,
     /// the window as it was left (size, and position where the system lets an app place a window)
     #[serde(default)]
     window: Option<SavedWindow>,
@@ -159,6 +162,13 @@ pub struct Rune {
     pub data: Data,
     pub covers: Covers,
     pub os: crate::os::Os,
+    /// a playlist's tracks "Newest first" (the default) or in the playlist's own order; the open playlist as shown, and shown row -> playlist position
+    pub pl_newest_first: bool,
+    pub pl_view: Option<Arc<PlaylistDetail>>,
+    pub pl_orig: Vec<usize>,
+    pub pl_sorted: bool,
+    /// "Play on" choices made this session: the kind of song that did not fit the zone on screen, and where it went instead
+    pub play_on_choice: Vec<(crate::playroute::Source, String)>,
     pub win_active: bool,
     pub notify_track: bool,
     notified: String,
@@ -350,7 +360,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
+            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -425,7 +435,7 @@ impl Rune {
     }
 
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software, notify_track: self.notify_track, window: self.window_saved };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software, notify_track: self.notify_track, playlist_own_order: !self.pl_newest_first, window: self.window_saved };
         if let Ok(j) = serde_json::to_string(&s) { let _ = crate::util::write_atomic(&state_path(&self.dir), j.as_bytes()); }
     }
 

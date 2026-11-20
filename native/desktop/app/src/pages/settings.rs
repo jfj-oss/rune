@@ -37,8 +37,8 @@ pub fn move_item<T: Clone>(list: &[T], from: usize, to: usize) -> Vec<T> {
 #[derive(Clone)]
 pub struct MiniDrag { pub from: usize, pub name: String }
 
-const MINI_COLORS: [u32; 8] = [0xe5736f, 0xe8b04a, 0x4fd18b, 0x5fb3e8, 0xb3a7ff, 0xd97fd9, 0xe8e06a, 0x7fd9c8];
-const MINI_MAX: usize = 9;
+pub const MINI_COLORS: [u32; 8] = [0xe5736f, 0xe8b04a, 0x4fd18b, 0x5fb3e8, 0xb3a7ff, 0xd97fd9, 0xe8e06a, 0x7fd9c8];
+pub const MINI_MAX: usize = 9;
 
 impl Rune {
     fn set_mini(&mut self, ids: Vec<String>, cx: &mut Context<Self>) {

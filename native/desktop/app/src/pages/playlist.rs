@@ -22,6 +22,22 @@ pub fn select_row(sel: &std::collections::BTreeSet<usize>, anchor: Option<usize>
 }
 const BODY_MAX: f32 = 1240.;
 
+/// The web's `orderPlaylist`: with "Newest first" the most recently added entries lead (entries added together keep their playlist
+/// order, undated ones go last); smart playlists and playlists without dates keep their own order. Returns the shown order as
+/// playlist positions, and whether it differs from the playlist's own.
+pub fn order_positions(tracks: &[LibTrack], smart: bool, newest_first: bool) -> (Vec<usize>, bool) {
+    let ident: Vec<usize> = (0..tracks.len()).collect();
+    if !newest_first || smart || tracks.iter().all(|t| t.added_at.is_none()) { return (ident, false); }
+    let at = |i: usize| tracks[i].added_at.unwrap_or(f64::NEG_INFINITY);
+    let mut o = ident.clone();
+    o.sort_by(|&a, &b| at(b).partial_cmp(&at(a)).unwrap_or(std::cmp::Ordering::Equal).then(a.cmp(&b)));
+    let sorted = o != ident;
+    (o, sorted)
+}
+
+/// Can the order be switched at all (the web's `canSort`)?
+pub fn can_sort(tracks: &[LibTrack], smart: bool) -> bool { !smart && tracks.iter().any(|t| t.added_at.is_some()) }
+
 impl Rune {
     pub fn playlist_page(&mut self, id: String, cw: f32, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         self.ensure_playlist(&id, cx);
@@ -30,6 +46,12 @@ impl Rune {
             Some(crate::data::Slot::Err(e)) => return div().size_full().pt(px(28.)).px(px(PAD)).child(if unreachable(&e) { fail(cx, "Could not load this playlist", "The rune server did not answer.") } else { empty("Playlist not found", "It may have been deleted, removed from Spotify, or hasn\u{2019}t synced yet.") }).into_any_element(),
             _ => return div().size_full().pt(px(44.)).px(px(PAD)).child(div().size(px(300.)).rounded(px(6.)).bg(surface())).into_any_element(),
         };
+        // "Newest first" (the default) or the playlist's own order; rows below act on playlist positions through `pl_orig`
+        let (order, sorted) = order_positions(&d.tracks, d.summary.is_smart(), self.pl_newest_first);
+        let d = if sorted { Arc::new(PlaylistDetail { summary: d.summary.clone(), description: d.description.clone(), tracks: order.iter().map(|&i| d.tracks[i].clone()).collect() }) } else { d };
+        self.pl_orig = order;
+        self.pl_sorted = sorted;
+        self.pl_view = Some(d.clone());
         let mut rows = vec![Row::Hero];
         if d.summary.is_editable() && !d.tracks.is_empty() { rows.push(Row::Tools); }
         if d.tracks.is_empty() { rows.push(Row::Empty); } else { rows.push(Row::Head); for i in 0..d.tracks.len() { rows.push(Row::Track(i)); } }
@@ -56,6 +78,7 @@ impl Rune {
         let (i1, i2, i3) = (s.id.clone(), s.id.clone(), s.id.clone());
         let cover = playlist_cover(self, s, 300., window, cx);
         let rune = s.is_rune();
+        let can_sort = can_sort(&d.tracks, s.is_smart());
         let kind = if s.is_smart() { "Smart playlist" } else if rune { "Playlist" } else { "Spotify playlist" };
         let pin = PopItem { icon: if s.pinned { "pin-off" } else { "pin" }, label: if s.pinned { "Unpin".into() } else { "Pin to Library".into() }, act: MenuAct::PinPlaylist { id: s.id.clone(), pin: !s.pinned }, danger: false, chevron: false, dot: false, sub: false };
         let ids: Vec<String> = d.tracks.iter().map(|t| t.id.clone()).collect();
@@ -74,9 +97,14 @@ impl Rune {
                 .child(div().child(format!("{}, {}", plural(if s.track_count > 0 { s.track_count } else { d.tracks.len() }, "track"), format_total_length(total_ms)))))
             .child(h_flex().flex_wrap().items_center().gap(px(8.)).child(if rune { badge("rune", false).h(px(28.)).px(px(11.)).text_size(px(12.)).text_color(c(ACCENT2)) } else { badge("From Spotify", true).h(px(28.)).px(px(11.)).text_size(px(12.)) }))
             .child(h_flex().flex_wrap().gap(px(10.)).mt(px(8.))
-                .child(div().id("p-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| this.play_playlist(&i1, false, 0, cx))))
-                .child(div().id("p-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| this.play_playlist(&i2, true, 0, cx))))
+                .child(div().id("p-play").child(btn("Play", Some("play"), true)).on_click(cx.listener(move |this, _, _, cx| { if let Some(v) = this.pl_view.clone() { this.play_tracks(v.tracks.clone(), 0, false, cx); } else { this.play_playlist(&i1, false, 0, cx); } })))
+                .child(div().id("p-shuffle").child(btn("Shuffle", Some("shuffle"), false)).on_click(cx.listener(move |this, _, _, cx| { if let Some(v) = this.pl_view.clone() { this.play_tracks(v.tracks.clone(), 0, true, cx); } else { this.play_playlist(&i2, true, 0, cx); } })))
                 .child(div().id("p-queue").child(btn("Queue", Some("plus"), false)).on_click(cx.listener(move |this, _, _, cx| this.enqueue_playlist(&i3, cx))))
+                .children(can_sort.then(|| {
+                    let newest = self.pl_newest_first;
+                    div().id("p-order").child(btn(if newest { "Newest first" } else { "Playlist order" }, Some(if newest { "arrow-down-wide-narrow" } else { "list-ordered" }), false))
+                        .on_click(cx.listener(|this, _, _, cx| { this.pl_newest_first = !this.pl_newest_first; this.save_state(); cx.notify(); }))
+                }))
                 .children(rune.then(|| {
                     let (hid, hname) = (s.id.clone(), s.name.clone());
                     let current = self.playlist_key_of(&s.id);
@@ -86,6 +114,7 @@ impl Rune {
                         .on_click(cx.listener(move |this, _, _, cx| { this.hotkey_listen = if this.hotkey_listen.is_some() { None } else { Some((hid.clone(), hname.clone())) }; cx.notify(); })))
                         .children(cur2.filter(|_| !listening).map(|_| div().id("p-hotkey-x").role(Role::Button).aria_label("Clear hotkey").child(btn_icon40("x")).on_click(cx.listener(move |this, _, _, cx| { let nm = this.data.playlist.get(&hid2).and_then(|c| c.slot.ready()).map(|d| d.summary.name.clone()).unwrap_or_default(); this.set_playlist_key(&hid2, &nm, "", cx); }))))
                 }))
+                .child(self.mini_button(&s.id, &s.name, cx))
                 .child(div().id("p-more").role(Role::Button).aria_label("More actions").child(btn_icon40("ellipsis")).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     let p = ev.position();
                     let mut its = items.clone();
@@ -98,6 +127,30 @@ impl Rune {
                 .child(div().w(px(300.)).flex_none().child(cover.shadow(vec![BoxShadow { inset: false, color: bk(0.6), offset: point(px(0.), px(30.)), blur_radius: px(70.), spread_radius: px(-10.) }])))
                 .child(text));
         div().relative().w_full().overflow_hidden().children(bg).child(content).into_any_element()
+    }
+
+    /// "Show in rune mini" on a playlist's page: a coloured dot on rune mini that shuffle-plays this playlist (the web's `MiniButton`).
+    fn mini_button(&mut self, id: &str, name: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::pages::settings::{MINI_COLORS, MINI_MAX};
+        let list: Vec<(String, usize)> = self.ensure_json("/mini/playlists", cx).ready().and_then(|v| v.get("playlists").and_then(|p| p.as_array()).cloned()).unwrap_or_default().iter()
+            .filter_map(|p| Some((p.get("id")?.as_str()?.to_string(), p.get("color").and_then(|c| c.as_u64()).unwrap_or(0) as usize))).collect();
+        let mine = list.iter().find(|(i, _)| i == id).map(|(_, c)| *c);
+        let on = mine.is_some();
+        let full = list.len() >= MINI_MAX;
+        let pid = id.to_string();
+        let _ = name;
+        let dot = match mine { Some(col) => icon("circle", 16., c(MINI_COLORS[col % MINI_COLORS.len()])), None => icon("circle", 16., c(TEXT)) };
+        h_flex().id("p-mini").role(Role::Button).aria_label(if on { "Remove from rune mini" } else { "Show in rune mini" }).aria_toggled(if on { Toggled::True } else { Toggled::False })
+            .h(px(40.)).px(px(16.)).gap(px(8.)).items_center().rounded_full().cursor_pointer().bg(wh(0.08)).hover(|s| s.bg(wh(0.15))).border_1().border_color(wh(0.12)).text_size(px(14.)).font_weight(w(600.))
+            .child(dot).child("Show in rune mini")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !on && full { this.say(format!("The rune mini has room for {MINI_MAX} playlists \u{2014} remove one in Settings first"), cx); return; }
+                this.spawn_send(cx, if on { "DELETE" } else { "PUT" }, format!("/mini/playlists/{}", rune_mini_core::commands::encode(&pid)), None, move |me, r, cx| {
+                    me.forget_json("/mini/playlists");
+                    if r.is_err() { me.say(if on { "Could not remove it from the rune mini" } else { "Could not add it to the rune mini" }, cx); } else { me.say(if on { "Removed from rune mini" } else { "Shown in rune mini" }, cx); }
+                    cx.notify();
+                });
+            }))
     }
 
     /// The header behind a playlist's hero: the ASCII sea for the two wave playlists, two glows for Liked Songs, otherwise the first
@@ -180,10 +233,10 @@ impl Rune {
             .bg(if on { ca(ACCENT, 0.2) } else { wh(0.08) }).text_color(c(TEXT)).hover(|s| s.bg(wh(0.15))).child(icon(ic, 14., c(TEXT))).child(label.to_string());
         h_flex().h(px(48.)).items_center().gap(px(12.)).pb(px(6.)).text_size(px(13.)).text_color(c(TEXT3))
             .when(n == 0, |t| t.child(sbtn("pt-select", "Select", "check", self.pl_select_mode).on_click(cx.listener(|this, _, _, cx| { this.pl_select_mode = !this.pl_select_mode; cx.notify(); }))))
-            .child(if n == 0 { div().flex_1().child("Drag the grip to reorder \u{b7} click to play \u{b7} shift or ctrl-click to select").into_any_element() } else { div().flex_1().font_weight(w(600.)).text_color(c(TEXT)).child(format!("{n} selected")).into_any_element() })
+            .child(if n == 0 { div().flex_1().child(if self.pl_sorted { "Newest first \u{b7} switch to \u{201c}Playlist order\u{201d} to drag rows \u{b7} shift or ctrl-click to select" } else { "Drag the grip to reorder \u{b7} click to play \u{b7} shift or ctrl-click to select" }).into_any_element() } else { div().flex_1().font_weight(w(600.)).text_color(c(TEXT)).child(format!("{n} selected")).into_any_element() })
             .when(n > 0, |t| {
                 let ids: Vec<String> = self.pl_sel.iter().filter_map(|i| d.tracks.get(*i).map(|x| x.id.clone())).collect();
-                let pos: Vec<usize> = self.pl_sel.iter().copied().collect();
+                let pos: Vec<usize> = self.pl_sel.iter().map(|&i| self.pl_orig.get(i).copied().unwrap_or(i)).collect();
                 let what = format!("{} tracks", n);
                 t.child(sbtn("pt-add", "Add to playlist", "list-plus", false).on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     let p = ev.position();
@@ -203,8 +256,9 @@ impl Rune {
         let img = self.cover(&album.id, album.cover_url.as_deref(), 40., window);
         let group = SharedString::from(format!("pr-{i}-{}", t.id));
         let rune_editable = d.summary.is_editable();
+        let can_drag = rune_editable && !self.pl_sorted;
         let mut menu = self.track_menu_ids(vec![t.id.clone()], t.title.clone(), Some(album.id.clone()), t.artists.first().map(|a| a.id.clone()), t.source == "spotify", t.id.clone());
-        if rune_editable { menu.items.push(PopItem { icon: "trash", label: "Remove from playlist".into(), act: MenuAct::RemoveFromPlaylist { playlist: d.summary.id.clone(), position: i }, danger: true, chevron: false, dot: false, sub: false }); }
+        if rune_editable { menu.items.push(PopItem { icon: "trash", label: "Remove from playlist".into(), act: MenuAct::RemoveFromPlaylist { playlist: d.summary.id.clone(), position: self.pl_orig.get(i).copied().unwrap_or(i) }, danger: true, chevron: false, dot: false, sub: false }); }
         let (menu2, pid) = (menu.clone(), d.summary.id.clone());
         let aid = album.id.clone();
         let picked = self.pl_sel.contains(&i);
@@ -213,7 +267,8 @@ impl Rune {
         let (drag_title, pid2) = (t.title.clone(), d.summary.id.clone());
         h_flex().id(group.clone()).group(group.clone()).h(px(56.)).px(px(6.)).items_center().rounded(px(R)).cursor_pointer()
             .when(playing, |x| x.bg(ca(ACCENT, 0.12))).when(!playing && !picked, |x| x.hover(|s| s.bg(wh(0.05)))).when(picked, |x| x.bg(ca(ACCENT, 0.2)))
-            .when(rune_editable, |d| d.child(div().id(SharedString::from(format!("pg-{i}"))).w(px(24.)).h_full().flex_none().flex().items_center().justify_center().opacity(0.45).hover(|s| s.opacity(1.)).cursor(CursorStyle::ClosedHand)
+            .when(rune_editable && !can_drag, |d| d.child(div().w(px(24.)).flex_none()))
+            .when(can_drag, |d| d.child(div().id(SharedString::from(format!("pg-{i}"))).w(px(24.)).h_full().flex_none().flex().items_center().justify_center().opacity(0.45).hover(|s| s.opacity(1.)).cursor(CursorStyle::ClosedHand)
                 .child(icon("grip-vertical", 15., c(TEXT3)))
                 .on_drag(PlDrag { from: i, title: drag_title }, |dg, _o, _w, cx| { let t = dg.title.clone(); cx.new(|_| crate::queue::DragGhost(t)) })))
             .child(div().w(px(44.)).h_full().flex_none().flex().items_center().justify_center().text_size(px(14.)).text_color(c(TEXT3))
@@ -237,7 +292,7 @@ impl Rune {
                 if rune_editable && (selecting || m.shift || m.control || m.platform) {
                     let (s, a) = select_row(&this.pl_sel, this.pl_anchor, i, m.shift, m.control || m.platform || this.pl_select_mode || !this.pl_sel.is_empty() && !m.shift);
                     this.pl_sel = s; this.pl_anchor = a; cx.notify();
-                } else { this.play_playlist(&pid, false, i, cx); }
+                } else if let Some(v) = this.pl_view.clone() { this.play_tracks(v.tracks.clone(), i, false, cx); } else { this.play_playlist(&pid, false, i, cx); }
             }))
             .into_any_element()
     }
@@ -264,3 +319,23 @@ mod tests {
 }
 
 fn img_fill(i: Arc<RenderImage>) -> impl IntoElement { img(ImageSource::Render(i)).size_full().object_fit(ObjectFit::Fill) }
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn t(added: Option<f64>) -> LibTrack { LibTrack { added_at: added, ..Default::default() } }
+
+    #[::core::prelude::v1::test]
+    fn newest_first_like_the_web_and_ties_keep_the_playlists_order() {
+        let tr = vec![t(Some(10.)), t(Some(30.)), t(None), t(Some(30.)), t(Some(20.))];
+        let (o, sorted) = order_positions(&tr, false, true);
+        assert_eq!(o, vec![1, 3, 4, 0, 2], "30, 30 (playlist order), 20, 10, undated last");
+        assert!(sorted);
+        assert_eq!(order_positions(&tr, false, false), ((0..5).collect(), false), "the playlist's own order");
+        assert!(!order_positions(&tr, true, true).1, "smart playlists keep their rule order");
+        assert!(!order_positions(&[t(None), t(None)], false, true).1, "nothing dated, nothing to sort");
+        assert!(!order_positions(&[t(Some(3.)), t(Some(2.)), t(Some(1.))], false, true).1, "already newest first: not 'sorted', rows stay draggable");
+        assert!(can_sort(&tr, false) && !can_sort(&tr, true) && !can_sort(&[t(None)], false));
+    }
+}
