@@ -169,7 +169,7 @@ impl Rune {
         if !liked && src.is_none() { return None; }
         let key = (s.id.clone(), src.as_ref().map(|i| Arc::as_ptr(i) as usize).unwrap_or(0));
         if self.hero_tint.as_ref().map(|(k, _)| k) != Some(&key) {
-            let vw = f32::from(window.viewport_size().width);
+            let vw = f32::from(crate::frame::content_size(window).width);
             let box_w = (vw - crate::shell::side_w(self.sidebar_collapsed)).max(400.);
             let box_h = 374.;
             let (ow, oh) = (64usize, ((64. * box_h / box_w).ceil() as usize).max(8));

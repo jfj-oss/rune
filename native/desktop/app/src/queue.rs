@@ -78,7 +78,7 @@ impl Rune {
                 }).collect()
             })).flex_1().py(px(8.)).into_any_element()
         };
-        v_flex().absolute().top_0().right_0().bottom(px(NPBAR_H)).w(px(QUEUE_W)).bg(c(0x11121a)).border_l_1().border_color(wh(0.14)).occlude()
+        v_flex().absolute().top_0().right_0().bottom(px(NPBAR_H)).w(px(QUEUE_W)).bg(c(0x11121a)).border_l_1().border_color(wh(0.14)).occlude().rounded_tr(px(crate::frame::round()))
             .shadow(vec![BoxShadow { inset: false, color: bk(0.4), offset: point(px(-24.), px(0.)), blur_radius: px(60.), spread_radius: px(0.) }])
             .child(h_flex().justify_between().items_start().pl(px(20.)).pr(px(16.)).pt(px(20.)).pb(px(12.)).gap(px(12.)).border_b_1().border_color(line())
                 .child(v_flex().child(div().text_size(px(20.)).font_weight(w(700.)).child("Queue")).child(div().mt(px(2.)).text_size(px(12.5)).text_color(c(TEXT3)).child(sub)))

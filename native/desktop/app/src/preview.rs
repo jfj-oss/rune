@@ -65,7 +65,7 @@ fn host_of(url: &str) -> String { url.trim_start_matches("https://").trim_start_
 impl Rune {
     pub fn preview_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = self.preview.clone().unwrap();
-        let vh = f32::from(window.viewport_size().height);
+        let vh = f32::from(crate::frame::content_size(window).height);
         let url = p.url.clone();
         let host = host_of(&p.url);
         let mut body = v_flex().gap(px(18.));
@@ -105,6 +105,6 @@ impl Rune {
             .child(h_flex().flex_none().items_center().justify_between().gap(px(12.)).px(px(24.)).py(px(14.)).border_t_1().border_color(line())
                 .child(div().text_size(px(12.5)).text_color(c(TEXT3)).child(p.attribution.clone().map(|a| format!("From {a}")).unwrap_or(host.clone())))
                 .when(!url.is_empty(), |d| d.child(div().id("pv-open").child(btn(&format!("Open {}", if host.is_empty() { "original".to_string() } else { host.clone() }), Some("external-link"), false)).on_click(cx.listener(move |_, _, _, _| open_url(&url))))));
-        div().absolute().top_0().left_0().size_full().child(div().id("pv-away").absolute().size_full().bg(ca(0x06060a, 0.4)).occlude().on_click(cx.listener(|this, _, _, cx| { this.preview = None; cx.notify(); }))).child(sheet)
+        div().absolute().top_0().left_0().size_full().child(div().id("pv-away").absolute().size_full().bg(ca(0x06060a, 0.4)).rounded(px(crate::frame::round())).occlude().on_click(cx.listener(|this, _, _, cx| { this.preview = None; cx.notify(); }))).child(sheet)
     }
 }

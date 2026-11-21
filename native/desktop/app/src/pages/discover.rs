@@ -150,7 +150,7 @@ impl Rune {
     /// The song-radio sheet: songs similar to one track that you do not have.
     pub fn song_radio_sheet(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (tid, title, artist) = self.song_radio.clone().unwrap();
-        let vh = f32::from(window.viewport_size().height);
+        let vh = f32::from(crate::frame::content_size(window).height);
         let (feed, loading, err) = self.parse_feed(&format!("/discover/track/{}/similar?limit=30", rune_mini_core::commands::encode(&tid)), cx);
         let dismissed = self.dismissed.clone();
         let items: Vec<DItem> = feed.as_ref().map(|f| f.items.iter().filter(|i| !dismissed.contains(&i.track.id)).cloned().collect()).unwrap_or_default();

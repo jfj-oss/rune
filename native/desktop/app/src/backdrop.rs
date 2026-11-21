@@ -323,7 +323,7 @@ impl Backdrop {
     /// The GPU path: one shader quad over the whole window; the tint and edge shading go on top as before.
     fn render_gpu(&mut self, root: Div) -> Div {
         let (anim, prefs) = (self.anim.clone(), self.prefs);
-        let quad = shader_quad(FOIL_SHADER, move |bounds, window| {
+        let quad = shader_quad_round(FOIL_SHADER, || (crate::frame::round(), 15), move |bounds, window| {
             let scale = window.scale_factor();
             let (pw, ph) = ((f32::from(bounds.size.width) * scale).round(), (f32::from(bounds.size.height) * scale).round());
             let mut a = anim.borrow_mut();
@@ -364,7 +364,7 @@ impl Backdrop {
     /// Dither backdrop has none).
     fn render_dither(&mut self, root: Div) -> Div {
         let (st, prefs) = (self.dither.clone(), self.prefs);
-        let quad = shader_quad(dither::DITHER_SHADER, move |bounds, window| {
+        let quad = shader_quad_round(dither::DITHER_SHADER, || (crate::frame::round(), 15), move |bounds, window| {
             let scale = f64::from(window.scale_factor());
             let (pw, ph) = ((f64::from(f32::from(bounds.size.width)) * scale).round(), (f64::from(f32::from(bounds.size.height)) * scale).round());
             let mut a = st.borrow_mut();
@@ -460,13 +460,10 @@ fn paint(window: &mut Window, bounds: Bounds<Pixels>, scale: f32, t: f32, dust: 
 pub struct Root { pub rune: Entity<crate::rune::Rune>, pub backdrop: Entity<Backdrop> }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> AnyElement {
-        let mut full = StyleRefinement::default();
-        full.size.width = Some(relative(1.).into());
-        full.size.height = Some(relative(1.).into());
-        // (the app is still there, clipped to nothing, so its state keeps driving the backdrop's colour)
-        if bare() { return div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(div().absolute().top_0().left_0().size(px(0.)).overflow_hidden().child(AnyView::from(self.rune.clone()).cached(full))).into_any_element(); }
-        div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(AnyView::from(self.rune.clone()).cached(full)).into_any_element()
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // the frame (shadow, edge, band, rounded content, resize zones) lives in frame.rs; with `bare()` the app is still there,
+        // clipped to nothing, so its state keeps driving the backdrop's colour
+        crate::frame::frame(window, cx, &self.rune, &self.backdrop)
     }
 }
 

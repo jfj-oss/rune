@@ -15,6 +15,7 @@ mod dither;
 mod crashlog;
 mod data;
 mod foil;
+mod frame;
 mod logo;
 mod hotkeys;
 mod menu;
@@ -94,7 +95,11 @@ fn main() {
         let opts = WindowOptions {
             window_bounds: Some(if sw.is_some_and(|s| s.maximized) { WindowBounds::Maximized(bounds) } else { WindowBounds::Windowed(bounds) }),
             window_min_size: Some(size(px(720.), px(520.))),
-            titlebar: Some(TitlebarOptions { title: Some("rune".into()), ..Default::default() }),
+            // the app draws its own frame and traffic lights (Linux: client-side decorations; macOS: the system lights inside our top row)
+            titlebar: Some(TitlebarOptions { title: Some("rune".into()), appears_transparent: true, traffic_light_position: Some(point(px(14.), px(18.))) }),
+            window_decorations: if cfg!(target_os = "linux") { Some(WindowDecorations::Client) } else { None },
+            window_background: if cfg!(target_os = "linux") { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Opaque },
+            app_owns_titlebar_drag: true,
             app_id: Some("rune-desktop".into()),
             ..Default::default()
         };

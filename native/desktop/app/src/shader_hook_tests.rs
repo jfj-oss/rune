@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 fn rect(x: f32, w: f32) -> Bounds<ScaledPixels> { Bounds { origin: point(ScaledPixels(x), ScaledPixels(0.0)), size: size(ScaledPixels(w), ScaledPixels(50.0)) } }
 fn shader_quad_at(b: Bounds<ScaledPixels>, mask: Bounds<ScaledPixels>, data: &[f32]) -> ShaderQuad {
-    ShaderQuad { order: 0, bounds: b, content_mask: ContentMask { bounds: mask }, shader: ShaderId(7), time: 1.5, data: Arc::from(data.to_vec()) }
+    ShaderQuad { order: 0, bounds: b, content_mask: ContentMask { bounds: mask }, shader: ShaderId(7), time: 1.5, round: [0.0, 0.0], data: Arc::from(data.to_vec()) }
 }
 
 #[test]
