@@ -102,6 +102,7 @@ mod tests {
             repeat: Repeat::All,
             elsewhere: false,
             tab: None,
+            updated_at: 0.,
         };
         m.update(Msg::Fetched { state: st, rev: None }, 0);
         m

@@ -207,8 +207,9 @@ impl Rune {
         let dur = cur.as_ref().map(|q| q.track.duration_ms).unwrap_or(0.);
         let live = player.as_ref().map(|p| p.position(now)).unwrap_or(0.);
         // after a seek, show where it was sent until the server's position catches up (no jump back to the old spot)
-        let held = self.seek_hold.and_then(|(t, ms)| { let el = t.elapsed().as_millis() as f64; (el < 2500. && (live - (ms + el)).abs() > 1500.).then_some(ms + el) });
+        let held = self.seek_hold.as_ref().and_then(|(t, ms, qid)| { if cur.as_ref().map(|q| &q.queue_id) != Some(qid) { return None; } let (t, ms) = (*t, *ms); let el = t.elapsed().as_millis() as f64; (el < 2500. && (live - (ms + el)).abs() > 1500.).then_some(ms + el) });
         let pos = self.seek_drag.or(held).unwrap_or(live);
+        self.bar_shown = cur.as_ref().map(|q| (q.track.title.clone(), pos, dur));
         let volume = match self.vol_hold { Some((t, v)) if t.elapsed().as_millis() < 4000 => v, _ => player.as_ref().map(|p| p.volume).unwrap_or(0.) };
         let vw_slider = vol_w(vw);
         let peaks = match cur.as_ref() { Some(q) => self.peaks_for(&q.track.id, q.track.duration_ms, cx), None => None };
@@ -363,7 +364,7 @@ impl Rune {
                 self.drag = Some(Drag::Seek);
                 self.drag_to(f32::from(ev.position.x), cx);
                 self.drag = None;
-                if let Some(ms) = self.seek_drag.take() { self.seek_hold = Some((std::time::Instant::now(), ms)); self.cmd(UiCommand::SeekTo(ms), cx); }
+                if let Some(ms) = self.seek_drag.take() { self.seek_hold = self.model.player.as_ref().and_then(|p| p.current()).map(|q| (std::time::Instant::now(), ms, q.queue_id.clone())); self.cmd(UiCommand::SeekTo(ms), cx); }
             }
             Some(Drag::Volume) => {
                 self.drag = Some(Drag::Volume);
