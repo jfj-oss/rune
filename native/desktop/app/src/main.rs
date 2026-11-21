@@ -10,6 +10,7 @@ mod shader_hook_tests;
 mod charts;
 mod audio_zone;
 mod covers;
+mod dither;
 mod crashlog;
 mod data;
 mod foil;
@@ -72,6 +73,7 @@ fn main() {
         gpui_kit::init(cx);
         backdrop::register_shaders();
         gen::register_shader_source();
+        dither::register_shader_source();
         let fonts: Vec<std::borrow::Cow<'static, [u8]>> = vec![
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/inter-latin-wght-normal.ttf").as_slice()),
             std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/source-serif-4-latin-wght-normal.ttf").as_slice()),

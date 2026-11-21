@@ -132,6 +132,15 @@ struct Saved {
     /// draw the backdrop on the CPU instead of the GPU shader (no switch in the UI; edit state.json, or set RUNE_DESKTOP_FOIL=software)
     #[serde(default)]
     foil_software: bool,
+    /// Settings -> Background: the backdrop chosen, as the web's ambient ids (`foil`, `off`, `dither`, `dither-blue`, .. `dither-custom`).
+    /// Absent in older files: `foil_off` decides between Foil waves and Off.
+    #[serde(default)]
+    backdrop: Option<String>,
+    /// "Dither · Custom": the base dots and the highlights, `#rrggbb`
+    #[serde(default)]
+    custom_mid: Option<String>,
+    #[serde(default)]
+    custom_light: Option<String>,
     /// Settings -> Playback: a desktop notification when the song changes (off by default)
     #[serde(default)]
     notify_track: bool,
@@ -141,6 +150,16 @@ struct Saved {
     /// the window as it was left (size, and position where the system lets an app place a window)
     #[serde(default)]
     window: Option<SavedWindow>,
+}
+
+impl Saved {
+    /// The Settings -> Background choices as the backdrop's preferences. A file from before the Dither backdrops has only `foil_off`.
+    fn prefs(&self) -> crate::backdrop::Prefs {
+        use crate::dither::{custom_palette, Mode, DEFAULT_CUSTOM};
+        let mode = self.backdrop.as_deref().and_then(Mode::from_id).unwrap_or(if self.foil_off { Mode::Off } else { Mode::Foil });
+        let custom = custom_palette(self.custom_mid.as_deref().unwrap_or(DEFAULT_CUSTOM.0), self.custom_light.as_deref().unwrap_or(DEFAULT_CUSTOM.1));
+        crate::backdrop::Prefs { mode, custom, reduce: self.effects_reduced, saver: !self.saver_off, software: self.foil_software }
+    }
 }
 
 /// The window as it was left: logical pixels; `maximized` carries the restore size in the rest.
@@ -220,6 +239,12 @@ pub struct Rune {
     pub focus: FocusHandle,
     pub backdrop: Entity<crate::backdrop::Backdrop>,
     pub foil: crate::backdrop::Prefs,
+    /// Settings -> Background -> Custom: the hex fields of the base dots and the highlights
+    pub custom_mid_in: Entity<InputState>,
+    pub custom_light_in: Entity<InputState>,
+    /// what the Dither backdrop was last told (colour decisions), and the song it last swelled for
+    bd_input: Option<crate::dither::Input>,
+    bd_song: String,
 
     pub sidebar_collapsed: bool,
     pub view_list: bool,
@@ -293,7 +318,7 @@ impl Rune {
         }).detach();
 
         let saved: Saved = std::fs::read_to_string(state_path(&dir)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        let foil_prefs = crate::backdrop::Prefs { on: !saved.foil_off, reduce: saved.effects_reduced, saver: !saved.saver_off, software: saved.foil_software };
+        let foil_prefs = saved.prefs();
         let foil_entity = cx.new(|cx| crate::backdrop::Backdrop::new(foil_prefs, window, cx));
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search albums, artists, tracks"));
         let albums_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find in albums"));
@@ -302,7 +327,13 @@ impl Rune {
         let genres_find = cx.new(|cx| InputState::new(window, cx).placeholder("Filter genres"));
         let radio_find = cx.new(|cx| InputState::new(window, cx).placeholder("Search stations, tags or countries"));
         let people_find = cx.new(|cx| InputState::new(window, cx).placeholder("Find a person"));
+        let (mid_hex, light_hex) = (crate::dither::to_hex(foil_prefs.custom.mid), crate::dither::to_hex(foil_prefs.custom.light));
+        let custom_mid_in = cx.new(|cx| { let mut s = InputState::new(window, cx).placeholder("#5a2a9e"); s.set_value(mid_hex, window, cx); s });
+        let custom_light_in = cx.new(|cx| { let mut s = InputState::new(window, cx).placeholder("#ff7a3d"); s.set_value(light_hex, window, cx); s });
         let mut subs = Vec::new();
+        // a valid #rrggbb in either box is the new Custom colour (anything else is left alone while typing)
+        subs.push(cx.subscribe_in(&custom_mid_in, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { if let Some(c) = crate::dither::parse_hex(st.read(cx).value().as_ref()) { let mut p = this.foil; p.custom.mid = c; this.set_foil(p, cx); } } }));
+        subs.push(cx.subscribe_in(&custom_light_in, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { if let Some(c) = crate::dither::parse_hex(st.read(cx).value().as_ref()) { let mut p = this.foil; p.custom.light = c; this.set_foil(p, cx); } } }));
         subs.push(cx.subscribe_in(&people_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { this.people_q = st.read(cx).value().trim().to_string(); cx.notify(); } }));
         subs.push(cx.subscribe_in(&radio_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
             if let InputEvent::Change = ev {
@@ -360,7 +391,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs,
+            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs, custom_mid_in, custom_light_in, bd_input: None, bd_song: String::new(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -372,6 +403,33 @@ impl Rune {
     }
 
     // ------------------------------------------------------------------ persistence
+
+    /// The colour of a cover for the Dither backdrops: its own once the cover has been read, else the web's placeholder for the album.
+    fn album_palette(&mut self, id: &str, url: Option<&str>) -> crate::dither::Palette {
+        use crate::dither::*;
+        let c = match crate::covers::cover_colour(id) {
+            Some(c) => [c[0] as f64, c[1] as f64, c[2] as f64],
+            None => { let _ = self.covers.get(id, url, 200, 200); fallback_colour(id) } // asked for now; the colour arrives with the cover
+        };
+        palette_from_rgb(c)
+    }
+
+    /// Tell the Dither backdrop what decides its colour (the playing album, the open album page, music playing) and swell it when the
+    /// song changes. Called every frame; only a change does anything.
+    pub fn sync_backdrop(&mut self, cx: &mut Context<Self>) {
+        use crate::dither::*;
+        let cur = self.model.player.as_ref().and_then(|p| p.current().map(|q| (p.index, q.track.id.clone(), q.album.id.clone(), q.album.cover_url.clone())));
+        let song = cur.as_ref().map(|(i, t, ..)| format!("{i}:{t}")).unwrap_or_default();
+        let changed = !song.is_empty() && song != self.bd_song;
+        self.bd_song = song;
+        if !self.foil.mode.is_dither() { self.bd_input = None; return; }
+        let playing = self.model.player.as_ref().is_some_and(|p| p.status == Status::Playing);
+        let album = cur.as_ref().map(|(_, _, id, url)| self.album_palette(id, url.as_deref()));
+        let page = match self.route().clone() { Route::Album(id) => { let url = self.data.album.get(&id).and_then(|c| c.slot.ready()).and_then(|a| a.summary.cover_url.clone()); Some(self.album_palette(&id, url.as_deref())) } _ => None };
+        let input = Input { mode: self.foil.mode, custom: self.foil.custom, album, page, playing };
+        if self.bd_input != Some(input) { self.bd_input = Some(input); self.backdrop.update(cx, |b, cx| b.set_input(input, cx)); }
+        if changed { self.backdrop.update(cx, |b, cx| b.song_changed(cx)); }
+    }
 
     /// Settings -> Background: change the backdrop switches, tell the backdrop, remember them.
     pub fn set_foil(&mut self, p: crate::backdrop::Prefs, cx: &mut Context<Self>) {
@@ -435,7 +493,7 @@ impl Rune {
     }
 
     pub fn save_state(&self) {
-        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on, effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software, notify_track: self.notify_track, playlist_own_order: !self.pl_newest_first, window: self.window_saved };
+        let s = Saved { sidebar_collapsed: self.sidebar_collapsed, view_list: self.view_list, audio_id: self.own_zone.trim_start_matches("browser:").to_string(), zone: self.zone_pref.clone(), foil_off: !self.foil.on(), effects_reduced: self.foil.reduce, saver_off: !self.foil.saver, foil_software: self.foil.software, backdrop: Some(self.foil.mode.id()), custom_mid: Some(crate::dither::to_hex(self.foil.custom.mid)), custom_light: Some(crate::dither::to_hex(self.foil.custom.light)), notify_track: self.notify_track, playlist_own_order: !self.pl_newest_first, window: self.window_saved };
         if let Ok(j) = serde_json::to_string(&s) { let _ = crate::util::write_atomic(&state_path(&self.dir), j.as_bytes()); }
     }
 
@@ -936,6 +994,35 @@ mod window_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The Settings -> Background choice is saved in state.json and comes back as it was; older files (only `foil_off`) still read right.
+    #[::core::prelude::v1::test]
+    fn the_backdrop_choice_round_trips_through_the_settings_file() {
+        use crate::dither::{custom_palette, Hue, Mode};
+        // a stock install: Foil waves, effects normal, battery saver on
+        let d: Saved = serde_json::from_str("{}").unwrap();
+        let p = d.prefs();
+        assert_eq!((p.mode, p.reduce, p.saver, p.software), (Mode::Foil, false, true, false));
+        // every mode, with a custom pair, survives save -> load
+        for m in Mode::all() {
+            let prefs = crate::backdrop::Prefs { mode: m, custom: custom_palette("#102030", "#a0b0c0"), reduce: true, saver: false, software: false };
+            let s = Saved { backdrop: Some(prefs.mode.id()), custom_mid: Some(crate::dither::to_hex(prefs.custom.mid)), custom_light: Some(crate::dither::to_hex(prefs.custom.light)), foil_off: !prefs.on(), effects_reduced: prefs.reduce, saver_off: !prefs.saver, ..Default::default() };
+            let back: Saved = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+            assert_eq!(back.prefs(), prefs, "{m:?}");
+        }
+        // files from before the Dither backdrops
+        let old_off: Saved = serde_json::from_str(r#"{"foil_off":true}"#).unwrap();
+        assert_eq!(old_off.prefs().mode, Mode::Off);
+        let old_on: Saved = serde_json::from_str(r#"{"foil_off":false,"effects_reduced":true}"#).unwrap();
+        assert_eq!((old_on.prefs().mode, old_on.prefs().reduce), (Mode::Foil, true));
+        // an unknown id or a broken colour falls back to the defaults
+        let bad: Saved = serde_json::from_str(r##"{"backdrop":"dither-plaid","custom_mid":"nope","custom_light":"#fff"}"##).unwrap();
+        assert_eq!(bad.prefs().mode, Mode::Foil);
+        assert_eq!(bad.prefs().custom, crate::backdrop::Prefs::default().custom);
+        let blue: Saved = serde_json::from_str(r#"{"backdrop":"dither-blue"}"#).unwrap();
+        assert_eq!(blue.prefs().mode, Mode::Hue(Hue::Blue));
+    }
     use super::*;
     #[::core::prelude::v1::test]
     fn routes_parse_like_the_web_urls() {

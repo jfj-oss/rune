@@ -1,15 +1,18 @@
 //! Settings (web `pages/Settings.tsx`): setup, keyboard (the album key and the playlist keys), the rune mini's playlists (reorder,
 //! remove), playback (volume levelling, auto-radio) and the server's status (library, database, playback, background jobs).
-//! Background: the Foil waves switch, Reduce effects and Battery saver (the web's other dither colours are not ported); the server's self-update card is not part of the native app (it updates by release).
+//! Background: the picker (Foil waves, the web's Dither colours, Off; Custom has two hex fields), Reduce effects and Battery saver; the server's self-update card is not part of the native app (it updates by release).
 use super::*;
 use crate::albumlogic::{format_listening, format_stamp};
 use crate::menu::{item, pop};
+use gpui_kit::component::input::{Input, InputState};
 use serde_json::{json, Value};
 
 fn card(title: &str, ic: &'static str) -> Div {
     v_flex().p(px(20.)).gap(px(10.)).rounded(px(16.)).bg(surface()).border_1().border_color(line()).min_w_0()
         .child(h_flex().gap(px(9.)).items_center().text_size(px(16.)).font_weight(w(700.)).child(icon(ic, 17., c(TEXT))).child(title.to_string()))
 }
+
+fn rgb_u32(c: crate::dither::Rgb) -> u32 { ((c[0].round() as u32) << 16) | ((c[1].round() as u32) << 8) | c[2].round() as u32 }
 
 fn muted(t: &str) -> Div { div().text_size(px(13.5)).text_color(c(TEXT3)).child(t.to_string()) }
 
@@ -150,12 +153,60 @@ impl Rune {
         };
         // ---- background (web: the Background picker, Reduce effects, Battery saver)
         let fp = self.foil;
-        let switch = |id: &'static str, on: bool| div().id(id).role(Role::Switch).aria_label(match id { "st-foil" => "Foil waves", "st-reduce" => "Reduce effects", "st-saver" => "Battery saver", "st-notify" => "Notify on song change", other => other }).aria_toggled(if on { Toggled::True } else { Toggled::False }).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
+        let switch = |id: &'static str, on: bool| div().id(id).role(Role::Switch).aria_label(match id { "st-reduce" => "Reduce effects", "st-saver" => "Battery saver", "st-notify" => "Notify on song change", other => other }).aria_toggled(if on { Toggled::True } else { Toggled::False }).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
         let row = |title: &str, sub: &str, sw: Stateful<Div>| h_flex().justify_between().items_center().gap(px(16.)).child(v_flex().min_w_0().child(div().text_size(px(14.)).font_weight(w(600.)).child(title.to_string())).child(muted(sub))).child(sw);
-        let background = card("Background", "palette")
-            .child(row("Foil waves", "Stippled wave lines over an icy-blue cloud, like printed foil. Off shows the plain dark page.", switch("st-foil", fp.on).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { on: !p.on, ..p }, cx); }))))
+        let current = fp.mode;
+        let mut modes = h_flex().flex_wrap().gap(px(6.));
+        for m in crate::dither::Mode::all() {
+            let on = m == current;
+            let dot = match m {
+                crate::dither::Mode::Foil => 0x697dff,
+                crate::dither::Mode::Off => 0x0f1013,
+                crate::dither::Mode::Hue(h) => rgb_u32(h.palette().light),
+                crate::dither::Mode::Cycle | crate::dither::Mode::Album => rgb_u32(crate::dither::Hue::Red.palette().light),
+                crate::dither::Mode::Custom => rgb_u32(fp.custom.light),
+            };
+            let label = m.label();
+            modes = modes.child(
+                h_flex().id(SharedString::from(format!("st-bg-{}", m.id()))).role(Role::RadioButton).aria_label(label.clone()).aria_toggled(if on { Toggled::True } else { Toggled::False })
+                    .w(px(168.)).h(px(40.)).px(px(12.)).gap(px(10.)).items_center().flex_none().rounded(px(10.)).border_1().border_color(if on { c(ACCENT) } else { line() }).cursor_pointer()
+                    .text_size(px(13.5)).text_color(if on { c(TEXT) } else { c(TEXT2) }).hover(|d| d.bg(wh(0.06)))
+                    .child(div().size(px(14.)).flex_none().rounded_full().border_1().border_color(wh(0.25)).bg(c(dot)))
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .when(on, |d| d.child(icon("check", 15., c(ACCENT))))
+                    .on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { mode: m, ..p }, cx); })),
+            );
+        }
+        let mut background = card("Background", "palette").child(muted("Foil waves are the default. The Dither backgrounds are the web's: black and one colour, in fine dots.")).child(modes);
+        if current == crate::dither::Mode::Custom {
+            let hexbox = |input: &Entity<InputState>, name: &str, sub: &str, col: crate::dither::Rgb| {
+                h_flex().gap(px(10.)).items_center()
+                    .child(div().size(px(26.)).flex_none().rounded(px(6.)).border_1().border_color(wh(0.25)).bg(c(rgb_u32(col))))
+                    .child(v_flex().w(px(150.)).child(div().text_size(px(14.)).font_weight(w(600.)).child(name.to_string())).child(muted(sub)))
+                    .child(div().h(px(36.)).w(px(130.)).px(px(12.)).flex().items_center().rounded_full().bg(surface2()).border_1().border_color(line()).child(div().flex_1().child(Input::new(input).appearance(false).cleanable(false))))
+            };
+            let mut presets = h_flex().gap(px(8.)).items_center();
+            for (i, (name, mid, light)) in crate::dither::CUSTOM_PRESETS.iter().enumerate() {
+                let (m, l) = (crate::dither::parse_hex(mid).unwrap(), crate::dither::parse_hex(light).unwrap());
+                let (ms, ls) = ((*mid).to_string(), (*light).to_string());
+                presets = presets.child(div().id(SharedString::from(format!("st-duo-{i}"))).role(Role::Button).aria_label(name.to_string()).size(px(28.)).rounded_full().border_1().border_color(wh(0.25)).cursor_pointer()
+                    .bg(linear_gradient(135., linear_color_stop(c(rgb_u32(m)), 0.55), linear_color_stop(c(rgb_u32(l)), 0.55)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let mut p = this.foil; p.custom = crate::dither::Palette { mid: m, light: l };
+                        let (a, b) = (ms.clone(), ls.clone());
+                        this.custom_mid_in.update(cx, |s, cx| s.set_value(a, window, cx));
+                        this.custom_light_in.update(cx, |s, cx| s.set_value(b, window, cx));
+                        this.set_foil(p, cx);
+                    })));
+            }
+            background = background.child(v_flex().gap(px(10.)).pt(px(6.))
+                .child(hexbox(&self.custom_mid_in, "Base", "Most of the dots (#rrggbb)", fp.custom.mid))
+                .child(hexbox(&self.custom_light_in, "Highlights", "The brightest parts (#rrggbb)", fp.custom.light))
+                .child(presets));
+        }
+        let background = background
             .child(row("Reduce effects", "No moving decorations: one still frame. This device only.", switch("st-reduce", fp.reduce).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { reduce: !p.reduce, ..p }, cx); }))))
-            .child(row("Battery saver", "The waves hold still while another window has focus, or this one is minimised. This device only.", switch("st-saver", fp.saver).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { saver: !p.saver, ..p }, cx); }))));
+            .child(row("Battery saver", "The backdrop holds still while another window has focus, or this one is minimised. This device only.", switch("st-saver", fp.saver).on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { saver: !p.saver, ..p }, cx); }))));
         let playback = playback.child(row("Notify on song change", "A desktop notification when the song changes while rune is in the background. This device only.", switch("st-notify", self.notify_track).on_click(cx.listener(move |this, _, _, cx| { this.notify_track = !this.notify_track; this.save_state(); cx.notify(); }))));
         let top = if two { h_flex().gap(px(16.)).items_start().child(div().flex_1().min_w_0().child(keyboard)).child(v_flex().flex_1().min_w_0().gap(px(16.)).child(mini_card).child(playback).child(background)).into_any_element() } else { v_flex().gap(px(16.)).child(keyboard).child(mini_card).child(playback).child(background).into_any_element() };
         let page = v_flex().pb(px(40.)).gap(px(16.)).child(setup).child(top).child(status);
