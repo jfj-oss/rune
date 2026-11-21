@@ -19,7 +19,11 @@ pub fn qs(pairs: &[(&str, String)]) -> String {
 impl Client {
     /// GET `/api{path}` as JSON. The error is the server's own `{error}` text, or "cannot reach the server".
     pub fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, String> {
-        self.req("GET", &format!("/api{path}")).call().map_err(Self::describe)?.into_json().map_err(|e| e.to_string())
+        let mut r = self.req("GET", &format!("/api{path}"));
+        // Discover builds its picks from Spotify and other services while it answers (a Refresh can take a minute): a
+        // longer wait than the usual 10 s, or the page reports a failure while the server is still finishing
+        if path.starts_with("/discover/") { r = r.timeout(std::time::Duration::from_secs(120)); }
+        r.call().map_err(Self::describe)?.into_json().map_err(|e| e.to_string())
     }
 
     /// POST/PUT/PATCH/DELETE `/api{path}` with an optional JSON body. An empty answer (204) is `Value::Null`.

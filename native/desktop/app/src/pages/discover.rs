@@ -109,9 +109,26 @@ impl Rune {
 
     pub fn discover_page(&mut self, cw: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let _ = cw;
-        let path = if self.discover_refresh { "/discover/new?limit=100&refresh=1" } else { "/discover/new?limit=100" };
-        let (feed, loading, err) = self.parse_feed(path, cx);
-        if self.discover_refresh && !loading && feed.is_some() { self.discover_refresh = false; }
+        const NORMAL: &str = "/discover/new?limit=100";
+        const FRESH: &str = "/discover/new?limit=100&refresh=1";
+        let path = if self.discover_refresh { FRESH } else { NORMAL };
+        let (mut feed, loading, mut err) = self.parse_feed(path, cx);
+        if self.discover_refresh && err {
+            // a Refresh that failed: back to the picks already shown, with a note
+            self.discover_refresh = false;
+            self.forget_json(FRESH);
+            self.say("Could not refresh Discover right now", cx);
+            err = false;
+        }
+        if self.discover_refresh && !loading && feed.is_some() {
+            // the new picks become what the page shows from now on (no second request for the plain feed)
+            if let Some(c) = self.data.json.get(FRESH).map(|c| c.slot.clone()) { self.data.json.insert(NORMAL.into(), crate::data::Cached { slot: c, at: std::time::Instant::now() }); }
+            self.discover_refresh = false;
+        }
+        // while a Refresh is being built, the current picks stay on screen (the button says "Refreshing…")
+        if feed.is_none() && !err {
+            feed = self.data.json.get(NORMAL).and_then(|c| c.slot.ready().cloned()).and_then(|v| serde_json::from_value::<Feed>((*v).clone()).ok());
+        }
         let dismissed = self.dismissed.clone();
         let groups: Vec<DGroup> = feed.as_ref().map(|f| f.groups.iter().map(|g| DGroup { title: g.title.clone(), items: g.items.iter().filter(|i| !dismissed.contains(&i.track.id)).cloned().collect() }).filter(|g| !g.items.is_empty()).collect()).unwrap_or_default();
         let state = feed.as_ref().map(|f| feed_state(f, groups.len())).unwrap_or("ok");
@@ -126,7 +143,7 @@ impl Rune {
         let row: RowFn = Box::new(move |this, ix, window, cx| match &rows[ix] {
             Row::Head => padded(h_flex().items_end().justify_between().pt(px(28.)).mb(px(20.))
                 .child(v_flex().child(page_title("Discover")).child(div().mt(px(4.)).text_size(px(14.)).text_color(c(TEXT3)).child("New songs from Spotify that aren\u{2019}t in your likes, playlists or library.")))
-                .child(div().id("dc-refresh").child(btn(if refreshing { "Refreshing\u{2026}" } else { "Refresh" }, Some("refresh-cw"), false)).on_click(cx.listener(|this, _, _, cx| { this.discover_refresh = true; this.forget_json("/discover/new"); cx.notify(); })))).into_any_element(),
+                .child(div().id("dc-refresh").child(btn(if refreshing { "Refreshing\u{2026}" } else { "Refresh" }, Some("refresh-cw"), false)).on_click(cx.listener(|this, _, _, cx| { this.discover_refresh = true; this.forget_json("/discover/new?limit=100&refresh=1"); cx.notify(); })))).into_any_element(),
             Row::Notice(t) => padded(h_flex().gap(px(8.)).items_center().mb(px(14.)).text_size(px(13.)).text_color(c(TEXT2)).child(icon("clock", 14., c(TEXT2))).child(t.clone())).into_any_element(),
             Row::State(s) => padded(match *s {
                 "limit" => v_flex().items_center().py(px(48.)).gap(px(8.)).child(icon("clock", 28., c(TEXT2))).child(div().text_size(px(17.)).font_weight(w(600.)).child("Spotify is taking a break")).child(div().max_w(px(520.)).text_color(c(TEXT2)).child(msg.clone().unwrap_or_else(|| "Spotify is rate-limiting rune \u{2014} try again later.".into()))).child(div().text_size(px(12.)).text_color(c(TEXT3)).child("Discover shares a small request budget, so a busy hour never locks the app out for a day.")),

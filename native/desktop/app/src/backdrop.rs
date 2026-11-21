@@ -208,14 +208,10 @@ impl Backdrop {
     /// The timer of the Video loop: tells the worker the size and whether frames are wanted (it paces them itself).
     fn tick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Duration {
         if self.dust.is_some() || self.waves.is_some() || self.fade.is_some() { self.drop_images(window); }
-        let vs = window.viewport_size();
-        let scale = window.scale_factor();
-        let (pw, ph) = ((f32::from(vs.width) * scale).round() as u32, (f32::from(vs.height) * scale).round() as u32);
-        if pw == 0 || ph == 0 { return Duration::from_millis(250); }
-        let size = video::decode_size(pw, ph);
-        if self.video_sent.0 != Some(size) { let _ = self.vtx.send(video::Ctl::Size(size.0, size.1)); self.video_sent.0 = Some(size); }
-        // (Reduce effects: frames only until the first one of this size is on screen, then it holds still)
-        let have = self.video.as_ref().is_some_and(|v| (v.1, v.2) == size);
+        // (the clip plays at its own size whatever the window's: the GPU fits it, see render_video)
+        if self.video_sent.0.is_none() { let _ = self.vtx.send(video::Ctl::Start); self.video_sent.0 = Some((0, 0)); }
+        // (Reduce effects: frames only until the first one is on screen, then it holds still)
+        let have = self.video.is_some();
         let live = animating(self.prefs, window.is_window_active()) || (self.prefs.reduce && !have);
         if self.video_sent.1 != Some(live) { let _ = self.vtx.send(video::Ctl::Live(live)); self.video_sent.1 = Some(live); }
         if self.video.is_none() { cx.notify(); }
@@ -456,7 +452,12 @@ impl Backdrop {
         let frame = self.video.clone();
         let quad = canvas(|_, _, _| (), move |bounds, _, window, _| {
             window.paint_quad(fill(bounds, ca(0x000000, 1.0)));
-            if let Some((img, ..)) = frame.clone() { let _ = window.paint_image(bounds, bounds, Corners::default(), img, 0, false); }
+            if let Some((img, iw, ih)) = frame.clone() {
+                // cover the window, centred, never stretched out of shape (the overflow is clipped by the root)
+                let (x, y, w, h) = video::cover(iw as f32, ih as f32, f32::from(bounds.size.width), f32::from(bounds.size.height));
+                let at = Bounds { origin: point(bounds.origin.x + px(x), bounds.origin.y + px(y)), size: size(px(w), px(h)) };
+                let _ = window.paint_image(bounds, at, Corners::default(), img, 0, false);
+            }
         });
         let root = root.child(quad.absolute().top_0().left_0().size_full());
         if bare() { return root; }
