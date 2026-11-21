@@ -27,6 +27,7 @@ mod route;
 mod rune;
 mod setup;
 mod shell;
+mod volume;
 mod smart;
 mod smartdlg;
 mod shortcuts;

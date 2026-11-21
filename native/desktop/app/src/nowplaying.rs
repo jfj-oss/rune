@@ -138,7 +138,7 @@ impl Rune {
         let vol_icon = if volume <= 0. { "volume-x" } else if volume < 40. { "volume-1" } else { "volume-2" };
         let vol = h_flex().w_full().pt(px(4.)).gap(px(4.)).items_center()
             .child(div().id("np-mute").role(Role::Button).aria_label("Mute").child(btn_icon(vol_icon, 18., c(TEXT2), false)).on_click(cx.listener(move |this, _, _, cx| { let to = if volume > 0. { 0. } else { 60. }; this.vol_hold = Some((std::time::Instant::now(), to)); this.cmd(UiCommand::Volume(to), cx); })))
-            .child(div().flex_1().child(self.slider("np-vol", (volume / 100.) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx)));
+            .child(div().id("np-vol-wheel").flex_1().on_scroll(cx.listener(|this, ev: &ScrollEvent, _, cx| this.vol_wheel(ev, cx))).child(self.slider("np-vol", crate::shell::volume_to_pos(volume) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx)));
         let tone = crate::shell::signal_tone(&self.signal_path);
         let signal = h_flex().flex_wrap().items_center().gap(px(10.)).text_size(px(12.5)).text_color(c(TEXT3))
             .child(div().size(px(10.)).rounded_full().bg(match tone { 2 => c(OK), 1 => c(WARN), _ => c(TEXT3) }))

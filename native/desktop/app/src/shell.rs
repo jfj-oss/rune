@@ -272,7 +272,7 @@ impl Rune {
                     let to = if volume > 0. { 0. } else { 60. };
                     this.vol_hold = Some((std::time::Instant::now(), to)); this.cmd(UiCommand::Volume(to), cx);
                 })))
-                .child(div().flex_1().child(self.slider("vol", (volume / 100.) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx))))
+                .child(div().id("vol-wheel").flex_1().on_scroll(cx.listener(|this, ev: &ScrollEvent, _, cx| this.vol_wheel(ev, cx))).child(self.slider("vol", volume_to_pos(volume) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx))))
             .child(div().id("queue-btn").role(Role::Button).aria_label("Queue").child(btn_icon("list-music", 20., c(TEXT2_GLASS), self.queue_open)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = !this.queue_open; cx.notify(); })));
 
         // occlude: clicks and drags on the bar must not reach the page under it (a seek or pause on top of an album's track
@@ -283,6 +283,32 @@ impl Rune {
     }
 
     // ------------------------------------------------------------------ drag handling (seek, volume)
+
+    /// Scroll over a volume bar: one wheel notch (or ~80 px of trackpad travel) is one 5% step, sent at once (at most
+    /// ~8 commands a second; the latest always lands) and shown at once.
+    pub fn vol_wheel(&mut self, ev: &ScrollEvent, cx: &mut Context<Self>) {
+        let d = match ev.delta { ScrollDelta::Lines(l) => { let y = if l.y != 0. { l.y } else { -l.x }; if y == 0. { 0. } else { y.signum() * VOL_WHEEL_PX } } ScrollDelta::Pixels(p) => { let (y, x) = (f32::from(p.y), f32::from(p.x)); if y.abs() >= x.abs() { y } else { -x } } };
+        if d == 0. { return; }
+        cx.stop_propagation();
+        if self.vol_wheel_acc != 0. && self.vol_wheel_acc.signum() != d.signum() { self.vol_wheel_acc = 0.; }
+        self.vol_wheel_acc += d;
+        let n = (self.vol_wheel_acc / VOL_WHEEL_PX).trunc();
+        if n == 0. { return; }
+        self.vol_wheel_acc -= n * VOL_WHEEL_PX;
+        let now_v = match self.vol_hold { Some((t, v)) if t.elapsed().as_millis() < 4000 => v, _ => self.model.player.as_ref().map(|p| p.volume).unwrap_or(0.) };
+        let to = wheel_step(now_v, n as i32);
+        self.vol_hold = Some((std::time::Instant::now(), to));
+        if self.vol_sent.elapsed().as_millis() >= 120 { self.vol_sent = std::time::Instant::now(); self.cmd(UiCommand::Volume(to), cx); }
+        else {
+            // the last step of a quick burst still reaches the server
+            let at = self.vol_sent;
+            cx.spawn(async move |me, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(140)).await;
+                let _ = me.update(cx, |me, cx| { if me.vol_sent == at { if let Some((_, v)) = me.vol_hold { me.vol_sent = std::time::Instant::now(); me.cmd(UiCommand::Volume(v), cx); } } });
+            }).detach();
+        }
+        cx.notify();
+    }
 
     pub fn start_seek_drag(&mut self, x: f32, cx: &mut Context<Self>) {
         self.drag = Some(Drag::Seek);
@@ -299,7 +325,7 @@ impl Rune {
             Some(Drag::Volume) => {
                 let b = self.vol_bounds.get();
                 let f = ((x - f32::from(b.origin.x)) / f32::from(b.size.width).max(1.)).clamp(0., 1.);
-                let v = (f * 100.).round() as f64;
+                let v = snap_volume(pos_to_volume(f as f64));
                 self.vol_hold = Some((std::time::Instant::now(), v));
                 // at most ~6 volume commands a second while dragging (Spotify rate limits), the last one on release
                 if self.vol_sent.elapsed().as_millis() >= 160 { self.vol_sent = std::time::Instant::now(); self.cmd(UiCommand::Volume(v), cx); }
@@ -326,7 +352,7 @@ impl Rune {
                 let b = self.vol_bounds.get();
                 let f = ((f32::from(ev.position.x) - f32::from(b.origin.x)) / f32::from(b.size.width).max(1.)).clamp(0., 1.);
                 self.drag = None;
-                let v = (f * 100.).round() as f64;
+                let v = snap_volume(pos_to_volume(f as f64));
                 self.vol_hold = Some((std::time::Instant::now(), v));
                 self.cmd(UiCommand::Volume(v), cx);
             }
@@ -378,3 +404,5 @@ fn vw_right_edge(vw: f32) -> f32 { vw - 20. }
 pub fn signal_tone(steps: &[String]) -> u8 {
     if steps.is_empty() { 0 } else if steps.iter().any(|s| s.to_lowercase().contains("bit-perfect")) { 2 } else { 1 }
 }
+
+pub use crate::volume::{pos_to_volume, snap_volume, volume_to_pos, wheel_step, VOL_WHEEL_PX};
