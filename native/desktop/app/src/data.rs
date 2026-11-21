@@ -88,7 +88,10 @@ impl Data {
         self.playlists = None;
         self.artist_cards = None;
         self.genres = None;
-        self.json.clear();
+        // keep what is on screen and ask again in the background: clearing it emptied lists like Discover for a moment,
+        // which threw their scroll back to the top after every like or playlist add
+        let old = Instant::now().checked_sub(STALE * 2);
+        for c in self.json.values_mut() { if let Some(t) = old { c.at = t; } }
         for l in self.tracks.values_mut() { l.at = None; }
     }
 }

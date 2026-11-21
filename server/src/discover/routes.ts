@@ -2,6 +2,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { DiscoverModule } from './service.js';
 import { DiscoverNotFoundError } from './service.js';
+import { rememberDiscoverItems } from './seen.js';
 
 export function registerDiscoverRoutes(app: FastifyInstance, discover: DiscoverModule): void {
   app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
@@ -9,9 +10,11 @@ export function registerDiscoverRoutes(app: FastifyInstance, discover: DiscoverM
     async (req, reply) => {
       const limit = req.query.limit === undefined ? undefined : Number(req.query.limit);
       try {
-        return await discover.similar(req.params.id, {
+        const res = await discover.similar(req.params.id, {
           ...(Number.isFinite(limit) ? { limit } : {}),
         });
+        rememberDiscoverItems(res.items ?? []);
+        return res;
       } catch (err) {
         return replyError(reply, req.log, err);
       }
@@ -22,10 +25,12 @@ export function registerDiscoverRoutes(app: FastifyInstance, discover: DiscoverM
     const raw = req.query.limit === undefined ? undefined : Number(req.query.limit);
     const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
     try {
-      return await discover.feed({
+      const res = await discover.feed({
         ...(Number.isFinite(raw) ? { limit: raw } : {}),
         refresh,
       });
+      for (const g of res.groups ?? []) rememberDiscoverItems(g.items ?? []);
+      return res;
     } catch (err) {
       return replyError(reply, req.log, err);
     }

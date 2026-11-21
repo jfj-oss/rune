@@ -24,6 +24,7 @@ import {
 import { createSpotify, type CreateSpotifyOptions, type SpotifyBudgetLevel } from '../spotify/index.js';
 import { HttpError } from '../spotify/fetch.js';
 import { createDiscover, registerDiscoverRoutes } from '../discover/index.js';
+import { seenDiscoverSong } from '../discover/seen.js';
 import { mergeSearchResults } from '../spotify/catalog.js';
 import { normalizeName } from '../db/index.js';
 import { LIKED_SONGS_PLAYLIST_ID, SpotifyReconnectNeeded, addTracksToSpotifyPlaylist, spotifyAlbumIsFull } from '../spotify/library.js';
@@ -454,7 +455,11 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
       if (hit && hit.track.id === id) {
         out.push(hit);
         k++;
-      } else if (id.startsWith('sp:')) out.push(placeholderItem(id, makeQueueId()));
+      } else if (id.startsWith('sp:')) {
+        // a song Discover showed keeps what it showed; any other unknown Spotify song is a placeholder to look up
+        const shown = seenDiscoverSong(id);
+        out.push(shown ? { queueId: makeQueueId(), track: shown.track, album: shown.album } : placeholderItem(id, makeQueueId()));
+      }
     }
     return out;
   }
