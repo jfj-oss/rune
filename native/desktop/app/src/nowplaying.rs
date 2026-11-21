@@ -70,7 +70,9 @@ impl Rune {
         let (shuffle, repeat) = player.as_ref().map(|p| (p.shuffle, p.repeat)).unwrap_or((false, Repeat::Off));
         let now = now_ms();
         let dur = cur.as_ref().map(|q| q.track.duration_ms).unwrap_or(0.);
-        let pos = self.seek_drag.unwrap_or_else(|| player.as_ref().map(|p| p.position(now)).unwrap_or(0.));
+        let live = player.as_ref().map(|p| p.position(now)).unwrap_or(0.);
+        let held = self.seek_hold.and_then(|(t, ms)| { let el = t.elapsed().as_millis() as f64; (el < 2500. && (live - (ms + el)).abs() > 1500.).then_some(ms + el) });
+        let pos = self.seek_drag.or(held).unwrap_or(live);
         let volume = match self.vol_hold { Some((t, v)) if t.elapsed().as_millis() < 4000 => v, _ => player.as_ref().map(|p| p.volume).unwrap_or(0.) };
         let frac = if dur > 0. { (pos / dur) as f32 } else { 0. };
         let panel_w = ((vw - 144. - 64.) * 0.42).clamp(380., 540.);

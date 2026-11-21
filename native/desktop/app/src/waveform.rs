@@ -107,6 +107,8 @@ impl Rune {
                 }
             }).absolute().size_full())
             .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, _w, cx| { this.start_seek_drag(f32::from(ev.position.x), cx); }))
+            // a quick click ends here: the window-level release listener only exists from the next frame on
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _w, cx| { if this.drag.is_some() { this.on_drag_up(ev, cx); cx.notify(); } }))
     }
 }
 

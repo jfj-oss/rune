@@ -191,6 +191,8 @@ impl Rune {
                 this.drag = Some(which);
                 this.drag_to(f32::from(ev.position.x), cx);
             }))
+            // a quick click ends here: the window-level release listener only exists from the next frame on
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _w, cx| { if this.drag.is_some() { this.on_drag_up(ev, cx); cx.notify(); } }))
     }
 
     fn playerbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -203,7 +205,10 @@ impl Rune {
         let has_queue = player.as_ref().is_some_and(|p| !p.queue.is_empty());
         let (shuffle, repeat) = player.as_ref().map(|p| (p.shuffle, p.repeat)).unwrap_or((false, Repeat::Off));
         let dur = cur.as_ref().map(|q| q.track.duration_ms).unwrap_or(0.);
-        let pos = self.seek_drag.unwrap_or_else(|| player.as_ref().map(|p| p.position(now)).unwrap_or(0.));
+        let live = player.as_ref().map(|p| p.position(now)).unwrap_or(0.);
+        // after a seek, show where it was sent until the server's position catches up (no jump back to the old spot)
+        let held = self.seek_hold.and_then(|(t, ms)| { let el = t.elapsed().as_millis() as f64; (el < 2500. && (live - (ms + el)).abs() > 1500.).then_some(ms + el) });
+        let pos = self.seek_drag.or(held).unwrap_or(live);
         let volume = match self.vol_hold { Some((t, v)) if t.elapsed().as_millis() < 4000 => v, _ => player.as_ref().map(|p| p.volume).unwrap_or(0.) };
         let vw_slider = vol_w(vw);
         let peaks = match cur.as_ref() { Some(q) => self.peaks_for(&q.track.id, q.track.duration_ms, cx), None => None };
@@ -352,13 +357,13 @@ impl Rune {
         if self.drag.is_some() { self.drag_to(f32::from(ev.position.x), cx); }
     }
 
-    fn on_drag_up(&mut self, ev: &MouseUpEvent, cx: &mut Context<Self>) {
+    pub(crate) fn on_drag_up(&mut self, ev: &MouseUpEvent, cx: &mut Context<Self>) {
         match self.drag.take() {
             Some(Drag::Seek) => {
                 self.drag = Some(Drag::Seek);
                 self.drag_to(f32::from(ev.position.x), cx);
                 self.drag = None;
-                if let Some(ms) = self.seek_drag.take() { self.cmd(UiCommand::SeekTo(ms), cx); }
+                if let Some(ms) = self.seek_drag.take() { self.seek_hold = Some((std::time::Instant::now(), ms)); self.cmd(UiCommand::SeekTo(ms), cx); }
             }
             Some(Drag::Volume) => {
                 self.drag = Some(Drag::Volume);
