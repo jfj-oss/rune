@@ -275,8 +275,10 @@ impl Rune {
                 .child(div().flex_1().child(self.slider("vol", (volume / 100.) as f32, 6., 18., false, self.vol_bounds.clone(), Drag::Volume, cx))))
             .child(div().id("queue-btn").role(Role::Button).aria_label("Queue").child(btn_icon("list-music", 20., c(TEXT2_GLASS), self.queue_open)).on_click(cx.listener(|this, _, _, cx| { this.queue_open = !this.queue_open; cx.notify(); })));
 
-        h_flex().absolute().left_0().right_0().bottom_0().h(px(NPBAR_H)).px(px(20.)).gap(px(20.)).items_center()
-            .bg(ca(0x020208, 0.97)).border_t_1().border_color(wh(0.16))
+        // occlude: clicks and drags on the bar must not reach the page under it (a seek or pause on top of an album's track
+        // list used to also "click" the track row beneath and start that song)
+        h_flex().id("player-bar").absolute().left_0().right_0().bottom_0().h(px(NPBAR_H)).px(px(20.)).gap(px(20.)).items_center()
+            .bg(ca(0x020208, 0.97)).border_t_1().border_color(wh(0.16)).occlude()
             .child(left).child(centre).child(right)
     }
 
