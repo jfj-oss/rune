@@ -292,6 +292,9 @@ impl Rune {
                 if rune_editable && (selecting || m.shift || m.control || m.platform) {
                     let (s, a) = select_row(&this.pl_sel, this.pl_anchor, i, m.shift, m.control || m.platform || this.pl_select_mode || !this.pl_sel.is_empty() && !m.shift);
                     this.pl_sel = s; this.pl_anchor = a; cx.notify();
+                } else if playing {
+                    // the song already playing: its row's button pauses and resumes, as on the web (it used to restart the list)
+                    this.cmd(rune_mini_core::commands::UiCommand::PlayPause, cx);
                 } else if let Some(v) = this.pl_view.clone() { this.play_tracks(v.tracks.clone(), i, false, cx); } else { this.play_playlist(&pid, false, i, cx); }
             }))
             .into_any_element()

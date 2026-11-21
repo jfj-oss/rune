@@ -236,7 +236,7 @@ impl Rune {
                 .child(btn_icon("ellipsis", 18., c(TEXT2), false))
                 .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| { cx.stop_propagation(); let p = ev.position(); let mut m = menu2.clone(); m.x = f32::from(p.x) - 200.; m.y = f32::from(p.y) + 20.; this.open_menu(m, cx); })))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| { let mut m = menu.clone(); m.x = f32::from(ev.position.x); m.y = f32::from(ev.position.y); this.open_menu(m, cx); }))
-            .on_click(cx.listener(move |this, _, _, cx| { let _ = &ids2; this.play_tracks(order2.clone(), i, false, cx) }))
+            .on_click(cx.listener(move |this, _, _, cx| { let _ = &ids2; if playing { this.cmd(rune_mini_core::commands::UiCommand::PlayPause, cx) } else { this.play_tracks(order2.clone(), i, false, cx) } }))
             .into_any_element()
     }
 }
