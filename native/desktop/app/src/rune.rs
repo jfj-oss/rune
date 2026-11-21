@@ -299,6 +299,10 @@ pub struct Rune {
     pub vol_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     pub test: Option<crate::testhook::Hook>,
     pub frame: u64,
+    /// space between the window's edge and the app's content while framed (see frame.rs)
+    pub frame_inset: f32,
+    /// what the window looks like right now (test hook): size, maximized, active, framed, client-decorated
+    pub win_info: (f32, f32, bool, bool, bool, bool),
     pub bench_times: Vec<f64>,
     pub last_frame: Option<Instant>,
     tick: Option<Task<()>>,
@@ -410,7 +414,7 @@ impl Rune {
             cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs, custom_mid_in, custom_light_in, picker: None, picker_hex_in, picker_closed: None, bd_input: None, bd_song: String::new(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, seek_hold: None, bar_shown: None, vol_sent: Instant::now() - Duration::from_secs(5), vol_wheel_acc: 0., zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
-            search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
+            search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, frame_inset: 0., win_info: (0., 0., false, false, false, false), bench_times: vec![], last_frame: None, tick: None, _subs: subs,
         };
         me.net.viewing(vec![me.model.zone.clone()]);
         let mut me = me;

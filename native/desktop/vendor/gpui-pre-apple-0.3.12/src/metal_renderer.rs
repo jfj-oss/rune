@@ -66,7 +66,21 @@ vertex CustomVarying vs_custom(uint vid [[vertex_id]], constant float* U [[buffe
 }
 "#;
 const CUSTOM_SHADER_SUFFIX: &str = "
-fragment float4 fs_custom(CustomVarying in [[stage_in]], constant float* U [[buffer(0)]]) { return custom_fs(in.position.xy, U); }
+float rune_round_cover(float2 p, constant float* U) {
+    float r = U[9];
+    if (r <= 0.0) { return 1.0; }
+    uint k = uint(U[10] + 0.5);
+    float2 lo = float2(U[0], U[1]);
+    float2 hi = lo + float2(U[2], U[3]);
+    bool left = p.x < lo.x + r, right = p.x > hi.x - r, top = p.y < lo.y + r, bottom = p.y > hi.y - r;
+    float2 centre = float2(0.0); bool hit = false;
+    if (top && left && (k & 1u) != 0u) { centre = lo + float2(r, r); hit = true; }
+    if (top && right && (k & 2u) != 0u) { centre = float2(hi.x - r, lo.y + r); hit = true; }
+    if (bottom && right && (k & 4u) != 0u) { centre = hi - float2(r, r); hit = true; }
+    if (bottom && left && (k & 8u) != 0u) { centre = float2(lo.x + r, hi.y - r); hit = true; }
+    return hit ? clamp(0.5 - (length(p - centre) - r), 0.0, 1.0) : 1.0;
+}
+fragment float4 fs_custom(CustomVarying in [[stage_in]], constant float* U [[buffer(0)]]) { float4 c = custom_fs(in.position.xy, U); c.a *= rune_round_cover(in.position.xy, U); return c; }
 ";
 
 pub type Context = Arc<Mutex<InstanceBufferPool>>;

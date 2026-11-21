@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+<g id="pressed-center">
+ <defs>
+  <radialGradient id="pressed-center-b" cx="0.5" cy="0.46" r="0.56"><stop offset="0" stop-color="#c14943"/><stop offset="0.78" stop-color="#c14943"/><stop offset="1" stop-color="#a2332d"/></radialGradient>
+  <linearGradient id="pressed-center-s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+  <radialGradient id="pressed-center-g" cx="0.5" cy="0.95" r="0.5"><stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+ </defs>
+ <rect x="0" y="0" width="24" height="24" fill="none"/>
+ <circle cx="12" cy="12" r="11.4" fill="#020202"/>
+ <circle cx="12" cy="12" r="10.2" fill="url(#pressed-center-b)"/>
+ <circle cx="12" cy="12" r="10.2" fill="url(#pressed-center-g)"/>
+ <ellipse cx="12" cy="7.4" rx="6.4" ry="3.6" fill="url(#pressed-center-s)"/>
+</g>
+</svg>

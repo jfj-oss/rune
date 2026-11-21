@@ -19,6 +19,9 @@ pub fn pop(x: f32, y: f32, items: Vec<PopItem>) -> PopMenu {
 
 impl Rune {
     pub fn open_menu(&mut self, m: PopMenu, cx: &mut Context<Self>) {
+        let mut m = m;
+        // menu positions come from the pointer (window coordinates); the app's own coordinates start inside the frame
+        m.x -= self.frame_inset; m.y -= self.frame_inset;
         self.menu = Some(m);
         self.zone_open = false;
         self.signal_open = false;
@@ -63,7 +66,7 @@ impl Rune {
     pub fn menu_overlay(&mut self, window: &mut Window, vw: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let m = self.menu.clone().unwrap();
         if m.add_open { self.ensure_playlists(cx); }
-        let vh = f32::from(window.viewport_size().height);
+        let vh = f32::from(crate::frame::content_size(window).height);
         let mut items: Vec<(PopItem, bool)> = vec![];
         for it in &m.items {
             items.push((it.clone(), false));
@@ -138,7 +141,7 @@ impl Rune {
     }
 
     pub fn dialog_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let scrim = div().absolute().size_full().top_0().left_0().bg(ca(0x06060a, 0.62)).flex().items_center().justify_center().occlude();
+        let scrim = div().absolute().size_full().top_0().left_0().bg(ca(0x06060a, 0.62)).rounded(px(crate::frame::round())).flex().items_center().justify_center().occlude();
         if matches!(self.dialog, Some(Dialog::Smart(_))) { return self.smart_overlay(scrim, window, cx); }
         match self.dialog.as_ref().unwrap() {
             Dialog::NewPlaylist { name, desc, ids } => {

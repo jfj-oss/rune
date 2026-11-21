@@ -40,9 +40,32 @@ fn vs_custom(@builtin(vertex_index) vertex_id: u32) -> CustomVarying {
     return out;
 }
 
+// RUNE PATCH: coverage of the rounded rect of the quad's bounds (radius U[9] in device px, corner bits U[10]); 1 for radius 0
+fn rune_round_cover(p: vec2<f32>) -> f32 {
+    let r = U[9];
+    if (r <= 0.0) { return 1.0; }
+    let k = u32(U[10] + 0.5);
+    let lo = vec2<f32>(U[0], U[1]);
+    let hi = lo + vec2<f32>(U[2], U[3]);
+    var cov = 1.0;
+    let left = p.x < lo.x + r;
+    let right = p.x > hi.x - r;
+    let top = p.y < lo.y + r;
+    let bottom = p.y > hi.y - r;
+    var centre = vec2<f32>(0.0, 0.0);
+    var hit = false;
+    if (top && left && (k & 1u) != 0u) { centre = lo + vec2<f32>(r, r); hit = true; }
+    if (top && right && (k & 2u) != 0u) { centre = vec2<f32>(hi.x - r, lo.y + r); hit = true; }
+    if (bottom && right && (k & 4u) != 0u) { centre = hi - vec2<f32>(r, r); hit = true; }
+    if (bottom && left && (k & 8u) != 0u) { centre = vec2<f32>(lo.x + r, hi.y - r); hit = true; }
+    if (hit) { cov = clamp(0.5 - (length(p - centre) - r), 0.0, 1.0); }
+    return cov;
+}
+
 @fragment
 fn fs_custom(input: CustomVarying) -> @location(0) vec4<f32> {
-    let c = custom_fs(input.position.xy);
+    var c = custom_fs(input.position.xy);
+    c.a = c.a * rune_round_cover(input.position.xy);
     let m = select(1.0, c.a, globals.premultiplied_alpha != 0u);
     return vec4<f32>(c.rgb * m, c.a);
 }

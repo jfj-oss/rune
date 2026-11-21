@@ -60,8 +60,8 @@ impl Rune {
     }
 
     pub fn now_playing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let vw = f32::from(window.viewport_size().width);
-        let vh = f32::from(window.viewport_size().height);
+        let vw = f32::from(crate::frame::content_size(window).width);
+        let vh = f32::from(crate::frame::content_size(window).height);
         let player = self.model.player.clone();
         let cur = player.as_ref().and_then(|p| p.current()).cloned();
         let index = player.as_ref().map(|p| p.index).unwrap_or(-1);
@@ -170,7 +170,7 @@ impl Rune {
         let is_radio = cur.as_ref().is_some_and(|q| crate::playroute::source_of(&q.track.id, "") == crate::playroute::Source::Radio);
         let np_scroll = self.hscrolls.entry("np-body".into()).or_default().clone();
         let more = cur.as_ref().filter(|_| !is_radio).map(|q| self.np_more(q, vw, cx));
-        div().absolute().top_0().left_0().size_full().bg(c(0x000000)).occlude().flex().flex_col()
+        div().absolute().top_0().left_0().size_full().bg(c(0x000000)).rounded(px(crate::frame::round())).occlude().flex().flex_col()
             .child(div().absolute().inset_0().bg(linear_gradient(180., linear_color_stop(ca(0x000000, 0.0), 0.), linear_color_stop(ca(0x0f1013, 0.55), 1.))))
             .child(top)
             .child(div().id("np-body").flex_1().min_h_0().overflow_y_scroll().track_scroll(&np_scroll).child(div().w_full().h(px(vh - 64.)).child(main)).children(more))

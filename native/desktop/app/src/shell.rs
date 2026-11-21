@@ -23,6 +23,8 @@ pub fn vol_w(window_w: f32) -> f32 { (window_w * 0.22).clamp(240., 340.) }
 impl Render for Rune {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.frame += 1;
+        self.frame_inset = crate::frame::inset(window);
+        { let v = window.viewport_size(); self.win_info = (f32::from(v.width), f32::from(v.height), window.is_maximized(), window.is_window_active(), crate::frame::framed(window), crate::frame::client(window)); }
         self.win_active = window.is_window_active();
         self.watch_window(window, cx);
         if self.frame == 1 { self.start_hook_loop(cx); }
@@ -31,7 +33,7 @@ impl Render for Rune {
         self.sync_backdrop(cx);
         self.covers.evict(window);
         if let Some(a) = self.pending_smart.take() { self.smart_act(a, window, cx); }
-        let vw = f32::from(window.viewport_size().width);
+        let vw = f32::from(crate::frame::content_size(window).width);
         let collapsed = self.sidebar_collapsed;
         let sw = side_w(collapsed);
         let page = self.page(vw - sw, window, cx);
@@ -52,6 +54,7 @@ impl Render for Rune {
                 .children(self.offline_bar(cx))
                 .child(div().flex_1().min_h_0().relative().child(page)))
             .child(self.sidebar(window, cx))
+            .children(self.lights_zone(window, cx))
             .child(self.playerbar(window, cx))
             // while a seek or volume drag is held, follow the pointer and catch the release anywhere in the window: the
             // root's own move/up listeners miss events over occluding layers (the player bar itself), which left the bar stuck
@@ -113,9 +116,9 @@ impl Rune {
         let r = self.route().clone();
         let spotify_view = matches!(&r, Route::Albums(q) if q.source == Src::Spotify);
         let it = |s: &Self, id, label, ic, active, to, cx: &mut Context<Self>| s.nav_item(id, label, ic, active, to, cx);
-        v_flex().absolute().left_0().top_0().bottom(px(NPBAR_H)).w(px(side_w(collapsed))).px(px(if collapsed { 10. } else { 12. })).pt(px(20.)).pb(px(12.)).gap(px(4.)).overflow_hidden().occlude()
+        v_flex().absolute().left_0().top_0().bottom(px(NPBAR_H)).w(px(side_w(collapsed))).px(px(if collapsed { 10. } else { 12. })).pt(px(TOPBAR_H - 6.)).pb(px(12.)).gap(px(4.)).overflow_hidden().occlude().rounded_tl(px(crate::frame::round()))
             .bg(ca(0x020208, 0.52)).border_r_1().border_color(wh(0.16))
-            .child(h_flex().h(px(44.)).px(px(if collapsed { 0. } else { 10. })).pb(px(18.)).gap(px(10.)).items_center().when(collapsed, |d| d.justify_center())
+            .child(h_flex().h(px(44.)).px(px(if collapsed { 0. } else { 10. })).pb(px(8.)).gap(px(10.)).items_center().when(collapsed, |d| d.justify_center())
                 .child(crate::logo::logo(36.))
                 .when(!collapsed, |d| d.child(div().font_weight(w(600.)).text_size(px(22.)).text_color(c(TEXT)).child("rune"))))
             .child(v_flex().gap(px(2.))
@@ -150,17 +153,31 @@ impl Rune {
 
     // ------------------------------------------------------------------ top bar
 
-    fn topbar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The strip over the sidebar's top, the left end of the top row: the glossy traffic lights (Linux), and bare space that drags the window.
+    fn lights_zone(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let sw = side_w(self.sidebar_collapsed);
+        let me = cx.entity();
+        let lights = crate::frame::client(window).then(|| {
+            let close = move |window: &mut Window, cx: &mut App| { me.update(cx, |r, _| r.remember_window(window)); window.remove_window(); };
+            h_flex().absolute().left(px(if self.sidebar_collapsed { 10. } else { crate::frame::LIGHTS_LEFT })).top_0().h(px(TOPBAR_H)).items_center().child(crate::frame::traffic_lights(window, cx, close))
+        });
+        let d = div().id("lights-zone").absolute().left_0().top_0().w(px(sw)).h(px(TOPBAR_H)).occlude().rounded_tl(px(crate::frame::round())).children(lights);
+        Some(crate::frame::bar_behaviour(d, "lights-drag", window, cx))
+    }
+
+    fn topbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (cb, cf) = (self.hist.can_back(), self.hist.can_forward());
         let nav = |id: &'static str, name: &'static str, on: bool| {
-            div().id(id).role(Role::Button).aria_label(if name == "chevron-left" { "Back" } else { "Forward" }).when(!on, |d| d.opacity(0.35)).child(btn_icon(name, 20., c(TEXT2), false)).when(on, |d| d.cursor_pointer())
+            div().id(id).role(Role::Button).aria_label(if name == "chevron-left" { "Back" } else { "Forward" }).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).when(!on, |d| d.opacity(0.35)).child(btn_icon(name, 20., c(TEXT2), false)).when(on, |d| d.cursor_pointer())
         };
         let has_text = !self.search_input.read(cx).value().is_empty();
-        h_flex().flex_none().h(px(TOPBAR_H)).px(px(20.)).gap(px(12.)).items_center().border_b_1().border_color(wh(0.06))
-            .child(h_flex().gap(px(2.))
+        let stop = |d: Div| d.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        let bar = h_flex().id("topbar").flex_none().h(px(TOPBAR_H)).px(px(20.)).gap(px(12.)).items_center().border_b_1().border_color(wh(0.06));
+        crate::frame::bar_behaviour(bar, "topbar-drag", window, cx)
+            .child(stop(h_flex().gap(px(2.)))
                 .child(nav("back", "chevron-left", cb).on_click(cx.listener(|this, _, _, cx| this.back(cx))))
                 .child(nav("fwd", "chevron-right", cf).on_click(cx.listener(|this, _, _, cx| this.forward(cx)))))
-            .child(h_flex().w(px(520.)).flex_shrink(1.).h(px(38.)).px(px(14.)).gap(px(10.)).items_center().rounded_full().bg(surface()).border_1().border_color(line()).text_color(c(TEXT3))
+            .child(stop(h_flex().w(px(520.)).flex_shrink(1.).h(px(38.))).px(px(14.)).gap(px(10.)).items_center().rounded_full().bg(surface()).border_1().border_color(line()).text_color(c(TEXT3))
                 .child(icon("search", 16., c(TEXT3)))
                 .child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&self.search_input).appearance(false).cleanable(false)))
                 .child(if has_text {
@@ -171,7 +188,7 @@ impl Rune {
                     div().px(px(6.)).py(px(1.)).rounded(px(4.)).border_1().border_color(line()).text_size(px(11.)).font_weight(w(500.)).text_color(c(TEXT3)).child("/").into_any_element()
                 }))
             .child(div().flex_1())
-            .child(div().id("settings").role(Role::Button).aria_label("Settings").child(btn_icon("settings", 19., c(TEXT2), false))
+            .child(div().id("settings").role(Role::Button).aria_label("Settings").on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(btn_icon("settings", 19., c(TEXT2), false))
                 .on_click(cx.listener(|this, ev: &ClickEvent, window, cx| this.open_top_menu(ev, window, cx))))
     }
 
@@ -197,7 +214,7 @@ impl Rune {
 
     fn playerbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now = now_ms();
-        let vw = f32::from(window.viewport_size().width);
+        let vw = f32::from(crate::frame::content_size(window).width);
         let player = self.model.player.clone();
         let cur = player.as_ref().and_then(|p| p.current()).cloned();
         let status = player.as_ref().map(|p| p.status.clone()).unwrap_or(Status::Stopped);
@@ -297,7 +314,7 @@ impl Rune {
         // occlude: clicks and drags on the bar must not reach the page under it (a seek or pause on top of an album's track
         // list used to also "click" the track row beneath and start that song)
         h_flex().id("player-bar").absolute().left_0().right_0().bottom_0().h(px(NPBAR_H)).px(px(20.)).gap(px(20.)).items_center()
-            .bg(ca(0x020208, 0.97)).border_t_1().border_color(wh(0.16)).occlude()
+            .bg(ca(0x020208, 0.97)).border_t_1().border_color(wh(0.16)).occlude().rounded_bl(px(crate::frame::round())).rounded_br(px(crate::frame::round()))
             .child(left).child(centre).child(right)
     }
 

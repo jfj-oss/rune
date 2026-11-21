@@ -90,6 +90,9 @@ pub struct ShaderQuad {
     pub shader: ShaderId,
     /// Seconds since the first shader quad was painted in this process.
     pub time: f32,
+    /// RUNE PATCH: rounded corners (device px radius, corner bits 1 = top left, 2 = top right, 4 = bottom right, 8 = bottom left); the
+    /// renderers fade the quad out beyond the rounded rect of `bounds`. Radius 0 = square.
+    pub round: [f32; 2],
     /// The app's floats, passed after the header.
     pub data: Arc<[f32]>,
 }
@@ -100,7 +103,7 @@ impl ShaderQuad {
     pub fn pack(&self) -> Vec<f32> {
         let (b, m) = (&self.bounds, &self.content_mask.bounds);
         let mut out = Vec::with_capacity(SHADER_HEADER_LEN + self.data.len());
-        out.extend_from_slice(&[b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0, m.origin.x.0, m.origin.y.0, m.size.width.0, m.size.height.0, self.time, 0.0, 0.0, 0.0]);
+        out.extend_from_slice(&[b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0, m.origin.x.0, m.origin.y.0, m.size.width.0, m.size.height.0, self.time, self.round[0], self.round[1], 0.0]);
         out.extend_from_slice(&self.data);
         out
     }
@@ -119,8 +122,14 @@ pub fn shader_clock() -> f32 {
 impl Window {
     /// Paints a quad of `bounds` with the custom shader `shader` and the app's floats `data` (see [`ShaderQuad::pack`]).
     pub fn paint_shader_quad(&mut self, bounds: Bounds<Pixels>, shader: ShaderId, data: Arc<[f32]>) {
+        self.paint_shader_quad_round(bounds, shader, data, 0.0, 0);
+    }
+
+    /// RUNE PATCH: like [`Window::paint_shader_quad`] with rounded corners: `radius` in logical pixels, `corners` bits 1 TL, 2 TR, 4 BR, 8 BL.
+    pub fn paint_shader_quad_round(&mut self, bounds: Bounds<Pixels>, shader: ShaderId, data: Arc<[f32]>, radius: f32, corners: u32) {
         self.invalidator.debug_assert_paint();
-        let quad = ShaderQuad { order: 0, bounds: self.snap_bounds(bounds), content_mask: self.snapped_content_mask(), shader, time: shader_clock(), data };
+        let round = [radius * self.scale_factor(), corners as f32];
+        let quad = ShaderQuad { order: 0, bounds: self.snap_bounds(bounds), content_mask: self.snapped_content_mask(), shader, time: shader_clock(), round, data };
         self.next_frame.scene.insert_primitive(quad);
     }
 }
@@ -129,6 +138,11 @@ impl Window {
 /// ask for the next animation frame) and returns the app's floats.
 pub fn shader_quad(shader: ShaderId, data: impl FnOnce(Bounds<Pixels>, &mut Window) -> Arc<[f32]> + 'static) -> Canvas<()> {
     canvas(|_, _, _| (), move |bounds, _, window, _| { let d = data(bounds, window); window.paint_shader_quad(bounds, shader, d); })
+}
+
+/// RUNE PATCH: [`shader_quad`] with rounded corners (`radius` logical px, `corners` bits 1 TL, 2 TR, 4 BR, 8 BL), evaluated at paint time.
+pub fn shader_quad_round(shader: ShaderId, round: impl FnOnce() -> (f32, u32) + 'static, data: impl FnOnce(Bounds<Pixels>, &mut Window) -> Arc<[f32]> + 'static) -> Canvas<()> {
+    canvas(|_, _, _| (), move |bounds, _, window, _| { let d = data(bounds, window); let (r, k) = round(); window.paint_shader_quad_round(bounds, shader, d, r, k); })
 }
 
 // The tests of this module live in the app (native/desktop/app/src/shader_hook_tests.rs): gpui-pre's own test build needs dev

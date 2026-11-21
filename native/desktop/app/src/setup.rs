@@ -78,7 +78,7 @@ impl Rune {
         let (ok, msg) = s.status.clone().map(|(o, m)| (o, Some(m))).unwrap_or((true, None));
         let first = self.first_run;
         let url = self.cfg.url.clone();
-        div().absolute().top_0().left_0().size_full().bg(c(BG)).flex().items_center().justify_center().occlude()
+        div().absolute().top_0().left_0().size_full().bg(c(BG)).rounded(px(crate::frame::round())).flex().items_center().justify_center().occlude()
             .child(v_flex().w(px(520.)).gap(px(18.)).p(px(32.)).rounded(px(20.)).bg(surface()).border_1().border_color(line())
                 .child(h_flex().gap(px(12.)).items_center().child(crate::logo::logo(40.)).child(div().text_size(px(26.)).font_weight(w(600.)).child("rune")))
                 .child(div().text_size(px(20.)).font_weight(w(700.)).child(if first { "Welcome" } else { "Server address" }))
