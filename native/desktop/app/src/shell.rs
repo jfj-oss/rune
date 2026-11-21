@@ -41,9 +41,7 @@ impl Render for Rune {
             .track_focus(&self.focus)
             .key_context("Rune")
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _w, cx| this.on_drag_move(ev, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, _w, cx| this.on_drag_up(ev, cx)))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
                 // a click on bare page gives the keyboard back to the shortcuts (and leaves the search box)
                 if !this.search_input.read(cx).focus_handle(cx).is_focused(window) { window.focus(&this.focus.clone(), cx); }
                 if this.menu.is_some() || this.zone_open || this.signal_open || this.sort_open { this.menu = None; this.zone_open = false; this.signal_open = false; this.sort_open = false; cx.notify(); }
@@ -55,6 +53,21 @@ impl Render for Rune {
                 .child(div().flex_1().min_h_0().relative().child(page)))
             .child(self.sidebar(window, cx))
             .child(self.playerbar(window, cx))
+            // while a seek or volume drag is held, follow the pointer and catch the release anywhere in the window: the
+            // root's own move/up listeners miss events over occluding layers (the player bar itself), which left the bar stuck
+            .children(self.drag.is_some().then(|| {
+                let me = cx.entity();
+                canvas(|_, _, _| (), move |_, _, window, _| {
+                    let m = me.clone();
+                    window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _w, cx| {
+                        if phase == DispatchPhase::Capture { m.update(cx, |this, cx| this.on_drag_move(ev, cx)); }
+                    });
+                    let m = me.clone();
+                    window.on_mouse_event(move |ev: &MouseUpEvent, phase, _w, cx| {
+                        if phase == DispatchPhase::Capture && ev.button == MouseButton::Left { m.update(cx, |this, cx| { this.on_drag_up(ev, cx); cx.notify(); }); }
+                    });
+                }).absolute().size_0()
+            }))
             .children(self.queue_open.then(|| self.queue_drawer(window, cx)))
             .children(self.np_open.then(|| self.now_playing(window, cx)))
             .children(self.song_radio.is_some().then(|| self.song_radio_sheet(window, cx)))
