@@ -308,6 +308,40 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await app.send({ cmd: 'go', route: '/albums' });
   }, 180_000);
 
+  it('a song ends by itself: the bar shows the next song and its moving position, not the old one at 0:00', async () => {
+    await app.send({ cmd: 'zone', id: 'pc' });
+    for (let k = 0; k < 3 && (await srv.state('pc')).repeat !== 'off'; k++) await app.send({ cmd: 'player', name: 'repeat' });
+    await app.send({ cmd: 'play_album', id: srv.library.charlie.id });
+    await until('Charlie playing', async () => { const s = await srv.state('pc'); return s.status === 'playing' && s.queue.length === 1 ? s : undefined; });
+    await app.send({ cmd: 'enqueue_album', id: srv.library.alpha.id, next: false });
+    await until('Alpha queued behind it', async () => (await srv.state('pc')).queue.length === 5);
+    const bar = async () => (await app.state())['bar'] as [string, number, number] | null;
+    await until('the bar to show Charlie', async () => (await bar())?.[0] === 'C1');
+    await app.send({ cmd: 'seek', ms: 10_800 });
+    // the song ends on its own; every song after it is followed on the bar until the list ends
+    for (const next of ['A1', 'A2', 'A3', 'A4']) {
+      await until(`the server to play ${next}`, async () => { const s = await srv.state('pc'); return s.queue[s.index]?.track.title === next ? s : undefined; });
+      await until(`the bar to show ${next}, not the song that ended`, async () => { const b = await bar(); return b?.[0] === next && b[2] > 0 && b[1] <= b[2] ? b : undefined; }, 4_000);
+    }
+  }, 60_000);
+
+  it('own audio: a song ends by itself, the bar shows the next song and its moving position, not the old one at 0:00', async () => {
+    await app.send({ cmd: 'zone', id: 'own' });
+    const own = String((await app.state())['own_zone']);
+    await app.send({ cmd: 'play_album', id: srv.library.charlie.id });
+    await until('Charlie playing', async () => { const s = await srv.state(own); return s.status === 'playing' && s.queue.length === 1 ? s : undefined; });
+    await app.send({ cmd: 'enqueue_album', id: srv.library.alpha.id, next: false });
+    await until('Alpha queued behind it', async () => (await srv.state(own)).queue.length === 5);
+    const bar = async () => (await app.state())['bar'] as [string, number, number] | null;
+    await until('the bar to show Charlie', async () => (await bar())?.[0] === 'C1');
+    await app.send({ cmd: 'seek', ms: 10_800 });
+    // the song ends on its own; every song after it is followed on the bar until the list ends
+    for (const next of ['A1', 'A2', 'A3', 'A4']) {
+      await until(`the server to play ${next}`, async () => { const s = await srv.state(own); return s.queue[s.index]?.track.title === next ? s : undefined; });
+      await until(`the bar to show ${next}, not the song that ended`, async () => { const b = await bar(); return b?.[0] === next && b[2] > 0 && b[1] <= b[2] ? b : undefined; }, 4_000);
+    }
+  }, 60_000);
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();

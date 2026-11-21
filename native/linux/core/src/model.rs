@@ -128,6 +128,9 @@ pub struct WireState {
     /// Browser zones only: what the sounding tab has to do. Missing for every other zone.
     #[serde(default)]
     pub tab: Option<TabPlan>,
+    /// When the server made this state (its clock, ms). A slow answer is told from a newer broadcast by it.
+    #[serde(default)]
+    pub updated_at: f64,
 }
 
 /// A zone as GET /zones lists it.
@@ -276,6 +279,11 @@ pub struct Model {
     queues: HashMap<String, (String, Vec<QueueItem>)>,
     /// A fetch is out for this zone: do not ask twice.
     fetching: Option<String>,
+    /// A slim event came while that fetch was out: its answer may predate it, so it is asked for once more.
+    refetch: bool,
+    /// The newest `updated_at` the server itself sent for the zone on screen: an older answer (a slow GET or command
+    /// reply overtaken by a broadcast) must not put the old song back. The web client keeps the same rule.
+    server_at: f64,
     /// The playlists on the left edge, in order (at most `MINI_MAX`).
     pub minis: Vec<MiniPlaylist>,
     /// The queue a playlist dot made: (zone, playlist id, first queue id, length). It stops matching as soon as the queue
@@ -310,11 +318,20 @@ impl Model {
         }
         self.zone = zone.to_string();
         self.player = None;
+        self.server_at = 0.;
+        self.refetch = false;
         self.fetching = Some(zone.to_string());
         vec![Effect::Fetch { zone: zone.to_string(), rev: None }]
     }
 
     fn apply(&mut self, w: WireState, queue: Vec<QueueItem>, now: u64) {
+        // (a clock that went back by more than a minute is a restarted server, not an old answer)
+        if w.updated_at > 0. && w.updated_at < self.server_at && self.server_at - w.updated_at < 60_000. {
+            return;
+        }
+        if w.updated_at > 0. {
+            self.server_at = w.updated_at;
+        }
         self.player = Some(Player {
             status: w.status,
             queue,
@@ -336,6 +353,8 @@ impl Model {
                     // events were missed: the next one for each zone must carry or fetch its queue
                     self.queues.clear();
                     self.fetching = None;
+                    self.refetch = false;
+                    self.server_at = 0.;
                 }
                 self.conn_state = Some(c);
                 vec![]
@@ -379,6 +398,7 @@ impl Model {
                     _ => {
                         // a queue we never saw (joined mid-way or missed an event): read the full state once
                         if self.fetching.as_deref() == Some(&self.zone) {
+                            self.refetch = true;
                             return vec![];
                         }
                         self.fetching = Some(self.zone.clone());
@@ -393,10 +413,15 @@ impl Model {
                 }
                 self.fetching = None;
                 let q = state.queue.clone().unwrap_or_default();
-                if let Some(r) = rev {
+                if let Some(r) = rev.clone() {
                     self.queues.insert(state.zone.clone(), (r, q.clone()));
                 }
                 self.apply(state, q, now);
+                // events were dropped while this answer was on its way: it may be older than they were
+                if std::mem::take(&mut self.refetch) {
+                    self.fetching = Some(self.zone.clone());
+                    return vec![Effect::Fetch { zone: self.zone.clone(), rev }];
+                }
                 vec![]
             }
         }
@@ -434,8 +459,10 @@ mod tests {
         assert_eq!(m.update(ev(slim), 0), vec![Effect::Fetch { zone: "pc".into(), rev: Some("r1".into()) }]);
         assert!(m.update(ev(slim), 0).is_empty());
         let full = WireState { zone: "pc".into(), queue: Some(vec![item("a", "One")]), ..Default::default() };
-        m.update(Msg::Fetched { state: full, rev: Some("r1".into()) }, 0);
+        // (the dropped event may be newer than this answer: it is read once more)
+        assert_eq!(m.update(Msg::Fetched { state: full.clone(), rev: Some("r1".into()) }, 0).len(), 1);
         assert_eq!(m.player.as_ref().unwrap().queue.len(), 1);
+        assert!(m.update(Msg::Fetched { state: full, rev: Some("r1".into()) }, 0).is_empty());
         // the same rev now fills in from the cache
         assert!(m.update(ev(slim), 5).is_empty());
         assert_eq!(m.player.as_ref().unwrap().queue[0].track.title, "One");
@@ -481,6 +508,60 @@ mod tests {
         let list = vec![z("spotify:phone", "spotify"), z("spotify:dev", "spotify"), z("browser:x", "browser"), soloist, pc];
         let ids: Vec<String> = pickable_zones(&list).into_iter().map(|z| z.id).collect();
         assert_eq!(ids, vec!["pc", "soloist", "spotify:phone"], "browser zones and the PC's own Spotify device are left out");
+    }
+
+    fn at(zone_json: &str) -> Msg { ev(zone_json) }
+
+    #[test]
+    fn a_slim_event_that_moves_to_the_next_song_shows_it() {
+        let mut m = Model::new("pc");
+        let full = r#"{"type":"player","queueRev":"r1","state":{"zone":"pc","status":"playing","queue":[{"queueId":"a","track":{"id":"a","title":"One","durationMs":1000},"album":{"id":"x","title":"X"}},{"queueId":"b","track":{"id":"b","title":"Two","durationMs":5000},"album":{"id":"x","title":"X"}}],"index":0,"positionMs":900,"volume":1,"shuffle":false,"repeat":"off","updatedAt":10}}"#;
+        m.update(at(full), 0);
+        // the song ends by itself: same queue, so the event is slim, the cursor is one on and the position starts over
+        let slim = r#"{"type":"player","queueRev":"r1","state":{"zone":"pc","status":"playing","index":1,"positionMs":20,"volume":1,"shuffle":false,"repeat":"off","updatedAt":20}}"#;
+        assert!(m.update(at(slim), 1000).is_empty());
+        let p = m.player.as_ref().unwrap();
+        assert_eq!(p.current().unwrap().track.title, "Two");
+        assert_eq!(p.position(1500), 520.);
+        assert_eq!(p.current().unwrap().track.duration_ms, 5000.);
+    }
+
+    #[test]
+    fn an_old_answer_does_not_put_the_song_that_ended_back() {
+        let mut m = Model::new("pc");
+        let full = r#"{"type":"player","queueRev":"r1","state":{"zone":"pc","status":"playing","queue":[{"queueId":"a","track":{"id":"a","title":"One","durationMs":1000},"album":{"id":"x","title":"X"}},{"queueId":"b","track":{"id":"b","title":"Two","durationMs":5000},"album":{"id":"x","title":"X"}}],"index":0,"positionMs":900,"volume":1,"shuffle":false,"repeat":"off","updatedAt":10}}"#;
+        let slim = r#"{"type":"player","queueRev":"r1","state":{"zone":"pc","status":"playing","index":1,"positionMs":20,"volume":1,"shuffle":false,"repeat":"off","updatedAt":20}}"#;
+        m.update(at(full), 0);
+        m.update(at(slim), 100);
+        // a GET / command reply made before the song ended, arriving after the broadcast of the new song
+        let old: WireState = serde_json::from_str(r#"{"zone":"pc","status":"playing","queue":[{"queueId":"a","track":{"id":"a","title":"One","durationMs":1000},"album":{"id":"x","title":"X"}},{"queueId":"b","track":{"id":"b","title":"Two","durationMs":5000},"album":{"id":"x","title":"X"}}],"index":0,"positionMs":0,"updatedAt":15}"#).unwrap();
+        m.update(Msg::Fetched { state: old.clone(), rev: None }, 120);
+        assert_eq!(m.player.as_ref().unwrap().index, 1);
+        m.update(Msg::Started { playlist: "p".into(), state: old }, 130);
+        assert_eq!(m.player.as_ref().unwrap().index, 1);
+        // a newer one is taken, and so is anything from a restarted server whose clock went far back
+        let newer: WireState = serde_json::from_str(r#"{"zone":"pc","status":"paused","queue":[],"index":0,"updatedAt":200000}"#).unwrap();
+        m.update(Msg::Fetched { state: newer, rev: None }, 140);
+        assert_eq!(m.player.as_ref().unwrap().status, Status::Paused);
+        let restarted: WireState = serde_json::from_str(r#"{"zone":"pc","status":"playing","queue":[],"index":0,"updatedAt":1}"#).unwrap();
+        m.update(Msg::Fetched { state: restarted, rev: None }, 150);
+        assert_eq!(m.player.as_ref().unwrap().status, Status::Playing);
+    }
+
+    #[test]
+    fn a_song_change_that_comes_while_the_queue_is_being_read_is_not_lost() {
+        let mut m = Model::new("pc");
+        let slim = |i: i64, at: u64| format!(r#"{{"type":"player","queueRev":"r1","state":{{"zone":"pc","status":"playing","index":{i},"positionMs":0,"volume":1,"shuffle":false,"repeat":"off","updatedAt":{at}}}}}"#);
+        assert_eq!(m.update(at(&slim(0, 10)), 0).len(), 1);
+        // the song ends while the read is out: the event is dropped, so the read's answer (older) is followed by one more read
+        assert!(m.update(at(&slim(1, 20)), 1).is_empty());
+        let q = r#"[{"queueId":"a","track":{"id":"a","title":"One","durationMs":1000},"album":{"id":"x","title":"X"}},{"queueId":"b","track":{"id":"b","title":"Two","durationMs":5000},"album":{"id":"x","title":"X"}}]"#;
+        let old: WireState = serde_json::from_str(&format!(r#"{{"zone":"pc","status":"playing","queue":{q},"index":0,"updatedAt":10}}"#)).unwrap();
+        let fx = m.update(Msg::Fetched { state: old, rev: Some("r1".into()) }, 2);
+        assert_eq!(fx, vec![Effect::Fetch { zone: "pc".into(), rev: Some("r1".into()) }]);
+        let now: WireState = serde_json::from_str(&format!(r#"{{"zone":"pc","status":"playing","queue":{q},"index":1,"updatedAt":20}}"#)).unwrap();
+        assert!(m.update(Msg::Fetched { state: now, rev: Some("r1".into()) }, 3).is_empty());
+        assert_eq!(m.player.as_ref().unwrap().current().unwrap().track.title, "Two");
     }
 
     fn started(zone: &str, ids: &[&str]) -> WireState {

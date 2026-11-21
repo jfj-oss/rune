@@ -72,7 +72,7 @@ impl Rune {
                 let (held, bytes) = self.covers.held();
                 json!({
                     "route": self.route().key(), "online": self.model.online(), "zone": self.model.zone,
-                    "status": p.map(|p| format!("{:?}", p.status).to_lowercase()), "index": p.map(|p| p.index), "shuffle": p.map(|p| p.shuffle), "volume": p.map(|p| p.volume),
+                    "status": p.map(|p| format!("{:?}", p.status).to_lowercase()), "bar": self.bar_shown.clone(), "index": p.map(|p| p.index), "shuffle": p.map(|p| p.shuffle), "volume": p.map(|p| p.volume),
                     "queue": p.map(|p| p.queue.iter().map(|q| q.track.title.clone()).collect::<Vec<_>>()),
                     "toast": self.toast.as_ref().map(|t| t.text.clone()), "queue_open": self.queue_open, "np_open": self.np_open, "picker": self.picker.as_ref().map(|p| json!({"well": if p.0 == CWell::Mid { "mid" } else { "light" }, "hsv": p.1.hsv})), "backdrop": self.foil.mode.id(), "custom": [crate::dither::to_hex(self.foil.custom.mid), crate::dither::to_hex(self.foil.custom.light)], "mid_field": self.custom_mid_in.read(cx).value().to_string(), "light_field": self.custom_light_in.read(cx).value().to_string(), "picker_field": self.picker_hex_in.read(cx).value().to_string(), "menu": self.menu.is_some(), "dialog": self.dialog.is_some(),
                     "covers_held": held, "covers_bytes": bytes, "covers_requested": self.covers.requested, "covers_fetched": self.covers.fetched, "frames": self.frame,
