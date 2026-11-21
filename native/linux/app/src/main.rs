@@ -112,6 +112,9 @@ fn main() {
         }).detach();
         if show_now {
             mini.update(cx, |m, cx| m.show(cx));
+        } else {
+            // warm the window up now (drawn once, then minimized) so the first summon is as quick as the rest
+            mini.update(cx, |m, cx| m.open_window(false, cx));
         }
     });
 }

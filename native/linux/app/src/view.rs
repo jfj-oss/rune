@@ -21,6 +21,7 @@ pub struct Panel {
     vol_acc: f32,
     vol_sent: Option<(u64, f64)>,
     _sub: Subscription,
+    _act: Subscription,
 }
 
 #[derive(Clone)]
@@ -37,11 +38,11 @@ impl Render for Ghost {
 
 /// Opens the panel's window; the layer-shell overlay first (no taskbar entry, above everything, centred at the top),
 /// an ordinary borderless window where the compositor has none.
-pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWindowHandle> {
+pub fn open(mini: &Entity<Mini>, w: f32, h: f32, focus: bool, cx: &mut App) -> Option<AnyWindowHandle> {
     let make = |layer: bool| WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.), px(0.)), size: size(px(w), px(h)) })),
         titlebar: None,
-        focus: true,
+        focus,
         show: true,
         kind: if layer {
             WindowKind::LayerShell(layer_shell::LayerShellOptions {
@@ -74,10 +75,19 @@ pub fn open(mini: &Entity<Mini>, w: f32, h: f32, cx: &mut App) -> Option<AnyWind
         // Opened bare, not through gpui_kit::open_window: its Root wraps every window in a client-decoration frame (a 20 px
         // shadow margin it re-asserts each frame, a border, the theme's light background), which showed around the panel.
         match cx.open_window(make(attempt), move |window, cx| {
+            crate::state::trace("window builder");
             let v = cx.new(|cx| Panel::new(m, window, cx));
             window.set_background_appearance(WindowBackgroundAppearance::Transparent);
             let f = v.read(cx).focus.clone();
-            window.focus(&f, cx);
+            if focus {
+                window.focus(&f, cx);
+            }
+            // closing the window (alt+F4) hides the panel; the next summon makes the window again
+            let m2 = v.read(cx).mini.clone();
+            window.on_window_should_close(cx, move |_, cx| {
+                m2.update(cx, |m, cx| m.window_gone(cx));
+                true
+            });
             v
         }) {
             Ok(h) => return Some(h.into()),
@@ -96,9 +106,15 @@ const VOL_NOTCH: f32 = 24.;
 const VOL_HOLD_MS: u64 = 1500;
 
 impl Panel {
-    fn new(mini: Entity<Mini>, _window: &mut Window, cx: &mut Context<Self>) -> Panel {
+    fn new(mini: Entity<Mini>, window: &mut Window, cx: &mut Context<Self>) -> Panel {
         let sub = cx.observe(&mini, |_, _, cx| cx.notify());
-        Panel { mini, focus: cx.focus_handle(), bar: Rc::new(Cell::new(Bounds::default())), vol_acc: 0., vol_sent: None, _sub: sub }
+        // the window is kept between summons: every time the compositor makes it active again the keys must reach the panel
+        let act = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                window.focus(&this.focus.clone(), cx);
+            }
+        });
+        Panel { mini, focus: cx.focus_handle(), bar: Rc::new(Cell::new(Bounds::default())), vol_acc: 0., vol_sent: None, _sub: sub, _act: act }
     }
 }
 
@@ -147,7 +163,11 @@ fn lst<E: 'static + ?Sized>(me: &Entity<Panel>, f: impl Fn(&mut Panel, &E, &mut 
 }
 
 impl Render for Panel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if crate::state::trace_on() {
+            crate::state::trace(&format!("render active={}", window.is_window_active()));
+            window.on_next_frame(|_, _| crate::state::trace("next frame after render"));
+        }
         let me = cx.entity();
         let m = self.mini.read(cx);
         let now = now_ms();

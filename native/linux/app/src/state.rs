@@ -18,10 +18,27 @@ use tokio::sync::mpsc::UnboundedSender as TokioTx;
 
 pub const WIDTH: f32 = 560.;
 pub const COMPACT_H: f32 = 124.;
+/// How long the closed layout is drawn before a hidden panel is minimized, and how long the warm-up window stays drawn.
+const HIDE_DELAY_MS: u64 = 40;
+const WARM_MS: u64 = 250;
+const ACTIVATE_WAIT_MS: u64 = 400;
 pub const ROWS: usize = 9;
 pub const ROW_H: f32 = 26.;
 /// 20 + 84 + 8 + (8 + 26 + 6 + rows) + 14 = COMPACT_H + QUEUE_H
 pub const QUEUE_H: f32 = 276. - 234. + ROWS as f32 * ROW_H;
+
+/// RUNE_MINI_TRACE=1: epoch-clock timestamps of the show path on stderr, to line up with an outside observer.
+pub fn trace_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("RUNE_MINI_TRACE").is_some())
+}
+
+pub fn trace(what: &str) {
+    if trace_on() {
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.);
+        eprintln!("TRACE {t:.6} {what}");
+    }
+}
 
 pub enum Cover {
     Loading,
@@ -47,12 +64,15 @@ pub struct Mini {
     pub drag_over: Option<usize>,
     tick: Option<Task<()>>,
     hide_epoch: u64,
+    opening: bool,
+    /// RUNE_MINI_LAYER=1: the layer-shell overlay, which is closed and made again instead of minimized and resized.
+    layer: bool,
 }
 
 impl Mini {
     pub fn new(cfg: Config, dir: PathBuf, net: Net) -> Mini {
         let model = Model::new(&cfg.zone);
-        Mini { cfg, dir, model, net, covers: vec![], shown: false, queue_open: false, filter: String::new(), pick: 0, top: 0, notice: None, hover: None, window: None, desktop: None, drag_over: None, tick: None, hide_epoch: 0 }
+        Mini { cfg, dir, model, net, covers: vec![], shown: false, queue_open: false, filter: String::new(), pick: 0, top: 0, notice: None, hover: None, window: None, desktop: None, drag_over: None, tick: None, hide_epoch: 0, opening: false, layer: std::env::var_os("RUNE_MINI_LAYER").is_some() }
     }
 
     // ---------------------------------------------------------------- what is shown
@@ -250,6 +270,9 @@ impl Mini {
     }
 
     pub fn on_desktop(&mut self, ev: DesktopEvent, cx: &mut Context<Self>) {
+        if trace_on() {
+            trace(&format!("desktop event {ev:?}"));
+        }
         match ev {
             DesktopEvent::Toggle => self.toggle(cx),
             DesktopEvent::Show => self.show(cx),
@@ -359,6 +382,8 @@ impl Mini {
         }
     }
 
+    /// Summon the panel. The window is made once and kept: summoning restores it (xdg-activation un-minimizes it) and
+    /// hiding minimizes it, so no summon pays for a new wgpu surface, atlas and first frame (about 250 ms the old way).
     pub fn show(&mut self, cx: &mut Context<Self>) {
         if self.shown {
             return;
@@ -370,7 +395,14 @@ impl Mini {
         self.net.fetch_state(&self.model.zone.clone(), None);
         self.net.fetch_zones();
         self.net.fetch_minis();
-        self.open_window(cx);
+        match self.window {
+            Some(h) => {
+                self.window_op(h, cx, |w, _| w.activate_window());
+                self.watch_activation(cx);
+                cx.notify();
+            }
+            None => self.open_window(true, cx),
+        }
         self.manage_tick(cx);
     }
 
@@ -384,8 +416,30 @@ impl Mini {
         self.pick = 0;
         self.top = 0;
         self.net.set_visible(false);
-        self.close_window(cx);
         self.tick = None;
+        self.hide_epoch += 1;
+        let epoch = self.hide_epoch;
+        let h = self.panel_height();
+        if self.layer {
+            // a layer-shell surface cannot be minimized: it is closed and made again
+            self.close_window(cx);
+        } else if let Some(w) = self.window {
+            // the closed state (compact, no filter) is drawn first, so the next summon never shows the queue it left; the
+            // window is minimized a frame later. A summon in between cancels it (the epoch moved on).
+            self.window_op(w, cx, move |win, _| win.resize(size(px(WIDTH), px(h))));
+            cx.notify();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(HIDE_DELAY_MS)).await;
+                let _ = this.update(cx, |m, cx| {
+                    if !m.shown && m.hide_epoch == epoch {
+                        if let Some(w) = m.window {
+                            m.window_op(w, cx, |win, _| win.minimize_window());
+                        }
+                    }
+                });
+            })
+            .detach();
+        }
     }
 
     pub fn set_queue_open(&mut self, open: bool, cx: &mut Context<Self>) {
@@ -397,29 +451,89 @@ impl Mini {
         self.pick = self.model.player.as_ref().map(|p| p.index.max(0) as usize).unwrap_or(0);
         self.top = 0;
         self.keep_pick_visible();
-        // a layer-shell surface is sized when it is made: the window is made again at the new height (state is here)
-        self.close_window(cx);
-        self.open_window(cx);
+        // the one window is resized in place (no new window, no new first frame)
+        let h = self.panel_height();
+        match self.window {
+            // a layer-shell surface is sized when it is made: it is made again at the new height
+            Some(_) if self.layer => {
+                self.close_window(cx);
+                self.open_window(true, cx);
+            }
+            Some(w) => self.window_op(w, cx, move |win, _| win.resize(size(px(WIDTH), px(h)))),
+            None => self.open_window(true, cx),
+        }
+        cx.notify();
     }
 
     fn close_window(&mut self, cx: &mut Context<Self>) {
         if let Some(h) = self.window.take() {
-            cx.defer(move |cx| {
-                let _ = h.update(cx, |_, window, _| window.remove_window());
-            });
+            self.window_op(h, cx, |win, _| win.remove_window());
         }
     }
 
-    fn open_window(&mut self, cx: &mut Context<Self>) {
+    /// If the compositor did not take the activation (the window is not active shortly after a summon), the old way is the
+    /// fallback: close the window and make a new one, which is shown and focused when it is made.
+    fn watch_activation(&mut self, cx: &mut Context<Self>) {
+        let epoch = self.hide_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(ACTIVATE_WAIT_MS)).await;
+            let Ok(Some(h)) = this.update(cx, |m, _| (m.shown && m.hide_epoch == epoch).then_some(m.window).flatten()) else { return };
+            let active = h.update(cx, |_, window, _| window.is_window_active()).unwrap_or(true);
+            if !active {
+                let _ = this.update(cx, |m, cx| {
+                    if m.shown && m.hide_epoch == epoch {
+                        eprintln!("rune-mini: the window was not activated; making a new one");
+                        m.close_window(cx);
+                        m.open_window(true, cx);
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Run `f` on the window once the current update is over (a window cannot be touched from inside its own update).
+    fn window_op(&self, h: AnyWindowHandle, cx: &mut Context<Self>, f: impl FnOnce(&mut Window, &mut App) + 'static) {
+        cx.defer(move |cx| {
+            let _ = h.update(cx, |_, window, cx| f(window, cx));
+        });
+    }
+
+    /// Make the window. `visible` false is the warm-up at start: no focus, minimized once its first frames are drawn.
+    pub fn open_window(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.opening || (self.layer && !visible) {
+            return;
+        }
+        self.opening = true;
         let me = cx.entity();
         let h = self.panel_height();
         cx.defer(move |cx: &mut App| {
-            let opened = crate::view::open(&me, WIDTH, h, cx);
+            trace("open_window start");
+            let opened = crate::view::open(&me, WIDTH, h, visible, cx);
+            trace("open_window returned");
             me.update(cx, |m, cx| {
+                m.opening = false;
                 match opened {
-                    Some(w) if m.shown => m.window = Some(w),
                     Some(w) => {
-                        let _ = w.update(cx, |_, window, _| window.remove_window());
+                        m.window = Some(w);
+                        if m.shown {
+                            // summoned while the warm-up window was being made: it was opened unfocused
+                            m.window_op(w, cx, |win, _| win.activate_window());
+                        } else {
+                            m.hide_epoch += 1;
+                            let epoch = m.hide_epoch;
+                            cx.spawn(async move |this, cx| {
+                                cx.background_executor().timer(Duration::from_millis(WARM_MS)).await;
+                                let _ = this.update(cx, |m, cx| {
+                                    if !m.shown && m.hide_epoch == epoch {
+                                        if let Some(w) = m.window {
+                                            m.window_op(w, cx, |win, _| win.minimize_window());
+                                        }
+                                    }
+                                });
+                            })
+                            .detach();
+                        }
                     }
                     None => {
                         m.shown = false;
@@ -429,6 +543,18 @@ impl Mini {
                 cx.notify();
             });
         });
+    }
+
+    /// The window was closed by the desktop (a close button, alt+F4): the panel is hidden and the next summon makes it again.
+    pub fn window_gone(&mut self, cx: &mut Context<Self>) {
+        self.window = None;
+        if self.shown {
+            self.shown = false;
+            self.queue_open = false;
+            self.net.set_visible(false);
+            self.tick = None;
+        }
+        cx.notify();
     }
 }
 
