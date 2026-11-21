@@ -24,9 +24,14 @@ pub const WARN: u32 = 0xe8b04a;
 pub const BAD: u32 = 0xe5736f;
 pub const SPOTIFY: u32 = 0x1db954;
 
-pub fn surface() -> Hsla { wh(0.055) }
-pub fn surface2() -> Hsla { wh(0.085) }
-pub fn surface3() -> Hsla { wh(0.13) }
+/// A Dither backdrop is showing: panels turn into dark glass. The web gets this from its backdrop blur + brightness filter, which
+/// GPUI does not have, and a plain 5 % white panel over bright dots is unreadable.
+static DITHER_UI: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn set_dither_ui(on: bool) { DITHER_UI.store(on, std::sync::atomic::Ordering::Relaxed); }
+fn dither_ui() -> bool { DITHER_UI.load(std::sync::atomic::Ordering::Relaxed) }
+pub fn surface() -> Hsla { if dither_ui() { ca(0x07070b, 0.80) } else { wh(0.055) } }
+pub fn surface2() -> Hsla { if dither_ui() { ca(0x0d0d13, 0.84) } else { wh(0.085) } }
+pub fn surface3() -> Hsla { if dither_ui() { ca(0x15151d, 0.88) } else { wh(0.13) } }
 pub fn line() -> Hsla { wh(0.10) }
 pub fn panel() -> Hsla { ca(0x1b1c24, 0.9) }
 

@@ -156,8 +156,12 @@ impl Rune {
         let switch = |id: &'static str, on: bool| div().id(id).role(Role::Switch).aria_label(match id { "st-reduce" => "Reduce effects", "st-saver" => "Battery saver", "st-notify" => "Notify on song change", other => other }).aria_toggled(if on { Toggled::True } else { Toggled::False }).w(px(44.)).h(px(24.)).flex_none().rounded_full().p(px(3.)).cursor_pointer().bg(if on { c(ACCENT) } else { wh(0.18) }).flex().items_center().when(on, |d| d.justify_end()).child(div().size(px(18.)).rounded_full().bg(c(0xffffff)));
         let row = |title: &str, sub: &str, sw: Stateful<Div>| h_flex().justify_between().items_center().gap(px(16.)).child(v_flex().min_w_0().child(div().text_size(px(14.)).font_weight(w(600.)).child(title.to_string())).child(muted(sub))).child(sw);
         let current = fp.mode;
-        let mut modes = h_flex().flex_wrap().gap(px(6.));
-        for m in crate::dither::Mode::all() {
+        // three to a row, in plain rows (a wrapping flex box measures short in this layout engine)
+        let mut modes = v_flex().gap(px(6.));
+        let mut row_now = h_flex().gap(px(6.));
+        let all = crate::dither::Mode::all();
+        let n_modes = all.len();
+        for (mi, m) in all.into_iter().enumerate() {
             let on = m == current;
             let dot = match m {
                 crate::dither::Mode::Foil => 0x697dff,
@@ -167,15 +171,22 @@ impl Rune {
                 crate::dither::Mode::Custom => rgb_u32(fp.custom.light),
             };
             let label = m.label();
-            modes = modes.child(
+            row_now = row_now.child(
                 h_flex().id(SharedString::from(format!("st-bg-{}", m.id()))).role(Role::RadioButton).aria_label(label.clone()).aria_toggled(if on { Toggled::True } else { Toggled::False })
-                    .w(px(168.)).h(px(40.)).px(px(12.)).gap(px(10.)).items_center().flex_none().rounded(px(10.)).border_1().border_color(if on { c(ACCENT) } else { line() }).cursor_pointer()
+                    .flex_1().min_w_0().h(px(40.)).px(px(10.)).gap(px(8.)).items_center().rounded(px(10.)).border_1().border_color(if on { c(ACCENT) } else { line() }).cursor_pointer()
                     .text_size(px(13.5)).text_color(if on { c(TEXT) } else { c(TEXT2) }).hover(|d| d.bg(wh(0.06)))
                     .child(div().size(px(14.)).flex_none().rounded_full().border_1().border_color(wh(0.25)).bg(c(dot)))
                     .child(div().flex_1().min_w_0().truncate().child(label))
                     .when(on, |d| d.child(icon("check", 15., c(ACCENT))))
                     .on_click(cx.listener(move |this, _, _, cx| { let p = this.foil; this.set_foil(crate::backdrop::Prefs { mode: m, ..p }, cx); })),
             );
+            if mi % 3 == 2 || mi + 1 == n_modes {
+                // (a short last row keeps its items the width of the others)
+                let pad = if mi + 1 == n_modes { 2 - mi % 3 } else { 0 };
+                let mut r = row_now; for _ in 0..pad { r = r.child(div().flex_1().min_w_0()); }
+                modes = modes.child(r);
+                row_now = h_flex().gap(px(6.));
+            }
         }
         let mut background = card("Background", "palette").child(muted("Foil waves are the default. The Dither backgrounds are the web's: black and one colour, in fine dots.")).child(modes);
         if current == crate::dither::Mode::Custom {
@@ -200,8 +211,8 @@ impl Rune {
                     })));
             }
             background = background.child(v_flex().gap(px(10.)).pt(px(6.))
-                .child(hexbox(&self.custom_mid_in, "Base", "Most of the dots (#rrggbb)", fp.custom.mid))
-                .child(hexbox(&self.custom_light_in, "Highlights", "The brightest parts (#rrggbb)", fp.custom.light))
+                .child(hexbox(&self.custom_mid_in, "Base", "Most of the dots", fp.custom.mid))
+                .child(hexbox(&self.custom_light_in, "Highlights", "The brightest parts", fp.custom.light))
                 .child(presets));
         }
         let background = background

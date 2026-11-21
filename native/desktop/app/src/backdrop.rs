@@ -1,4 +1,5 @@
-//! The page backdrop (web `Ambient.tsx` + `FoilBackdrop.tsx`): "Foil waves", crisp at device resolution.
+//! The page backdrop (web `Ambient.tsx` + `FoilBackdrop.tsx`): "Foil waves" (the default) or one of the web's Dither backdrops (see
+//! [`crate::dither`]), crisp at device resolution. Everything below about images and the CPU is the Foil path.
 //!
 //! Default: ONE custom shader (`shaders/foil.wgsl` / `foil.metal`, through the shader hook of the vendored GPUI, see
 //! vendor/PATCH.md) draws the whole picture per device pixel on the GPU, at the display's frame rate. The CPU path below is the
@@ -145,6 +146,7 @@ pub struct Backdrop {
 impl Backdrop {
     pub fn new(prefs: Prefs, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::gen::set_effects(prefs.on(), prefs.reduce);
+        crate::theme::set_dither_ui(prefs.mode.is_dither());
         let (tx, rx) = channel::<Job>();
         let (dtx, mut drx) = futures::channel::mpsc::unbounded::<Done>();
         std::thread::Builder::new().name("rune-foil".into()).spawn(move || {
@@ -166,10 +168,12 @@ impl Backdrop {
             let wait = match this.update_in(cx, |b, window, cx| b.tick(window, cx)) { Ok(w) => w, Err(_) => break };
             cx.background_executor().timer(wait).await;
         });
-        Backdrop {
+        let me = Backdrop {
             prefs, dust: None, fade: None, dust_for: None, waves: None, waves_in_flight: false, cols: Arc::new(vec![]), tx, t: t0, last: Instant::now(),
             was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, anim: Rc::new(RefCell::new(Anim { t: t0, last: None, was_live: false, running: false, failed: false, first_paint: None, frozen: std::env::var_os("RUNE_DESKTOP_FOIL_FREEZE").is_some(), cols_w: 0, cols: vec![] })), dither: Rc::new(RefCell::new(DAnim::new(prefs, t0))), _tasks: vec![recv, tick],
-        }
+        };
+        me.publish_logo_palette(); // (a Dither mode's logo has its colour from the first frame)
+        me
     }
 
     /// A Dither backdrop is what is drawn (the mode is one, and its shader works).
@@ -201,6 +205,7 @@ impl Backdrop {
         crate::gen::set_effects(p.on(), p.reduce);
         if p == self.prefs { return; }
         self.prefs = p;
+        crate::theme::set_dither_ui(p.mode.is_dither());
         self.dither.borrow_mut().input.mode = p.mode;
         self.dither.borrow_mut().input.custom = p.custom;
         self.publish_logo_palette();
@@ -385,7 +390,9 @@ impl Backdrop {
             let shown = match a.shown { Some(s) => dither::mix_palette(s, want, k), None => want };
             a.shown = Some(shown);
             if prefs.mode.is_dither() { dither::publish_shown(Some(shown)); }
-            let wave = if still { 0.0 } else { a.wave_start.map(|w| dither::wave_at(now.duration_since(w).as_secs_f64())).unwrap_or(0.0) };
+            // (`RUNE_DESKTOP_DITHER_WAVE=<s>`, test tool: hold the new-song swell at that many seconds in)
+            let held = std::env::var("RUNE_DESKTOP_DITHER_WAVE").ok().and_then(|v| v.parse::<f64>().ok());
+            let wave = if still { 0.0 } else { held.map(dither::wave_at).or_else(|| a.wave_start.map(|w| dither::wave_at(now.duration_since(w).as_secs_f64()))).unwrap_or(0.0) };
             let d = dither::gpu_data(pw, ph, scale, t, wave, shown, &mut a.plan);
             d.into()
         });
@@ -457,7 +464,8 @@ impl Render for Root {
         let mut full = StyleRefinement::default();
         full.size.width = Some(relative(1.).into());
         full.size.height = Some(relative(1.).into());
-        if bare() { return div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).into_any_element(); }
+        // (the app is still there, clipped to nothing, so its state keeps driving the backdrop's colour)
+        if bare() { return div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(div().absolute().top_0().left_0().size(px(0.)).overflow_hidden().child(AnyView::from(self.rune.clone()).cached(full))).into_any_element(); }
         div().relative().size_full().bg(c(BG)).child(self.backdrop.clone()).child(AnyView::from(self.rune.clone()).cached(full)).into_any_element()
     }
 }

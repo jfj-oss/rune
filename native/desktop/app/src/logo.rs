@@ -1,6 +1,6 @@
 //! The mark (web `Logo.tsx` + `lib/dotLogo.ts`): four balls on a square, one diagonal pair at a time swapping corners with a
 //! motion trail. Drawn as a soft brightness field, then ordered-dithered with the web's blue-noise thresholds into very fine
-//! dots, one dot per CSS pixel (`max(1, round(scale))` device pixels). Colours come from the foil's own periwinkle. Animated
+//! dots, one dot per CSS pixel (`max(1, round(scale))` device pixels). Colours follow the active Dither backdrop (its palette as shown, see [`colours`]), the foil's own periwinkle otherwise. Animated
 //! only while the window is active; one still frame (t = 0) under "Reduce effects", like the web's reduced-motion path.
 //! The maths is a line-by-line port of the web's, so motion, timing and dithering match.
 use crate::bluenoise;
