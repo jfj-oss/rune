@@ -132,7 +132,7 @@ impl Rune {
         if let Some(st) = &st { st.set_scroll_handler(move |_, _, app| { me.update(app, |_, cx| cx.notify()); }); }
         let stuck = st.as_ref().is_some_and(|s| { let t = s.logical_scroll_top(); t.item_ix > 1 || (t.item_ix == 1 && f32::from(t.offset_in_item) > 0.) });
         let active = self.album_active_tab(&key, &tabs);
-        let overlay = stuck.then(|| div().absolute().top_0().left_0().right_0().bg(ca(BG, 0.94)).border_b_1().border_color(wh(0.07)).pl(px(PAD)).pr(px(PAD)).child(div().w(px(body_w)).max_w_full().mx_auto().child(self.tab_strip(&key, &tabs, active, cx))));
+        let overlay = stuck.then(|| div().absolute().top_0().left_0().right_0().bg(ca(BG, 0.94)).border_b_1().border_color(wh(0.07)).occlude().pl(px(PAD)).pr(px(PAD)).child(div().w(px(body_w)).max_w_full().mx_auto().child(self.tab_strip(&key, &tabs, active, cx))));
         div().relative().size_full().child(list).children(overlay).into_any_element()
     }
 

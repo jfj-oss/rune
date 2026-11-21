@@ -163,7 +163,7 @@ impl Rune {
         let group = SharedString::from(format!("hs-{key}"));
         let (h1, h2) = (handle.clone(), handle.clone());
         let arrow = |id: String, left: bool, h: ScrollHandle, cx: &mut Context<Self>| {
-            let mut d = div().id(SharedString::from(id)).absolute().top(px(70.)).size(px(40.)).rounded_full().bg(ca(0x14151c, 0.9)).border_1().border_color(wh(0.14)).flex().items_center().justify_center().cursor_pointer()
+            let mut d = div().id(SharedString::from(id)).absolute().top(px(70.)).size(px(40.)).rounded_full().occlude().bg(ca(0x14151c, 0.9)).border_1().border_color(wh(0.14)).flex().items_center().justify_center().cursor_pointer()
                 .opacity(0.).group_hover(group.clone(), |s| s.opacity(1.)).hover(|s| s.bg(ca(0x23242e, 0.95))).child(icon(if left { "chevron-left" } else { "chevron-right" }, 18., c(TEXT)));
             d = if left { d.left(px(PAD - 14.)) } else { d.right(px(PAD - 14.)) };
             d.on_click(cx.listener(move |_, _, _, cx| {

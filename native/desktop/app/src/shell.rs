@@ -79,7 +79,7 @@ impl Render for Rune {
             .children(self.menu.is_some().then(|| self.menu_overlay(window, vw, cx)))
             .children(self.toast.as_ref().map(|t| {
                 div().absolute().left_0().right_0().bottom(px(NPBAR_H + 18.)).flex().justify_center().child(
-                    div().px(px(18.)).py(px(10.)).rounded_full().bg(panel()).border_1().border_color(wh(0.14)).text_size(px(13.5)).child(t.text.clone()))
+                    div().px(px(18.)).py(px(10.)).rounded_full().bg(panel()).border_1().border_color(wh(0.14)).text_size(px(13.5)).occlude().child(t.text.clone()))
             }))
     }
 }
@@ -113,7 +113,7 @@ impl Rune {
         let r = self.route().clone();
         let spotify_view = matches!(&r, Route::Albums(q) if q.source == Src::Spotify);
         let it = |s: &Self, id, label, ic, active, to, cx: &mut Context<Self>| s.nav_item(id, label, ic, active, to, cx);
-        v_flex().absolute().left_0().top_0().bottom(px(NPBAR_H)).w(px(side_w(collapsed))).px(px(if collapsed { 10. } else { 12. })).pt(px(20.)).pb(px(12.)).gap(px(4.)).overflow_hidden()
+        v_flex().absolute().left_0().top_0().bottom(px(NPBAR_H)).w(px(side_w(collapsed))).px(px(if collapsed { 10. } else { 12. })).pt(px(20.)).pb(px(12.)).gap(px(4.)).overflow_hidden().occlude()
             .bg(ca(0x020208, 0.52)).border_r_1().border_color(wh(0.16))
             .child(h_flex().h(px(44.)).px(px(if collapsed { 0. } else { 10. })).pb(px(18.)).gap(px(10.)).items_center().when(collapsed, |d| d.justify_center())
                 .child(crate::logo::logo(36.))

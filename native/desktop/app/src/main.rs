@@ -8,6 +8,7 @@ mod gen;
 mod gpubench;
 mod shader_hook_tests;
 mod charts;
+mod colour_picker;
 mod audio_zone;
 mod covers;
 mod dither;

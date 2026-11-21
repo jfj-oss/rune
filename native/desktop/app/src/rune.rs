@@ -172,6 +172,10 @@ pub fn load_window(dir: &std::path::Path) -> Option<SavedWindow> {
     s.window.filter(|w| w.w >= 200. && w.h >= 200. && w.w <= 20000. && w.h <= 20000. && w.x.is_finite() && w.y.is_finite())
 }
 
+/// The two colours of Dither \u{b7} Custom.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum CWell { Mid, Light }
+
 pub struct Rune {
     pub cfg: Config,
     pub dir: PathBuf,
@@ -242,6 +246,10 @@ pub struct Rune {
     /// Settings -> Background -> Custom: the hex fields of the base dots and the highlights
     pub custom_mid_in: Entity<InputState>,
     pub custom_light_in: Entity<InputState>,
+    /// the open colour picker (which of the two Custom colours it edits, and its state), its hex field, and when it last closed
+    pub picker: Option<(CWell, crate::colour_picker::State)>,
+    pub picker_hex_in: Entity<InputState>,
+    pub picker_closed: Option<(CWell, Instant)>,
     /// what the Dither backdrop was last told (colour decisions), and the song it last swelled for
     bd_input: Option<crate::dither::Input>,
     bd_song: String,
@@ -333,9 +341,11 @@ impl Rune {
         let custom_mid_in = cx.new(|cx| { let mut s = InputState::new(window, cx).placeholder("#5a2a9e"); s.set_value(mid_hex, window, cx); s });
         let custom_light_in = cx.new(|cx| { let mut s = InputState::new(window, cx).placeholder("#ff7a3d"); s.set_value(light_hex, window, cx); s });
         let mut subs = Vec::new();
-        // a valid #rrggbb in either box is the new Custom colour (anything else is left alone while typing)
-        subs.push(cx.subscribe_in(&custom_mid_in, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { if let Some(c) = crate::dither::parse_hex(st.read(cx).value().as_ref()) { let mut p = this.foil; p.custom.mid = c; this.set_foil(p, cx); } } }));
-        subs.push(cx.subscribe_in(&custom_light_in, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { if let Some(c) = crate::dither::parse_hex(st.read(cx).value().as_ref()) { let mut p = this.foil; p.custom.light = c; this.set_foil(p, cx); } } }));
+        let picker_hex_in = cx.new(|cx| InputState::new(window, cx).placeholder("#5a2a9e"));
+        // a valid #rrggbb in any of the three boxes is the new Custom colour (anything else is left alone while typing)
+        subs.push(cx.subscribe_in(&custom_mid_in, window, |this: &mut Rune, st, ev: &InputEvent, w, cx| { if let InputEvent::Change = ev { let v = st.read(cx).value().to_string(); this.custom_typed(CWell::Mid, &v, w, cx); } }));
+        subs.push(cx.subscribe_in(&custom_light_in, window, |this: &mut Rune, st, ev: &InputEvent, w, cx| { if let InputEvent::Change = ev { let v = st.read(cx).value().to_string(); this.custom_typed(CWell::Light, &v, w, cx); } }));
+        subs.push(cx.subscribe_in(&picker_hex_in, window, |this: &mut Rune, st, ev: &InputEvent, w, cx| { if let InputEvent::Change = ev { let v = st.read(cx).value().to_string(); if let Some(k) = this.picker.as_ref().map(|p| p.0) { this.custom_typed(k, &v, w, cx); } } }));
         subs.push(cx.subscribe_in(&people_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| { if let InputEvent::Change = ev { this.people_q = st.read(cx).value().trim().to_string(); cx.notify(); } }));
         subs.push(cx.subscribe_in(&radio_find, window, |this: &mut Rune, st, ev: &InputEvent, _w, cx| {
             if let InputEvent::Change = ev {
@@ -393,7 +403,7 @@ impl Rune {
         }).detach();
         let me = Rune {
             audio_model, audio, own_zone, zone_pref: saved.zone.clone(),
-            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs, custom_mid_in, custom_light_in, bd_input: None, bd_song: String::new(),
+            cfg, dir, net, client, model, data: Data::default(), covers, os: crate::os::start(os_tx), pl_newest_first: !saved.playlist_own_order, pl_view: None, pl_orig: vec![], pl_sorted: false, play_on_choice: vec![], win_active: true, notify_track: saved.notify_track, notified: String::new(), window_saved: saved.window, window_seen: None, window_timer: None, hero_tint: None, arts: HashMap::new(), hist: History::new(start), lists: HashMap::new(), list_sigs: HashMap::new(), hscrolls: HashMap::new(), peak_cache: None, np_open: false, setup: None, first_run: false, stats_period: "30d", people_find, people_q: String::new(), people_bucket: "all", album_key: "a".into(), playlist_keys: Default::default(), hotkey_listen: None, pending_smart: None, dlg_subs: vec![], smart_prev: None, smart_timer: None, radio_find, radio_q: String::new(), radio_tag: None, fav_override: HashMap::new(), dismissed: Default::default(), discover_refresh: false, song_radio: None, prose_open: Default::default(), hscores_open: false, preview: None, pl_sel: Default::default(), pl_anchor: None, pl_select_mode: false, pl_rename: None, pl_rename_sub: None, focus: cx.focus_handle(), backdrop: foil_entity, foil: foil_prefs, custom_mid_in, custom_light_in, picker: None, picker_hex_in, picker_closed: None, bd_input: None, bd_song: String::new(),
             sidebar_collapsed: saved.sidebar_collapsed, view_list: saved.view_list, queue_open: false, menu: None, dialog: None, toast: None, drag: None, seek_drag: None,
             vol_hold: None, vol_sent: Instant::now() - Duration::from_secs(5), vol_wheel_acc: 0., zone_open: false, signal_open: false, signal_path: vec![], signal_for: String::new(),
             search_input, albums_find, playlists_find, tracks_find, genres_find, tracks_q: String::new(), genres_q: String::new(), tracks_sort: "title", tracks_desc: None, genre_sort: "artist", find_timer: None, sort_open: false, hovered_row: None, search_pick: None, badges_always: false, seek_bounds: Default::default(), vol_bounds: Default::default(), test: crate::testhook::start(), frame: 0, bench_times: vec![], last_frame: None, tick: None, _subs: subs,
@@ -439,6 +449,40 @@ impl Rune {
         self.backdrop.update(cx, |b, cx| b.set_prefs(p, cx));
         self.save_state();
         cx.notify();
+    }
+
+    /// A new colour for one of the two Custom colours (the picker, a hex field, a preset): the backdrop recolours at once and the hex
+    /// fields follow (without echoing back: a field already showing this colour is left alone).
+    pub fn set_custom(&mut self, k: CWell, col: crate::dither::Rgb, window: &mut Window, cx: &mut Context<Self>) {
+        let mut p = self.foil;
+        match k { CWell::Mid => p.custom.mid = col, CWell::Light => p.custom.light = col }
+        self.set_foil(p, cx);
+        let hex = crate::dither::to_hex(col);
+        let mut fields = vec![match k { CWell::Mid => self.custom_mid_in.clone(), CWell::Light => self.custom_light_in.clone() }];
+        if self.picker.as_ref().is_some_and(|p| p.0 == k) { fields.push(self.picker_hex_in.clone()); }
+        for f in fields { if !f.read(cx).value().eq_ignore_ascii_case(&hex) { let h = hex.clone(); f.update(cx, |s, cx| s.set_value(h, window, cx)); } }
+    }
+    pub fn custom_of(&self, k: CWell) -> crate::dither::Rgb { match k { CWell::Mid => self.foil.custom.mid, CWell::Light => self.foil.custom.light } }
+    /// Typed in a hex box: valid and new means that is the colour (and the picker's square moves to it).
+    pub fn custom_typed(&mut self, k: CWell, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(col) = crate::dither::parse_hex(text) else { return };
+        if col == self.custom_of(k) { return; }
+        if let Some(p) = self.picker.as_mut().filter(|p| p.0 == k) { p.1.hsv = crate::colour_picker::rgb_to_hsv(col); }
+        self.set_custom(k, col, window, cx);
+    }
+    /// The swatch was pressed: open the picker for that colour, or close it when it is already open for it.
+    pub fn picker_toggle(&mut self, k: CWell, window: &mut Window, cx: &mut Context<Self>) {
+        if self.picker.as_ref().is_some_and(|p| p.0 == k) { self.picker_close(cx); return; }
+        // (the press that closed it by clicking outside also lands on the swatch: that must not open it again)
+        if self.picker_closed.is_some_and(|(w, at)| w == k && at.elapsed() < Duration::from_millis(150)) { return; }
+        let col = self.custom_of(k);
+        self.picker = Some((k, crate::colour_picker::State::new(crate::colour_picker::rgb_to_hsv(col))));
+        let hex = crate::dither::to_hex(col);
+        self.picker_hex_in.update(cx, |s, cx| s.set_value(hex, window, cx));
+        cx.notify();
+    }
+    pub fn picker_close(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = self.picker.take() { self.picker_closed = Some((p.0, Instant::now())); cx.notify(); }
     }
 
     /// "Try again" on an error page and on the offline bar: forget what was cached and fetch it all again.

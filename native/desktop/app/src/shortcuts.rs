@@ -39,6 +39,7 @@ impl Rune {
         let key = k.key.to_lowercase();
         if self.hotkey_listen.is_some() && !k.modifiers.control && !k.modifiers.platform && !k.modifiers.alt { if !ev.is_held { self.hotkey_capture(&key, cx); } return; }
         if key == "escape" {
+            if self.picker.is_some() { self.picker_close(cx); return; }
             if self.preview.is_some() { self.preview = None; cx.notify(); return; }
             if self.song_radio.is_some() { self.song_radio = None; cx.notify(); return; }
             if self.pl_rename.is_some() { self.pl_rename = None; self.pl_rename_sub = None; window.focus(&self.focus.clone(), cx); cx.notify(); return; }

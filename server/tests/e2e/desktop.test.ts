@@ -236,6 +236,78 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await app.send({ cmd: 'go', route: '/albums' });
   });
 
+  // ---------------------------------------------------------------- the Custom backdrop's colour picker
+  it('Dither custom: the colour picker recolours live, the hex fields follow, and the colours are saved', async () => {
+    const hexToHue = (h: string) => { const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number]; const mx = Math.max(r, g, b); const d = mx - Math.min(r, g, b); if (!d) return 0; const k = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; return k * 60; };
+    await app.send({ cmd: 'go', route: '/settings' });
+    expect((await app.send({ cmd: 'backdrop', mode: 'dither-custom' }))['ok']).toBe(true);
+    await app.send({ cmd: 'picker', well: 'mid', do: 'open' });
+    let st = await app.state();
+    expect(st['picker']?.well).toBe('mid');
+    // a pick: hue 200, saturation .8, value .6 -> (31, 112, 153) -> the backdrop and both fields say so
+    await app.send({ cmd: 'picker', well: 'mid', do: 'pick', h: 200, s: 0.8, v: 0.6 });
+    st = await app.state();
+    expect(st['custom'][0]).toBe('#1f7099');
+    expect(Math.abs(hexToHue(st['custom'][0]) - 200)).toBeLessThan(1);
+    expect(st['mid_field']).toBe('#1f7099');
+    expect(st['picker_field']).toBe('#1f7099');
+    expect(st['custom'][1]).toBe('#ff7a3d');
+    // typing a hex in the picker moves the colour and the square
+    await app.send({ cmd: 'picker', well: 'mid', do: 'hex', hex: '#336600' });
+    await until('the typed hex to apply', async () => (await app.state())['custom'][0] === '#336600');
+    st = await app.state();
+    expect(st['mid_field']).toBe('#336600');
+    expect(Math.abs(st['picker'].hsv[0] - 90)).toBeLessThan(1);
+    // the other colour has its own picker, and the first closes
+    await app.send({ cmd: 'picker', well: 'light', do: 'open' });
+    st = await app.state();
+    await app.send({ cmd: 'picker', well: 'light', do: 'pick', h: 0, s: 1, v: 1 });
+    st = await app.state();
+    expect(st['custom']).toEqual(['#336600', '#ff0000']);
+    expect(st['light_field']).toBe('#ff0000');
+    // a click outside the popover closes it
+    await app.send({ cmd: 'click', x: 6, y: 300 });
+    await until('the popover to close', async () => (await app.state())['picker'] === null);
+    // saved
+    const dirs = [join(work, 'data'), join(work, 'cfg/rune-desktop'), join(work, 'cfg')];
+    const file = dirs.map((d) => join(d, 'state.json')).find((f) => existsSync(f));
+    expect(file, 'state.json').toBeTruthy();
+    const saved = JSON.parse(readFileSync(file!, 'utf8')) as { backdrop: string; custom_mid: string; custom_light: string };
+    expect([saved.backdrop, saved.custom_mid, saved.custom_light]).toEqual(['dither-custom', '#336600', '#ff0000']);
+    await app.send({ cmd: 'backdrop', mode: 'foil' });
+    await app.send({ cmd: 'go', route: '/albums' });
+  }, 60_000);
+
+  // ---------------------------------------------------------------- overlays do not click through
+  it('the player bar does not click through to the track list under it (seek, pause, next, art)', async () => {
+    await app.send({ cmd: 'zone', id: 'pc' });
+    await app.send({ cmd: 'play_album', id: srv.library.charlie.id });
+    const before = await until('Charlie', async () => { const s = await srv.state('pc'); return s.queue.length === 1 ? s : undefined; });
+    // a short window so the track rows run down under the bar
+    await app.send({ cmd: 'size', w: 1280, h: 420 });
+    await app.send({ cmd: 'go', route: '/tracks' });
+    await new Promise((res) => setTimeout(res, 800));
+    const ids = (s: { queue: { queueId: string }[] }) => s.queue.map((q) => q.queueId).join(',');
+    const was = ids(before);
+    // the bar is the bottom 88 px: sweep it end to end on its seek line and on its button row, with every overlay closed again between clicks
+    for (const y of [338, 352, 375, 395]) {
+      for (let x = 40; x < 1280; x += 70) {
+        await app.send({ cmd: 'queue', open: false });
+        await app.send({ cmd: 'np', open: false });
+        await app.send({ cmd: 'click', x, y });
+      }
+    }
+    await new Promise((res) => setTimeout(res, 500));
+    const after = await srv.state('pc');
+    // a row click would have replaced the queue with that track (a new queue id): it is still Charlie's, the same entry
+    expect(ids(after)).toBe(was);
+    expect(after.queue.length).toBe(1);
+    await app.send({ cmd: 'queue', open: false });
+    await app.send({ cmd: 'np', open: false });
+    await app.send({ cmd: 'size', w: 1280, h: 800 });
+    await app.send({ cmd: 'go', route: '/albums' });
+  }, 180_000);
+
   // ---------------------------------------------------------------- phase 9: the app sounds its own zone
   it('own audio: playing on this computer follows the run, skips, seeks and pauses, all on the server', async () => {
     const st0 = await app.state();
