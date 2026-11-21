@@ -343,6 +343,42 @@ describe('the server-owned pc queue with Soloist', () => {
     await t.close();
   });
 
+  it('autoplay after the list\'s very last song is the end of the list, not a takeover: nothing is parked and the queue is just over', { timeout: 20000 }, async () => {
+    const t = await boot();
+    t.fake.autoplay = ['spotify:track:x1'];
+    await t.send('pc', { type: 'play', trackIds: ['sp:a'], startIndex: 0 });
+    await until(() => t.fake.item === 'spotify:track:a');
+    await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify', index: 0 }));
+    t.fake.finishTrack();
+    await vi.waitFor(async () => expect((await t.state()).status).toBe('stopped'));
+    await new Promise((r) => setTimeout(r, 400)); // a takeover, if one comes, lands after the stop
+    const s = await t.state();
+    expect(s.hold).toBeUndefined();
+    expect(s.output).toBeNull();
+    // The server-owned queue never sounds a song it did not choose: Soloist was stopped.
+    await until(() => t.fake.status !== 'playing');
+    // Volume still reaches Soloist with nothing playing (the next play starts at that level).
+    await t.send('pc', { type: 'volume', volume: 33 });
+    await until(() => t.fake.volume === 33);
+    expect((await t.state()).volume).toBe(33);
+    await t.close();
+  });
+
+  it('a seek Soloist refuses (an ad, seek_to_restricted) is no error and does not touch the queue or the position', { timeout: 20000 }, async () => {
+    const t = await boot();
+    await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => t.fake.item === 'spotify:track:a');
+    await vi.waitFor(async () => expect(await t.state()).toMatchObject({ status: 'playing', output: 'spotify', index: 0 }));
+    t.fake.seekRestrictedMs = 60_000;
+    const res = await t.send('pc', { type: 'seek', positionMs: 120_000 });
+    expect(res.statusCode).toBe(200);
+    const s = await t.state();
+    expect(s.positionMs).toBeLessThan(60_000);
+    expect(s).toMatchObject({ status: 'playing', index: 0 });
+    expect(s.queue).toHaveLength(2);
+    await t.close();
+  });
+
   it('a song a Spotify app starts mid-run parks the queue (takeover), and the Soloist zone shows that song', { timeout: 20000 }, async () => {
     const t = await boot();
     await t.send('pc', { type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });

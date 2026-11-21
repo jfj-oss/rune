@@ -448,6 +448,39 @@ describe('SoloistZone with songs left in Soloist\'s own queue', () => {
   }, 15_000);
 });
 
+describe('a seek Soloist refuses (seek_to_restricted) after the song is playing', () => {
+  it('while the song still loads the seek is tried again and lands; an ad or restricted context is refused gracefully, with the queue intact', async () => {
+    const client = await connected();
+    const logs: string[] = [];
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc', log: (_o, m) => logs.push(m) });
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => client.view.status === 'playing');
+    // Refused for a moment: retried once the song sounds, then it lands.
+    fake.seekRestrictedMs = 400;
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await zone.command({ type: 'seek', positionMs: 30_000 });
+    expect(fake.positionMs).toBe(30_000);
+    expect(zone.refusedSeek).toBe(false);
+    // Refused for good (an ad): no throw, the song plays on, the queue and the cursor are untouched.
+    fake.seekRestrictedMs = 60_000;
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    const s = await zone.command({ type: 'seek', positionMs: 90_000 });
+    expect(zone.refusedSeek).toBe(true);
+    expect(fake.positionMs).not.toBe(90_000);
+    expect(s.index).toBe(0);
+    expect(s.queue).toHaveLength(2);
+    expect(s.status).toBe('playing');
+    expect(logs.some((m) => /does not allow a seek/.test(m))).toBe(true);
+    // The zone still works afterwards.
+    fake.seekRestrictedMs = 0;
+    await zone.command({ type: 'seek', positionMs: 10_000 });
+    expect(fake.positionMs).toBe(10_000);
+    expect(zone.refusedSeek).toBe(false);
+    await zone.close();
+    client.close();
+  }, 20_000);
+});
+
 describe('SoloistZone while another Spotify device plays', () => {
   const settle = () => new Promise((r) => setTimeout(r, 150));
   const sentAfter = (from: number) => fake.commands.slice(from).filter((c) => c.command !== 'get_auth_state');

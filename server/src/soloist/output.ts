@@ -80,7 +80,9 @@ export class SoloistRunOutput implements Output {
   }
 
   async seek(positionMs: number): Promise<void> {
-    if (this.active) await this.deps.zone.command({ type: 'seek', positionMs });
+    if (!this.active) return;
+    await this.deps.zone.command({ type: 'seek', positionMs });
+    if (this.deps.zone.refusedSeek) throw new Error('Spotify does not allow a seek in this song right now');
   }
 
   async stop(): Promise<void> {
@@ -184,7 +186,7 @@ export class SoloistRunOutput implements Output {
       this.cur = null;
       this.last = 'stopped';
       if (adopted.reason === 'autoplay' && cur) this.fact({ type: 'ended', token, queueId: cur, at, last: true });
-      else this.fact({ type: 'takeover', at, trackId: `sp:${adopted.id}` });
+      else this.fact({ type: 'takeover', at, trackId: `sp:${adopted.id}`, ...(adopted.reason === 'autoplay' ? { autoplay: true } : {}) });
       return;
     }
     if (qid !== this.cur) {
@@ -286,8 +288,9 @@ export class PcSpotifyOutput implements Output {
     await Promise.all([this.deps.soloist?.output.stop(), this.deps.app?.stop()].map((p) => p?.catch(() => undefined)));
   }
 
+  /** With no run sent the level still goes to Soloist (it keeps it for the next play); the app takes it with its next start. */
   async setVolume(volume: number): Promise<void> {
-    await this.active?.setVolume(volume);
+    await (this.active ?? this.deps.soloist?.output)?.setVolume(volume);
   }
 
   position(): number | null {

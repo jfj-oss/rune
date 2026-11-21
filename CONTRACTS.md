@@ -82,3 +82,13 @@ Shuffle is a real reordering: the queue shown is the play order; turning it off 
   is mixed by rune before it is sent.
 - Tests: `server/tests/e2e/` plays real silent FLACs through a real server (mpv on a null output) and a muted headless Chromium;
   it runs in `pnpm test`.
+- Autoplay after the end of rune's list (decided): Spotify's own continuation (Soloist or the app) right after rune's list ran out
+  by itself is the END of the list: the queue stays, stopped, the output that continued is stopped (rune never sounds a song it did
+  not choose; auto-radio hangs off the end as before) and nothing is parked. Outputs flag that start as `takeover { autoplay: true }`;
+  the driver ignores it within 30 s of its own natural list end on the same output. A song someone else starts still parks.
+- Volume: `setVolume` reaches whatever sounds on the PC. The output holding the song gets it; with none (paused start, list over,
+  parked, failed start) every output does, and the Spotify app mirror too while parked. The state reports the level rune applied.
+  Every start carries it (`start(..., { volume })`).
+- Seek: Soloist refuses a seek while a song loads, in an ad or a restricted context (`seek_to_restricted`). While loading it is
+  retried once the song sounds; still refused, the song plays on where it was, no error, the queue untouched (`SoloistZone.refusedSeek`,
+  the driver then shows the output's real position).

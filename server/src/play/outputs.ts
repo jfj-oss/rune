@@ -212,6 +212,7 @@ export class SpotifyAppOutput implements Output {
   private recheck: ReturnType<typeof setTimeout> | null = null;
   private rechecked: string | null = null;
   /** A start is being prepared: what the app still shows is not a takeover. */
+  private doneAt: number | null = null;
   private starting = false;
   /** Songs of a run just stopped: their late "Playing" is rune's own start landing, not someone else's. */
   private ghost: { ids: Set<string>; until: number } | null = null;
@@ -505,8 +506,10 @@ export class SpotifyAppOutput implements Output {
         if (device) void this.deps.api.pause(device).catch(() => undefined);
         return;
       }
-      // Not rune's: a start here is a takeover (the driver decides who wins).
-      this.fact({ type: 'takeover', at, trackId: props.trackId });
+      // Not rune's: a start here is a takeover (the driver decides who wins). Right after rune's list ended here it is
+      // Spotify's autoplay, which the driver does not count as one.
+      const autoplay = !!run && run.done && now - (this.doneAt ?? Number.NEGATIVE_INFINITY) < 30_000;
+      this.fact({ type: 'takeover', at, trackId: props.trackId, ...(autoplay ? { autoplay: true } : {}) });
       return;
     }
     const token = run.token;
@@ -551,6 +554,7 @@ export class SpotifyAppOutput implements Output {
         this.clearRecheck();
         this.playing = false;
         run.done = true;
+        this.doneAt = now;
         this.clearLead();
         this.fact({ type: 'ended', token, queueId: cur.queueId, at, last: true });
         return;
@@ -575,6 +579,7 @@ export class SpotifyAppOutput implements Output {
       // Spotify's autoplay after rune's list: rune's song ended; the driver decides what comes next.
       this.playing = false;
       run.done = true;
+      this.doneAt = now;
       this.clearLead();
       this.fact({ type: 'ended', token, queueId: cur.queueId, at, last: true });
       return;
@@ -683,6 +688,7 @@ export class SpotifyAppOutput implements Output {
     if (change.next.length === 0) {
       // The next song is not the app's: the driver plays it (and pauses the app).
       run.done = true;
+      this.doneAt = at;
       this.playing = false;
       this.fact({ type: 'ended', token: run.token, queueId: cur.queueId, at, last: true });
       return;
