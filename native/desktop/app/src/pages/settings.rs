@@ -165,6 +165,7 @@ impl Rune {
             let on = m == current;
             let dot = match m {
                 crate::dither::Mode::Foil => 0x697dff,
+                crate::dither::Mode::Video => 0xff8f9a,
                 crate::dither::Mode::Off => 0x0f1013,
                 crate::dither::Mode::Hue(h) => rgb_u32(h.palette().light),
                 crate::dither::Mode::Cycle | crate::dither::Mode::Album => rgb_u32(crate::dither::Hue::Red.palette().light),
@@ -188,7 +189,7 @@ impl Rune {
                 row_now = h_flex().gap(px(6.));
             }
         }
-        let mut background = card("Background", "palette").child(muted("Foil waves are the default. The Dither backgrounds are the web's: black and one colour, in fine dots.")).child(modes);
+        let mut background = card("Background", "palette").child(muted("Foil waves are the default. The Dither backgrounds are the web's: black and one colour, in fine dots. Video loop plays backdrop.mp4 from rune's data folder (needs ffmpeg).")).child(modes);
         if current == crate::dither::Mode::Custom {
             let hexbox = |k: crate::rune::CWell, input: &Entity<InputState>, name: &str, sub: &str, col: crate::dither::Rgb, cx: &mut Context<Self>| {
                 let open = self.picker.as_ref().is_some_and(|p| p.0 == k);

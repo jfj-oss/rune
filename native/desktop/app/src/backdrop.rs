@@ -15,6 +15,7 @@
 //! only wakes twice a second.
 use crate::dither::{self, Input, Mode, Palette};
 use crate::foil;
+use crate::video;
 use crate::theme::*;
 use futures::StreamExt;
 use gpui_kit::*;
@@ -140,6 +141,10 @@ pub struct Backdrop {
     anim: Rc<RefCell<Anim>>,
     /// the Dither backdrops' state, shared with the paint closure
     dither: Rc<RefCell<DAnim>>,
+    /// the Video loop: the worker's controls, the newest frame, and what the worker was last told
+    vtx: Sender<video::Ctl>,
+    video: Option<(Arc<RenderImage>, u32, u32)>,
+    video_sent: (Option<(u32, u32)>, Option<bool>),
     _tasks: Vec<Task<()>>,
 }
 
@@ -164,13 +169,21 @@ impl Backdrop {
                 if this.update_in(cx, |b, window, cx| b.got(d, window, cx)).is_err() { break; }
             }
         });
+        let (vtx, vrx) = channel::<video::Ctl>();
+        let (vftx, mut vfrx) = futures::channel::mpsc::unbounded::<video::Frame>();
+        video::spawn(vrx, vftx);
+        let vrecv = cx.spawn_in(window, async move |this, cx| {
+            while let Some(f) = vfrx.next().await {
+                if this.update_in(cx, |b, window, cx| b.got_video(f, window, cx)).is_err() { break; }
+            }
+        });
         let tick = cx.spawn_in(window, async move |this, cx| loop {
             let wait = match this.update_in(cx, |b, window, cx| b.tick(window, cx)) { Ok(w) => w, Err(_) => break };
             cx.background_executor().timer(wait).await;
         });
         let me = Backdrop {
             prefs, dust: None, fade: None, dust_for: None, waves: None, waves_in_flight: false, cols: Arc::new(vec![]), tx, t: t0, last: Instant::now(),
-            was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, anim: Rc::new(RefCell::new(Anim { t: t0, last: None, was_live: false, running: false, failed: false, first_paint: None, frozen: std::env::var_os("RUNE_DESKTOP_FOIL_FREEZE").is_some(), cols_w: 0, cols: vec![] })), dither: Rc::new(RefCell::new(DAnim::new(prefs, t0))), _tasks: vec![recv, tick],
+            was_animating: false, shown: None, size: (0., 0.), scale: 1., drawn: 0, anim: Rc::new(RefCell::new(Anim { t: t0, last: None, was_live: false, running: false, failed: false, first_paint: None, frozen: std::env::var_os("RUNE_DESKTOP_FOIL_FREEZE").is_some(), cols_w: 0, cols: vec![] })), dither: Rc::new(RefCell::new(DAnim::new(prefs, t0))), vtx, video: None, video_sent: (None, None), _tasks: vec![recv, tick, vrecv],
         };
         me.publish_logo_palette(); // (a Dither mode's logo has its colour from the first frame)
         me
@@ -179,7 +192,41 @@ impl Backdrop {
     /// A Dither backdrop is what is drawn (the mode is one, and its shader works).
     fn dither_on(&self) -> bool { self.prefs.mode.is_dither() && !self.prefs.software && !self.dither.borrow().failed && std::env::var("RUNE_DESKTOP_FOIL").map(|v| v != "software").unwrap_or(true) }
     /// Foil waves are what is drawn: chosen, or standing in for a Dither mode whose shader cannot be used.
-    fn foil_on(&self) -> bool { self.prefs.mode == Mode::Foil || (self.prefs.mode.is_dither() && !self.dither_on()) }
+    fn foil_on(&self) -> bool { self.prefs.mode == Mode::Foil || (self.prefs.mode.is_dither() && !self.dither_on()) || (self.prefs.mode == Mode::Video && !self.video_on()) }
+    /// The Video loop is what is drawn (chosen, the file is there and ffmpeg is installed).
+    fn video_on(&self) -> bool { self.prefs.mode == Mode::Video && video::available() }
+
+    fn got_video(&mut self, f: video::Frame, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.video_on() { return; }
+        let Some(img) = image::RgbaImage::from_raw(f.w, f.h, f.bgra) else { return };
+        let new = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(img)]));
+        if let Some((old, ..)) = self.video.replace((new, f.w, f.h)) { let _ = window.drop_image(old); }
+        self.drawn += 1;
+        cx.notify();
+    }
+
+    /// The timer of the Video loop: tells the worker the size and whether frames are wanted (it paces them itself).
+    fn tick_video(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Duration {
+        if self.dust.is_some() || self.waves.is_some() || self.fade.is_some() { self.drop_images(window); }
+        let vs = window.viewport_size();
+        let scale = window.scale_factor();
+        let (pw, ph) = ((f32::from(vs.width) * scale).round() as u32, (f32::from(vs.height) * scale).round() as u32);
+        if pw == 0 || ph == 0 { return Duration::from_millis(250); }
+        let size = video::decode_size(pw, ph);
+        if self.video_sent.0 != Some(size) { let _ = self.vtx.send(video::Ctl::Size(size.0, size.1)); self.video_sent.0 = Some(size); }
+        // (Reduce effects: frames only until the first one of this size is on screen, then it holds still)
+        let have = self.video.as_ref().is_some_and(|v| (v.1, v.2) == size);
+        let live = animating(self.prefs, window.is_window_active()) || (self.prefs.reduce && !have);
+        if self.video_sent.1 != Some(live) { let _ = self.vtx.send(video::Ctl::Live(live)); self.video_sent.1 = Some(live); }
+        if self.video.is_none() { cx.notify(); }
+        Duration::from_millis(250)
+    }
+
+    fn stop_video(&mut self, window: &mut Window) {
+        if self.video_sent.0.is_some() { let _ = self.vtx.send(video::Ctl::Stop); }
+        self.video_sent = (None, None);
+        if let Some((i, ..)) = self.video.take() { let _ = window.drop_image(i); }
+    }
 
     /// The logo follows the backdrop's colour; before the first dither frame it already has the mode's own.
     fn publish_logo_palette(&self) {
@@ -278,6 +325,8 @@ impl Backdrop {
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Duration {
+        if self.video_on() { return self.tick_video(window, cx); }
+        if self.video_sent.0.is_some() || self.video.is_some() { self.stop_video(window); }
         if self.dither_on() { return self.tick_dither(window, cx); }
         if self.foil_on() && self.gpu() { return self.tick_gpu(window, cx); }
         if self.foil_on() && self.anim.borrow().failed { cx.notify(); }
@@ -400,10 +449,34 @@ impl Backdrop {
     }
 }
 
+impl Backdrop {
+    /// The Video loop: the newest frame stretched over the window, then darkened with pure black only (an OLED's black stays
+    /// black: no coloured tint), a little more at the edges.
+    fn render_video(&mut self, root: Div) -> Div {
+        let frame = self.video.clone();
+        let quad = canvas(|_, _, _| (), move |bounds, _, window, _| {
+            window.paint_quad(fill(bounds, ca(0x000000, 1.0)));
+            if let Some((img, ..)) = frame.clone() { let _ = window.paint_image(bounds, bounds, Corners::default(), img, 0, false); }
+        });
+        let root = root.child(quad.absolute().top_0().left_0().size_full());
+        if bare() { return root; }
+        let edge = |a: f32| ca(0x000000, a);
+        root.child(div().absolute().top_0().left_0().size_full().bg(ca(0x000000, VIDEO_DIM)))
+            .child(div().absolute().top_0().left_0().w_full().h(relative(0.3)).bg(linear_gradient(180., linear_color_stop(edge(0.45), 0.), linear_color_stop(edge(0.), 1.))))
+            .child(div().absolute().bottom_0().left_0().w_full().h(relative(0.3)).bg(linear_gradient(0., linear_color_stop(edge(0.45), 0.), linear_color_stop(edge(0.), 1.))))
+            .child(div().absolute().top_0().left_0().h_full().w(relative(0.25)).bg(linear_gradient(90., linear_color_stop(edge(0.45), 0.), linear_color_stop(edge(0.), 1.))))
+            .child(div().absolute().top_0().right_0().h_full().w(relative(0.25)).bg(linear_gradient(270., linear_color_stop(edge(0.45), 0.), linear_color_stop(edge(0.), 1.))))
+    }
+}
+
+/// How much the Video loop is darkened so text stays readable (black at this opacity over the whole picture).
+pub const VIDEO_DIM: f32 = 0.55;
+
 impl Render for Backdrop {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let root = div().absolute().top_0().left_0().size_full().overflow_hidden();
         if self.dither_on() { return self.render_dither(root); }
+        if self.video_on() { return self.render_video(root); }
         if self.foil_on() && self.gpu() { return self.render_gpu(root); }
         if !self.foil_on() || self.size.0 == 0. { return root; }
         let t = if self.prefs.reduce { foil::STILL_T } else { self.t };

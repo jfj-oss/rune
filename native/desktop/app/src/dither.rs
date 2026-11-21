@@ -143,34 +143,34 @@ pub fn custom_palette(mid: &str, light: &str) -> Palette {
 
 /// The Settings -> Background choice (the web's `ambient` plus Foil waves).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Mode { #[default] Foil, Off, Hue(Hue), Cycle, Album, Custom }
+pub enum Mode { #[default] Foil, Off, Hue(Hue), Cycle, Album, Custom, Video }
 
 impl Mode {
-    /// The list of the Settings card: Foil waves, then the web's order (hues, Cycle, Album, Custom), then Off.
+    /// The list of the Settings card: Foil waves, Video loop, then the web's order (hues, Cycle, Album, Custom), then Off.
     pub fn all() -> Vec<Mode> {
-        let mut v = vec![Mode::Foil];
+        let mut v = vec![Mode::Foil, Mode::Video];
         v.extend(Hue::ALL.iter().map(|&h| Mode::Hue(h)));
         v.extend([Mode::Cycle, Mode::Album, Mode::Custom, Mode::Off]);
         v
     }
     /// The saved id: the web's `rune.ambient` strings (`dither` is red), plus `foil`.
     pub fn id(self) -> String {
-        match self { Mode::Foil => "foil".into(), Mode::Off => "off".into(), Mode::Hue(Hue::Red) => "dither".into(), Mode::Hue(h) => format!("dither-{}", h.name()), Mode::Cycle => "dither-cycle".into(), Mode::Album => "dither-album".into(), Mode::Custom => "dither-custom".into() }
+        match self { Mode::Foil => "foil".into(), Mode::Video => "video".into(), Mode::Off => "off".into(), Mode::Hue(Hue::Red) => "dither".into(), Mode::Hue(h) => format!("dither-{}", h.name()), Mode::Cycle => "dither-cycle".into(), Mode::Album => "dither-album".into(), Mode::Custom => "dither-custom".into() }
     }
     pub fn from_id(s: &str) -> Option<Mode> {
         match s {
-            "foil" => Some(Mode::Foil), "off" => Some(Mode::Off), "dither" | "dither-red" => Some(Mode::Hue(Hue::Red)),
+            "foil" => Some(Mode::Foil), "video" => Some(Mode::Video), "off" => Some(Mode::Off), "dither" | "dither-red" => Some(Mode::Hue(Hue::Red)),
             "dither-cycle" => Some(Mode::Cycle), "dither-album" => Some(Mode::Album), "dither-custom" => Some(Mode::Custom),
             _ => Hue::ALL.iter().find(|h| s == format!("dither-{}", h.name())).map(|&h| Mode::Hue(h)),
         }
     }
     pub fn label(self) -> String {
         match self {
-            Mode::Foil => "Foil waves".into(), Mode::Off => "Off".into(), Mode::Cycle => "Dither \u{b7} Cycle".into(), Mode::Album => "Dither \u{b7} Album".into(), Mode::Custom => "Dither \u{b7} Custom".into(),
+            Mode::Foil => "Foil waves".into(), Mode::Video => "Video loop".into(), Mode::Off => "Off".into(), Mode::Cycle => "Dither \u{b7} Cycle".into(), Mode::Album => "Dither \u{b7} Album".into(), Mode::Custom => "Dither \u{b7} Custom".into(),
             Mode::Hue(h) => { let n = h.name(); format!("Dither \u{b7} {}{}", n[..1].to_uppercase(), &n[1..]) }
         }
     }
-    pub fn is_dither(self) -> bool { !matches!(self, Mode::Foil | Mode::Off) }
+    pub fn is_dither(self) -> bool { !matches!(self, Mode::Foil | Mode::Off | Mode::Video) }
 }
 
 /// What decides the dither colour (`Ambient.tsx`): the mode, the Custom pair, the playing album's palette and the open album page's.
@@ -194,7 +194,7 @@ impl Input {
             Mode::Album => self.page.or(self.album).unwrap_or(Hue::Purple.palette()),
             Mode::Cycle => self.page.unwrap_or_else(|| cycle_at(t)),
             Mode::Hue(h) => self.page.unwrap_or_else(|| h.palette()),
-            Mode::Foil | Mode::Off => Hue::Red.palette(),
+            Mode::Foil | Mode::Off | Mode::Video => Hue::Red.palette(),
         }
     }
 }
@@ -430,7 +430,7 @@ mod tests {
     #[::core::prelude::v1::test]
     fn every_mode_round_trips_through_its_saved_id() {
         for m in Mode::all() { assert_eq!(Mode::from_id(&m.id()), Some(m), "{m:?}"); }
-        assert_eq!(Mode::all().len(), 16, "foil, 11 hues, cycle, album, custom, off");
+        assert_eq!(Mode::all().len(), 17, "foil, video, 11 hues, cycle, album, custom, off");
         assert_eq!(Mode::from_id("dither"), Some(Mode::Hue(Hue::Red)), "the web's id for red");
         assert_eq!(Mode::from_id("dither-red"), Some(Mode::Hue(Hue::Red)));
         assert_eq!(Mode::from_id("dither-cycle"), Some(Mode::Cycle));

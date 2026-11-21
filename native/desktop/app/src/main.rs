@@ -38,6 +38,7 @@ mod text;
 mod tint;
 mod theme;
 mod util;
+mod video;
 mod waveform;
 mod widgets;
 
