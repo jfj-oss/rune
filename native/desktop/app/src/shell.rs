@@ -28,6 +28,7 @@ impl Render for Rune {
         if self.frame == 1 { self.start_hook_loop(cx); }
         self.note_frame();
         self.covers.begin_frame();
+        self.sync_backdrop(cx);
         self.covers.evict(window);
         if let Some(a) = self.pending_smart.take() { self.smart_act(a, window, cx); }
         let vw = f32::from(window.viewport_size().width);

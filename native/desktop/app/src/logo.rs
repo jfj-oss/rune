@@ -1,6 +1,6 @@
 //! The mark (web `Logo.tsx` + `lib/dotLogo.ts`): four balls on a square, one diagonal pair at a time swapping corners with a
 //! motion trail. Drawn as a soft brightness field, then ordered-dithered with the web's blue-noise thresholds into very fine
-//! dots, one dot per CSS pixel (`max(1, round(scale))` device pixels). Colours come from the foil's own periwinkle. Animated
+//! dots, one dot per CSS pixel (`max(1, round(scale))` device pixels). Colours follow the active Dither backdrop (its palette as shown, see [`colours`]), the foil's own periwinkle otherwise. Animated
 //! only while the window is active; one still frame (t = 0) under "Reduce effects", like the web's reduced-motion path.
 //! The maths is a line-by-line port of the web's, so motion, timing and dithering match.
 use crate::bluenoise;
@@ -25,6 +25,18 @@ const TRAIL_GAP_MS: f32 = 20.0;
 /// it (the web's red palette uses 0.39, but that vanishes on the navy foil).
 pub const LIGHT: [u8; 3] = [105, 125, 255];
 pub const MID: [u8; 3] = [62, 74, 150];
+
+/// The logo's (light, mid) colours: the Dither backdrop's palette as it is on screen right now (the cycle and album blends
+/// included, like the web's `backdropShown`), or the foil's periwinkle under Foil waves and Off.
+pub fn colours(shown: Option<crate::dither::Palette>) -> ([u8; 3], [u8; 3]) {
+    match shown {
+        Some(p) => {
+            let q = |c: [f64; 3]| [c[0].round().clamp(0., 255.) as u8, c[1].round().clamp(0., 255.) as u8, c[2].round().clamp(0., 255.) as u8];
+            (q(p.light), q(p.mid))
+        }
+        None => (LIGHT, MID),
+    }
+}
 
 static REDUCE: AtomicBool = AtomicBool::new(false);
 /// Reduce effects (set with the backdrop's preferences): the logo stays on its still frame.
@@ -153,13 +165,14 @@ pub fn logo(size: f32) -> impl IntoElement {
         // a grid slightly off the box (rounding) is centred in it
         let (ox, oy) = (f32::from(b.origin.x) + (size - w as f32 * cell) / 2., f32::from(b.origin.y) + (size - w as f32 * cell) / 2.);
         let grid = cells(ms, w);
+        let (light, mid) = colours(crate::dither::shown());
         for y in 0..w {
             let mut x = 0;
             while x < w {
                 let Some(l) = grid[y * w + x] else { x += 1; continue };
                 let mut e = x + 1;
                 while e < w && grid[y * w + e] == Some(l) { e += 1; }
-                let col = match l { 2 => LIGHT, 1 => MID, _ => [0, 0, 0] };
+                let col = match l { 2 => light, 1 => mid, _ => [0, 0, 0] };
                 let rgb = ((col[0] as u32) << 16) | ((col[1] as u32) << 8) | col[2] as u32;
                 window.paint_quad(fill(Bounds { origin: point(px(ox + x as f32 * cell), px(oy + y as f32 * cell)), size: gpui_kit::size(px((e - x) as f32 * cell), px(cell)) }, rgba(rgb << 8 | 0xff)));
                 x = e;
@@ -170,7 +183,7 @@ pub fn logo(size: f32) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{balls_at, brightness, cells, cubic_bezier, densities, dither_levels, Ball, HALF_SIDE, LOOP_MS, RADIUS, SWELL};
+    use super::{colours, LIGHT, MID, balls_at, brightness, cells, cubic_bezier, densities, dither_levels, Ball, HALF_SIDE, LOOP_MS, RADIUS, SWELL};
     const E: f32 = 1e-4;
     fn near(a: Ball, x: f32, y: f32, r: f32) { assert!((a.x - x).abs() < E && (a.y - y).abs() < E && (a.r - r).abs() < E, "{a:?} vs {x} {y} {r}"); }
 
@@ -231,6 +244,20 @@ mod tests {
         // an empty field draws nothing
 
         assert!(dither_levels(&vec![0.0; n * n], n).iter().all(|&x| x == 0));
+    }
+
+    #[test]
+    fn the_logo_wears_the_backdrops_colours_and_periwinkle_under_foil() {
+        use crate::dither::{cycle_at, Hue};
+        assert_eq!(colours(None), (LIGHT, MID), "Foil waves / Off: the periwinkle");
+        let blue = Hue::Blue.palette();
+        assert_eq!(colours(Some(blue)), ([0x3f, 0x74, 0xe8], [0x1c, 0x32, 0x70]));
+        // it follows the palette as it changes: the cycle at the start, mid-blend and a colour later
+        assert_eq!(colours(Some(cycle_at(0.))).0, [0xd4, 0x58, 0x4f]);
+        assert_ne!(colours(Some(cycle_at(25.))), colours(Some(cycle_at(0.))));
+        assert_eq!(colours(Some(cycle_at(30.))).0, [0x8f, 0x5a, 0xe8]);
+        let album = crate::dither::palette_from_rgb([200., 40., 40.]);
+        assert_eq!(colours(Some(album)), ([214, 51, 51], [76, 21, 21]));
     }
 
     #[test]

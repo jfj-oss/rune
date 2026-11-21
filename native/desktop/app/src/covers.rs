@@ -172,12 +172,49 @@ fn worker(sh: Arc<Shared>, client: Client, tx: UnboundedSender<Done>) {
             continue;
         }
         let done = match client.image(&job.path).ok().and_then(|b| decode(&b, job.target)) {
-            Some((img, bytes)) => Done { key: job.key.clone(), img: Some(img), bytes, stale: false },
+            Some((img, bytes)) => {
+                if let Some(px) = img.as_bytes(0) {
+                    let sz = img.size(0);
+                    if let Some(c) = dominant_colour(px, i32::from(sz.width) as usize, i32::from(sz.height) as usize) { if let Ok(mut m) = colours().lock() { m.entry(job.key.0.clone()).or_insert(c); } }
+                }
+                Done { key: job.key.clone(), img: Some(img), bytes, stale: false }
+            }
             None => Done { key: job.key.clone(), img: None, bytes: 0, stale: false },
         };
         if let Ok(mut s) = sh.seen.lock() { s.remove(&job.key); }
         let _ = tx.unbounded_send(done);
     }
+}
+
+fn colours() -> &'static Mutex<HashMap<String, [u8; 3]>> {
+    static C: std::sync::OnceLock<Mutex<HashMap<String, [u8; 3]>>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
+
+/// The album's representative colour (web `useCoverColor`), once any of its covers has been decoded. Kept for the whole run.
+pub fn cover_colour(id: &str) -> Option<[u8; 3]> { colours().lock().ok().and_then(|c| c.get(id).copied()) }
+
+/// A saturated representative colour of a picture (web `dominantColour`): a 24 x 24 sample weighted toward vivid, bright pixels.
+/// `bgra` is the decoded picture (`w` x `h`). The web lets the browser scale the cover to 24 x 24; here each sample is the mean of
+/// its cell.
+pub fn dominant_colour(bgra: &[u8], w: usize, h: usize) -> Option<[u8; 3]> {
+    if w == 0 || h == 0 || bgra.len() < w * h * 4 { return None; }
+    const N: usize = 24;
+    let (mut r, mut g, mut b, mut wt) = (0f64, 0f64, 0f64, 0f64);
+    for gy in 0..N {
+        for gx in 0..N {
+            let (x0, x1) = (gx * w / N, ((gx + 1) * w / N).max(gx * w / N + 1).min(w));
+            let (y0, y1) = (gy * h / N, ((gy + 1) * h / N).max(gy * h / N + 1).min(h));
+            let (mut s, mut n) = ([0f64; 3], 0f64);
+            for y in y0..y1 { for x in x0..x1 { let p = (y * w + x) * 4; s[0] += bgra[p + 2] as f64; s[1] += bgra[p + 1] as f64; s[2] += bgra[p] as f64; n += 1.; } }
+            let (cr, cg, cb) = (s[0] / n, s[1] / n, s[2] / n);
+            let (max, min) = (cr.max(cg).max(cb), cr.min(cg).min(cb));
+            let sat = if max == 0. { 0. } else { (max - min) / max };
+            let k = 0.05 + sat * sat * (max / 255.);
+            r += cr * k; g += cg * k; b += cb * k; wt += k;
+        }
+    }
+    Some([(r / wt).round() as u8, (g / wt).round() as u8, (b / wt).round() as u8])
 }
 
 /// Decode and, only when the picture is much bigger than where it is drawn, shrink it. GPUI wants BGRA.
@@ -218,6 +255,19 @@ mod tests {
         assert_eq!(n, 200 * 200 * 4);
         let (_, n) = decode(&png(600, 600), 600).unwrap();
         assert_eq!(n, 600 * 600 * 4);
+    }
+
+    #[::core::prelude::v1::test]
+    fn the_album_colour_is_the_vivid_one_and_a_flat_picture_gives_itself() {
+        // a flat picture: its own colour (BGRA bytes)
+        let flat: Vec<u8> = (0..48 * 48).flat_map(|_| [30u8, 30, 200, 255]).collect();
+        assert_eq!(dominant_colour(&flat, 48, 48), Some([200, 30, 30]));
+        // mostly dull grey with a patch of vivid blue: the weighting leans to the blue (the web weights by saturation squared x brightness)
+        let mut px: Vec<u8> = (0..48 * 48).flat_map(|_| [90u8, 90, 90, 255]).collect();
+        for y in 0..12 { for x in 0..12 { let i = (y * 48 + x) * 4; px[i] = 230; px[i + 1] = 60; px[i + 2] = 20; } }
+        let c = dominant_colour(&px, 48, 48).unwrap();
+        assert!(c[2] > c[0] && c[2] > 120, "{c:?}");
+        assert_eq!(dominant_colour(&[], 0, 0), None);
     }
 
     #[::core::prelude::v1::test]
