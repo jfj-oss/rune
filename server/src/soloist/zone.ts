@@ -85,6 +85,12 @@ const END_SLACK_MS = 5000;
 const OWN_PLAY_GRACE_MS = 2000;
 /** How long after rune's own play a same-titled song under another id counts as Spotify relinking rune's song. */
 const RELINK_WINDOW_MS = 15_000;
+/**
+ * While rune starts a song (taking the session over from another device, then the play): Spotify first resumes whatever
+ * that session last played, for a moment, before rune's song lands. A song that is not rune's in this window is that
+ * leftover, never a takeover (adopting it parked the pc queue: the bar showed "paused 0:00" while the song played).
+ */
+const STARTING_GRACE_MS = 5000;
 
 /** Titles equal once case, punctuation and a trailing " - Remastered ..." style suffix are ignored. */
 export function sameTitle(a: string, b: string): boolean {
@@ -147,6 +153,8 @@ export class SoloistZone implements PlaybackZone {
   private mine = true;
   /** When rune last started a song on Soloist itself (which makes it the active device). */
   private ownPlayAt = Number.NEGATIVE_INFINITY;
+  /** When rune last began starting a song (before any session takeover), see STARTING_GRACE_MS. */
+  private startingAt = Number.NEGATIVE_INFINITY;
   private ownPlayCheck: ReturnType<typeof setTimeout> | null = null;
   /** A song rune did not ask for, held until Soloist says whether it is the active device (`confirm`). */
   private pending: { id: string; live: boolean; ended: boolean; left: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
@@ -353,6 +361,8 @@ export class SoloistZone implements PlaybackZone {
     // Another Connect device holds the session (playing or paused): Soloist's commands would act on THAT device, so it
     // is made the active device first. With nothing active anywhere, a play alone does that.
     const takeover = !this.deps.link.view.isActive && this.deps.link.view.status !== 'idle';
+    // (only when rune takes the session over: that is when Spotify first resumes the other device's song)
+    this.startingAt = takeover ? this.now() : Number.NEGATIVE_INFINITY;
     if (takeover) await this.deps.link.send({ command: 'activate' }).catch((err) => this.deps.log?.({ err: String(err) }, 'soloist: could not become the active device'));
     else await this.ensureModes();
     this.adoptedSong = null;
@@ -539,6 +549,8 @@ export class SoloistZone implements PlaybackZone {
         const head = this.soloistUpcoming[0];
         const fromQueue = !!id && head?.id === id && head.source === 'queue';
         if (id && head?.id === id) this.soloistUpcoming = this.soloistUpcoming.slice(1);
+        // rune's own song is on: the leftover window of a session takeover is over
+        if (id && id === this.expected) this.startingAt = Number.NEGATIVE_INFINITY;
         this.onTrack(id, { fromQueue });
         return;
       }
@@ -745,6 +757,11 @@ export class SoloistZone implements PlaybackZone {
       this.expected = id;
       this.revive(live);
       this.bump();
+      return;
+    }
+    // rune is starting its own song: what sounds before it lands is the old session's leftover (see STARTING_GRACE_MS)
+    if (!opts.ended && this.now() - this.startingAt < STARTING_GRACE_MS) {
+      this.deps.log?.({ id, asked: this.expected }, 'soloist: a leftover song while rune starts its own; not a takeover');
       return;
     }
     // Soloist's own next (autoplay after rune's song, its context, a song queued in a Spotify app) is one it listed in

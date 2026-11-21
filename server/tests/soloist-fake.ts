@@ -141,6 +141,9 @@ export class FakeSoloist {
   }
 
   /** Soloist becomes the device that plays (its own play, `activate`, or picked in a Spotify app). */
+  /** On `activate`, report the other device's song as now playing here first (what real Spotify does). */
+  resumeOnActivate = false;
+
   private becomeActive(): void {
     this.elsewhere = false;
     if (this.isActive) return;
@@ -300,6 +303,11 @@ export class FakeSoloist {
         this.ok(socket, command);
         // The session moves to Soloist as it is (the other device's song goes on here until something else is played).
         this.becomeActive();
+        if (this.resumeOnActivate && this.item) {
+          // real Spotify: the other device's song sounds here for a moment before the play that follows lands
+          this.broadcast({ type: 'track_changed', item: this.entity(this.item) });
+          this.broadcast({ type: 'playback_changed', status: 'playing' });
+        }
         return;
       case 'deactivate':
         this.ok(socket, command);

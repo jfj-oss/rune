@@ -604,6 +604,25 @@ describe('SoloistZone while another Spotify device plays', () => {
     client.close();
   });
 
+  it('taking the session over: the other device\'s song that sounds for a moment first is not a takeover (the queue is not parked)', async () => {
+    const client = await connected();
+    const zone = new SoloistZone({ link: client, loadItems, output: () => 'pc' });
+    await zone.command({ type: 'play', trackIds: ['sp:x'], startIndex: 0 });
+    await until(() => client.view.isActive);
+    // another device takes the session; then rune plays again, taking it back
+    fake.playsElsewhere('spotify:track:leftover');
+    await until(() => zone.playsElsewhere());
+    fake.resumeOnActivate = true;
+    await zone.command({ type: 'play', trackIds: ['sp:a', 'sp:b'], startIndex: 0 });
+    await until(() => fake.item === 'spotify:track:a');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(zone.adopted()).toBeNull();
+    expect(zone.state().queue.map((q) => q.track.id)).toEqual(['sp:a', 'sp:b']);
+    expect(zone.state()).toMatchObject({ status: 'playing', index: 0 });
+    await zone.close();
+    client.close();
+  });
+
   it('Soloist picked in a Spotify app after another device played is followed again', async () => {
     const client = await connected();
     const zone = new SoloistZone({ link: client, loadItems: loadKnown, output: () => 'pc' });
