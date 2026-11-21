@@ -25,6 +25,8 @@ fn ffmpeg() -> &'static Option<PathBuf> {
         // (a Mac app does not get Homebrew's folders on its PATH)
         let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
         dirs.extend(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"].map(PathBuf::from));
+        // (and a copy the person put in their own folder, no admin rights needed)
+        if let Some(h) = std::env::var_os("HOME") { dirs.push(PathBuf::from(h).join(".local/bin")); }
         dirs.into_iter().map(|d| d.join("ffmpeg")).find(|f| f.is_file())
     })
 }
