@@ -27,7 +27,14 @@ export type OutputFact =
   | { type: 'failed'; token: number; queueId: string | null; reason: PlayerHold['reason']; message: string; at: number }
   /** Something rune did not start began to play in this output. `at` is when its signal arrived. `message`: the one
    *  line for the page when the output knows what happened (the default names "another player"). */
-  | { type: 'takeover'; at: number; trackId: string | null; message?: string };
+  | {
+      type: 'takeover';
+      at: number;
+      trackId: string | null;
+      message?: string;
+      /** The output saw this song begin as Spotify's own continuation (autoplay) after rune's list: not a takeover if rune's list just ended. */
+      autoplay?: boolean;
+    };
 
 export interface Output {
   readonly kind: OutputKind;
@@ -98,6 +105,8 @@ export interface DriverDeps {
 export const QUEUE_KEY = 'player.queue.pc';
 const SAVE_DEBOUNCE_MS = 1_000;
 const POSITION_SAVE_MS = 5_000;
+/** Spotify's autoplay this soon after rune's list ran out by itself is the end of the list, not a takeover. */
+const AUTOPLAY_AFTER_END_MS = 30_000;
 /** A lower level that stands this long was the user's; a voice duck lasts at most 15 s. */
 export const DUCK_MS = 20_000;
 /** Spotify takes at most 100 URIs per play; mpv only preloads two, but a long run keeps transitions gapless. */
@@ -135,6 +144,10 @@ export class QueueDriver implements PlaybackZone {
   private hold: PlayerHold | null = null;
   /** Another player took the speakers: the queue waits and the page shows that player. */
   private parked = false;
+  /** The mirrored app's volume as last seen, to tell a change made in the app from rune's own. */
+  private mirrorVolume: number | null = null;
+  /** The list ran out by itself (when, on which output): Spotify's autoplay right after is the end of the list, not a takeover. */
+  private listEnd: { at: number; kind: OutputKind } | null = null;
   private lastStartAt = Number.NEGATIVE_INFINITY;
   /** Pause was pressed while the start was on its way: the start, once it lands, is paused. */
   private pauseOnStart = false;
@@ -174,7 +187,8 @@ export class QueueDriver implements PlaybackZone {
       const m = this.deps.mirror?.();
       if (m) {
         const s = m.state();
-        return { ...s, zone: this.zone, rev: this.rev, output: 'spotify', ...(this.hold ? { hold: this.hold } : {}), updatedAt: s.updatedAt };
+        // The volume shown is the one rune applied to whatever sounds (the app's own report, until rune set one).
+        return { ...s, volume: this.volume, zone: this.zone, rev: this.rev, output: 'spotify', ...(this.hold ? { hold: this.hold } : {}), updatedAt: s.updatedAt };
       }
     }
     const details = this.output ? this.deps.outputs[this.output]?.details?.() : undefined;
@@ -215,7 +229,17 @@ export class QueueDriver implements PlaybackZone {
 
   /** The mirrored app changed: a parked page follows it. */
   mirrorChanged(): void {
-    if (this.parked) this.emit(false);
+    if (!this.parked) return;
+    // A level the user set in the app itself is the level now (rune's own sends come back as the same number).
+    const v = this.deps.mirror?.()?.state().volume;
+    if (typeof v === 'number' && v !== this.mirrorVolume) {
+      this.mirrorVolume = v;
+      if (Math.abs(v - this.volume) >= 1) {
+        this.noteVolume(v);
+        this.volume = v;
+      }
+    }
+    this.emit(false);
   }
 
   command(cmd: PlayerCommand): Promise<PlayerState> {
@@ -357,8 +381,19 @@ export class QueueDriver implements PlaybackZone {
       throw new Error("The Spotify app is playing something else: play a song to bring rune's queue back");
     }
     if (cmd.type === 'volume') {
-      this.noteVolume(cmd.volume);
-      this.volume = cmd.volume;
+      // Whatever sounds on the PC gets the level (Soloist, mpv, the app): the page shows the app, but the sound may be elsewhere.
+      const v = Math.round(Math.min(100, Math.max(0, cmd.volume)) * 2) / 2;
+      this.noteVolume(v);
+      this.volume = v;
+      await this.applyVolume(v);
+      if (m) {
+        await m.command({ type: 'volume', volume: v }).catch((err) => this.deps.log?.({ err }, 'driver: volume on the Spotify app failed'));
+        this.mirrorVolume = m.state().volume;
+        this.emit(false);
+        return;
+      }
+      this.emit(true);
+      return;
     }
     if (!m) {
       // The app is gone: nothing to mirror, the queue is rune's again.
@@ -412,10 +447,18 @@ export class QueueDriver implements PlaybackZone {
     if (!item || isRadioTrack(item.track)) return;
     const dur = item.track.durationMs;
     const pos = Math.max(0, Math.round(dur > 0 ? Math.min(dur, positionMs) : positionMs));
+    const before = { pos: this.livePosition(this.now()) };
     this.pos = pos;
     this.posAt = this.now();
     const out = this.current();
-    if (out) await out.seek(pos).catch((err) => this.deps.log?.({ err }, 'driver: seek failed'));
+    if (out) {
+      const ok = await out.seek(pos).then(() => true, (err) => (this.deps.log?.({ err }, 'driver: seek failed'), false));
+      // A seek the output did not make (refused or failed): the song is where it was, not where the page asked.
+      if (!ok) {
+        this.pos = Math.round(out.position() ?? before.pos);
+        this.posAt = this.now();
+      }
+    }
     this.emit(true);
   }
 
@@ -437,9 +480,18 @@ export class QueueDriver implements PlaybackZone {
     const v = Math.round(Math.min(100, Math.max(0, volume)) * 2) / 2;
     this.noteVolume(v);
     this.volume = v;
-    const out = this.current();
-    if (out) await out.setVolume(v).catch((err) => this.deps.log?.({ err }, 'driver: volume failed'));
+    await this.applyVolume(v);
     this.emit(true);
+  }
+
+  /**
+   * The level reaches whatever sounds on the PC: the output that holds the song, or, when none does (paused before
+   * a start, the list over, parked, a start that failed), every output, so the next sound starts at this level.
+   */
+  private async applyVolume(v: number): Promise<void> {
+    const cur = this.current();
+    const outs = cur ? [cur] : Object.values(this.deps.outputs).filter((o): o is Output => !!o);
+    await Promise.all(outs.map((o) => o.setVolume(v).catch((err) => this.deps.log?.({ err, output: o.kind }, 'driver: volume failed'))));
   }
 
   /** A raise is the user's at once; a lower level only once it stood longer than a voice duck. */
@@ -493,6 +545,7 @@ export class QueueDriver implements PlaybackZone {
     const kind = this.route(item.track);
     const out = this.deps.outputs[kind];
     const token = ++this.token;
+    this.listEnd = null;
     const fail = (hold: PlayerHold) => {
       this.output = null;
       this.hold = hold;
@@ -645,6 +698,7 @@ export class QueueDriver implements PlaybackZone {
   private async advance(): Promise<void> {
     const r = Q.next(this.q, { auto: true });
     if (r.ended) {
+      this.listEnd = this.output ? { at: this.now(), kind: this.output } : null;
       await this.silence();
       this.setStatus('stopped', 0);
       this.emit(true);
@@ -674,9 +728,17 @@ export class QueueDriver implements PlaybackZone {
       if (this.output !== kind) void this.deps.outputs[kind]?.stop().catch(() => undefined);
       return;
     }
-    this.deps.log?.({ trackId: f.trackId, output: kind }, 'driver: another player took over the PC speakers: queue parked');
     void this.serialize(async () => {
       if (this.parked) return;
+      // Spotify's autoplay right after rune's list ended by itself: the list is over, rune's queue stays (stopped) and
+      // the sound stops (rune never sounds a song it did not choose). Anything else that starts is a takeover.
+      const end = this.listEnd;
+      if (f.autoplay && end && end.kind === kind && this.status === 'stopped' && this.now() - end.at < AUTOPLAY_AFTER_END_MS) {
+        this.deps.log?.({ trackId: f.trackId, output: kind }, "driver: Spotify's autoplay after the end of rune's list: not a takeover, stopped");
+        await this.deps.outputs[kind]?.stop().catch(() => undefined);
+        return;
+      }
+      this.deps.log?.({ trackId: f.trackId, output: kind }, 'driver: another player took over the PC speakers: queue parked');
       const pos = this.livePosition(this.now());
       this.closeActive(false);
       const mine = this.current();
@@ -694,6 +756,7 @@ export class QueueDriver implements PlaybackZone {
   private unpark(): void {
     if (!this.parked) return;
     this.parked = false;
+    this.mirrorVolume = null;
     this.hold = null;
   }
 

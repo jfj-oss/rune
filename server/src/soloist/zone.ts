@@ -154,6 +154,8 @@ export class SoloistZone implements PlaybackZone {
   private doubted = false;
   /** A volume set while another device was the active one: Soloist gets it when it plays again. */
   private volumeDue = false;
+  /** The last seek asked for was refused by Soloist (the song plays on where it was). */
+  refusedSeek = false;
   private readonly subs = new Set<(s: PlayerState) => void>();
   private readonly offs: (() => void)[] = [];
   private readonly now: () => number;
@@ -477,9 +479,22 @@ export class SoloistZone implements PlaybackZone {
   }
 
   private async seekTo(ms: number): Promise<void> {
+    this.refusedSeek = false;
     // Not Soloist's session: the place is kept for when rune's song starts here again.
     if (!this.mine) { this.setPos(ms); this.bump(); return; }
-    await this.deps.link.send({ command: 'seek', position_ms: ms });
+    try {
+      await this.deps.link.send({ command: 'seek', position_ms: ms });
+    } catch (err) {
+      if (!/seek_to_restricted/.test(String(err))) throw err;
+      // Soloist refuses a seek while the song is loading, in an ad, or where Spotify does not allow one. Loading: tried
+      // again once the song sounds. Still refused: the song plays on where it was, the queue is untouched, no error.
+      if (!(await this.seekStarted(ms))) {
+        this.deps.log?.({ ms }, 'soloist: Spotify does not allow a seek in this song right now (an ad or a restricted context); it plays on');
+        this.refusedSeek = true;
+        return;
+      }
+    }
+    this.refusedSeek = false;
     this.setPos(ms);
     this.updatedAt = this.now();
     this.newProgram();
