@@ -14,7 +14,7 @@ fn uniforms_are_packed_header_then_app_floats() {
     let u = shader_quad_at(b, b, &[0.25, 0.5]).pack();
     assert_eq!(u.len(), SHADER_HEADER_LEN + 2);
     assert_eq!(&u[..9], &[10.0, 20.0, 300.0, 200.0, 10.0, 20.0, 300.0, 200.0, 1.5]);
-    assert_eq!(&u[9..SHADER_HEADER_LEN], &[0.0, 0.0, 0.0]);
+    assert_eq!(&u[9..SHADER_HEADER_LEN], &[0.0, 0.0, 0.0], "square: no rounding in the header");
     assert_eq!(&u[SHADER_HEADER_LEN..], &[0.25, 0.5]);
 }
 
@@ -51,4 +51,13 @@ fn registry_tracks_sources_and_status() {
     register_shader(id, ShaderSource { wgsl: "c", msl: "d" });
     assert_eq!(shader_status(id), ShaderStatus::Pending, "a new source is tried again");
     assert_eq!(shader_source(id).unwrap().msl, "d");
+}
+
+#[test]
+fn rounded_corners_ride_in_the_header() {
+    let b = rect(0.0, 100.0);
+    let mut q = shader_quad_at(b, b, &[]);
+    q.round = [20.0, 15.0];
+    let u = q.pack();
+    assert_eq!(&u[9..12], &[20.0, 15.0, 0.0]);
 }

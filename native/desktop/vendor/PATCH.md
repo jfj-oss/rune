@@ -22,6 +22,10 @@ content mask, time) followed by the app's own floats.
 - `src/window.rs`: `snap_bounds` and `snapped_content_mask` are `pub(crate)` (used by `paint_shader_quad`).
 - `Cargo.toml`: the `[[example]]` entries and the `examples/` directory are removed (5 MB, unused).
 
+- Rounded corners (added for the app's own window frame): `ShaderQuad::round` = [radius in device px, corner bits 1 TL / 2 TR /
+  4 BR / 8 BL], packed into header slots 9 and 10 (slot 11 stays free), `Window::paint_shader_quad_round`, `shader_quad_round`. Both
+  renderers multiply the app shader's alpha by the coverage of the rounded rect of the quad's bounds (radius 0 = untouched).
+
 ## gpui-pre-wgpu-0.3.12 (Linux; also what a Windows or web build would use)
 - `src/custom_shader.rs` (new): the WGSL prelude (globals, `U`, `ud(i)`, a vertex stage covering the bounds clipped to the content
   mask, `fs_custom` that converts the app's straight RGBA to the surface's alpha mode), `CustomShaders` (pipelines built on first
@@ -33,7 +37,7 @@ content mask, time) followed by the app's own floats.
 - `src/gpui_wgpu.rs`: `mod custom_shader;`
 
 ## gpui-pre-apple-0.3.12 (macOS, iOS: the Metal renderer)
-- `src/metal_renderer.rs`: `CUSTOM_SHADER_PRELUDE` / `_SUFFIX` (vertex stage, `fs_custom` calling the app's
+- `src/metal_renderer.rs`: `CUSTOM_SHADER_PRELUDE` / `_SUFFIX` (vertex stage, `rune_round_cover`, `fs_custom` calling the app's
   `float4 custom_fs(float2 pos, constant float* U)`), `custom_pipelines`, `custom_pipeline` (compiles the MSL at runtime with
   `newLibraryWithSource`, so no Metal toolchain is needed at build time), `draw_shader_quad`, one match arm.
 

@@ -110,27 +110,33 @@ fn ball_img(k: Kind, l: Look, scale: f32) -> impl IntoElement {
 }
 
 /// One traffic light: the ball in its four looks, stacked; hover and pressed show on top.
-fn light(k: Kind, id: &'static str, focused: bool, scale: f32, on_click: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
+fn light(k: Kind, id: &'static str, focused: bool, scale: f32, window: &mut Window, cx: &mut App, on_click: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
     let g: SharedString = format!("tl-{id}").into();
     let base = if focused { Look::Normal } else { Look::Backdrop };
+    // pressed: set on the press, cleared on release (or when the pointer is let go elsewhere)
+    let pressed = window.use_keyed_state(SharedString::from(format!("tl-down-{id}")), cx, |_, _| false);
+    let (p1, p2, p3) = (pressed.clone(), pressed.clone(), pressed.clone());
+    let view = window.current_view();
+    let is_down = *pressed.read(cx);
     div().id(id).group(g.clone()).relative().flex_none().size(px(BOX)).cursor_pointer()
         .role(Role::Button).aria_label(match k { Kind::Close => "Close", Kind::Minimize => "Minimize", Kind::Maximize => "Maximize" })
         .child(ball_img(k, base, scale))
         .child(div().absolute().top_0().left_0().size_full().opacity(0.).group_hover(g.clone(), |s| s.opacity(1.)).child(ball_img(k, Look::Hover, scale)))
-        .child(div().id(SharedString::from(format!("{id}-down"))).absolute().top_0().left_0().size_full().opacity(0.).group_active(g.clone(), |s| s.opacity(1.)).child(ball_img(k, Look::Pressed, scale)))
-        // the bar's drag must not start from a ball
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(div().absolute().top_0().left_0().size_full().opacity(if is_down { 1. } else { 0. }).child(ball_img(k, Look::Pressed, scale)))
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| { p1.update(cx, |v, _| { *v = true; }); cx.notify(view); })
+        .on_mouse_up(MouseButton::Left, move |_, _, cx| { p2.update(cx, |v, _| { *v = false; }); cx.notify(view); })
+        .on_mouse_up_out(MouseButton::Left, move |_, _, cx| { if p3.update(cx, |v, _| std::mem::replace(v, false)) { cx.notify(view); } })
         .on_click(move |_, window, cx| { cx.stop_propagation(); on_click(window, cx) })
 }
 
 /// The three glossy lights, close, minimize, maximize. `close` runs the app's own close path (it remembers the window first).
-pub fn traffic_lights(window: &Window, close: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
+pub fn traffic_lights(window: &mut Window, cx: &mut App, close: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
     let focused = window.is_window_active();
     let scale = window.scale_factor();
-    div().flex().flex_row().items_center().gap(px(BALL_GAP - (BOX - BALL) + 0.)).flex_none()
-        .child(light(Kind::Close, "tl-close", focused, scale, close))
-        .child(light(Kind::Minimize, "tl-min", focused, scale, |window, _| window.minimize_window()))
-        .child(light(Kind::Maximize, "tl-max", focused, scale, |window, _| window.zoom_window()))
+    let (c1, c2, c3) = (light(Kind::Close, "tl-close", focused, scale, window, cx, close), light(Kind::Minimize, "tl-min", focused, scale, window, cx, |window, _| window.minimize_window()), light(Kind::Maximize, "tl-max", focused, scale, window, cx, |window, _| window.zoom_window()));
+    // (the bar's drag must not start from a ball; stopped here, above the balls, so their own pressed look still sees the press)
+    div().flex().flex_row().items_center().gap(px(BALL_GAP - (BOX - BALL))).flex_none().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(c1).child(c2).child(c3)
 }
 
 /// Width the lights take at the left of the row (so the row can leave room on macOS, where the system draws them).
@@ -243,13 +249,74 @@ pub fn frame(window: &mut Window, cx: &mut App, rune: &Entity<crate::rune::Rune>
             if let Some(edge) = resize_edge(window.mouse_position(), size, framed) { window.start_window_resize(edge); }
         })
         // the soft shadow + the band (outer rounded rect)
-        .child(div().absolute().left(px(SHADOW)).top(px(SHADOW)).right(px(SHADOW)).bottom(px(SHADOW)).rounded(px(if std::env::var_os("RUNE_FRAME_SQUARE").is_some() { 0. } else { ro })).bg(if std::env::var_os("RUNE_FRAME_NOBAND").is_some() { gpui_kit::transparent_black() } else { band })
-            .shadow(if std::env::var_os("RUNE_FRAME_NOSHADOW").is_some() { vec![] } else { vec![shadow(10., 0.22, 2.), shadow(3., 0.18, 1.)] }))
+        .child(div().absolute().left(px(SHADOW)).top(px(SHADOW)).right(px(SHADOW)).bottom(px(SHADOW)).rounded(px(ro)).bg(band)
+            .shadow(vec![shadow(10., 0.22, 2.), shadow(3., 0.18, 1.)]))
         // the faint light edge, just outside the band
-        .children((std::env::var_os("RUNE_FRAME_NOEDGE").is_none()).then(|| div().absolute().left(px(SHADOW - EDGE)).top(px(SHADOW - EDGE)).right(px(SHADOW - EDGE)).bottom(px(SHADOW - EDGE)).rounded(px(ro + EDGE)).border(px(EDGE)).border_color(edge)))
+        .child(div().absolute().left(px(SHADOW - EDGE)).top(px(SHADOW - EDGE)).right(px(SHADOW - EDGE)).bottom(px(SHADOW - EDGE)).rounded(px(ro + EDGE)).border(px(EDGE)).border_color(edge))
         // the content, inside the band, its corners rounded (the backdrop and whatever touches a corner round themselves)
         .child(div().absolute().left(px(SHADOW + BAND)).top(px(SHADOW + BAND)).right(px(SHADOW + BAND)).bottom(px(SHADOW + BAND)).cursor(CursorStyle::default())
             .child(content(backdrop.clone().into_any_element(), app)))
         .child(div().absolute().size_full().children(zones(win)))
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    // explicit names: a glob of super::* also pulls in gpui's own `test` macro
+    use super::{corner_bits, lights_width, rasterize, resize_edge, svg_source, Kind, Look, BAND, EDGE, INNER_R, SHADOW};
+    use crate::theme::SIDE_W_COLLAPSED;
+    use gpui_kit::{point, px, Pixels, Point, ResizeEdge, Size};
+
+    fn at(x: f32, y: f32) -> Point<Pixels> { point(px(x), px(y)) }
+    #[allow(non_snake_case)]
+    fn WIN_() -> Size<Pixels> { Size { width: px(1280.), height: px(800.) } }
+
+    #[test]
+    fn edges_and_corners_are_found_on_the_visible_frame() {
+        assert_eq!(resize_edge(at(SHADOW, 400.), WIN_(), true), Some(ResizeEdge::Left));
+        assert_eq!(resize_edge(at(1280. - SHADOW, 400.), WIN_(), true), Some(ResizeEdge::Right));
+        assert_eq!(resize_edge(at(640., SHADOW), WIN_(), true), Some(ResizeEdge::Top));
+        assert_eq!(resize_edge(at(640., 800. - SHADOW), WIN_(), true), Some(ResizeEdge::Bottom));
+        assert_eq!(resize_edge(at(SHADOW + 2., SHADOW + 2.), WIN_(), true), Some(ResizeEdge::TopLeft));
+        assert_eq!(resize_edge(at(1280. - SHADOW - 2., SHADOW + 2.), WIN_(), true), Some(ResizeEdge::TopRight));
+        assert_eq!(resize_edge(at(SHADOW + 2., 800. - SHADOW - 2.), WIN_(), true), Some(ResizeEdge::BottomLeft));
+        assert_eq!(resize_edge(at(1280. - SHADOW - 2., 800. - SHADOW - 2.), WIN_(), true), Some(ResizeEdge::BottomRight));
+    }
+
+    #[test]
+    fn the_middle_the_shadow_and_unframed_windows_do_not_resize() {
+        assert_eq!(resize_edge(at(640., 400.), WIN_(), true), None);
+        assert_eq!(resize_edge(at(2., 400.), WIN_(), true), None, "deep in the shadow margin");
+        assert_eq!(resize_edge(at(SHADOW, 400.), WIN_(), false), None, "maximized or tiled: no grab band");
+    }
+
+    #[test]
+    fn corner_bits_match_the_shader_hook() {
+        assert_eq!(corner_bits(true, true, true, true), 15);
+        assert_eq!(corner_bits(true, false, false, false), 1);
+        assert_eq!(corner_bits(false, true, false, true), 2 | 8);
+    }
+
+    #[test]
+    fn the_balls_rasterize_at_any_device_size_with_a_transparent_corner() {
+        for dev in [15u32, 22, 30, 45] {
+            for k in [Kind::Close, Kind::Minimize, Kind::Maximize] {
+                for l in [Look::Normal, Look::Hover, Look::Pressed, Look::Backdrop] {
+                    let img = rasterize(svg_source(k, l), dev).expect("renders");
+                    let b = img.as_bytes(0).unwrap();
+                    assert_eq!(b.len() as u32, dev * dev * 4);
+                    assert_eq!(b[3], 0, "the corner pixel is transparent");
+                    let mid = ((dev / 2 * dev + dev / 2) * 4) as usize;
+                    assert_eq!(b[mid + 3], 255, "the centre is opaque");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_band_is_the_inner_radius_plus_its_width() {
+        assert_eq!(INNER_R + BAND, 24.);
+        assert!(SHADOW > BAND + EDGE, "the shadow margin holds the edge and the band");
+        assert!(lights_width() - super::LIGHTS_LEFT + 10. <= SIDE_W_COLLAPSED, "the lights (10 px in) fit the collapsed sidebar column");
+    }
 }

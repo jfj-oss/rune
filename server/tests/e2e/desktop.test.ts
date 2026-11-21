@@ -6,7 +6,7 @@
 // Needs the app built (`cd native/desktop && cargo build`) and kwin_wayland. RUNE_DESKTOP_BIN names the binary; the test is
 // skipped unless it exists AND RUNE_DESKTOP_E2E=1, so `pnpm -r test` stays green without a Rust toolchain or a compositor.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection, type Socket } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,8 @@ const bin = process.env.RUNE_DESKTOP_BIN ?? join(homedir(), 'data/agent-tmp/rune
 const ready = process.env.RUNE_DESKTOP_E2E === '1' && haveAudioTools() && hasTool('kwin_wayland') && existsSync(bin);
 const HERE = new URL('.', import.meta.url).pathname;
 const startKwin = join(HERE, '../../../native/desktop/tools/hl-start.sh');
+const probePy = join(HERE, '../../../native/desktop/tools/titlebar-probe.py');
+const fakeptrBuild = join(HERE, '../../../native/desktop/tools/fakeptr/build.sh');
 
 class App {
   private sock!: Socket;
@@ -52,9 +54,13 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     const ps = spawnSync('ps', ['-eo', 'pid,cmd'], { encoding: 'utf8' }).stdout.split('\n').find((l) => l.includes('kwin_wayland') && l.includes(sock));
     kwinPid = Number(ps?.trim().split(/\s+/)[0] ?? 0);
     const port = 20000 + Math.floor(Math.random() * 20000);
+    // links the app opens ("Open the server's own setup") must not start or reach a real browser: a stub xdg-open that only notes the URL
+    const stub = join(work, 'bin');
+    mkdirSync(stub, { recursive: true });
+    writeFileSync(join(stub, 'xdg-open'), `#!/bin/sh\necho "$1" >> '${join(work, 'opened-urls.txt')}'\n`, { mode: 0o755 });
     child = spawn(bin, [], {
       stdio: 'ignore',
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, WAYLAND_DISPLAY: sock, DBUS_SESSION_BUS_ADDRESS: bus, XDG_CONFIG_HOME: join(work, 'cfg'), RUNE_DESKTOP_CONFIG_DIR: join(work, 'cfg/rune-desktop'),
+      env: { PATH: `${stub}:${process.env.PATH}`, HOME: process.env.HOME, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, WAYLAND_DISPLAY: sock, DBUS_SESSION_BUS_ADDRESS: bus, XDG_CONFIG_HOME: join(work, 'cfg'), RUNE_DESKTOP_CONFIG_DIR: join(work, 'cfg/rune-desktop'),
         RUNE_DESKTOP_AUDIO: 'null', RUNE_DESKTOP_OS: 'off', RUNE_DESKTOP_DATA_DIR: join(work, 'data'), RUNE_DESKTOP_URL: srv.base, RUNE_DESKTOP_TEST_PORT: String(port), RUNE_DESKTOP_ROUTE: '/albums', RUNE_DESKTOP_SIZE: '1280x800' },
     });
     app = new App(port);
@@ -377,4 +383,102 @@ describe.skipIf(!ready)('rune desktop (native, headless KWin) against a real ser
     await until('cleared', async () => (await srv.state(own)).queue.length === 0);
     await app.send({ cmd: 'zone', id: 'pc' });
   }, 120_000);
+
+  // ---------------------------------------------------------------- the app's own title bar: REAL pointer events through KWin's fake-input
+  describe('own title bar (client-side decorations, glossy traffic lights)', () => {
+    let ptr: ChildProcess | undefined;
+    let ptrOut: ((v: string) => void)[] = [];
+    const win = async () => (await app.state())['window'] as { w: number; h: number; maximized: boolean; active: boolean; framed: boolean; client: boolean; inset: number };
+    let shotN = 0;
+    // (RUNE_TITLEBAR_SHOTS=<dir> keeps a screenshot of every probe, for looking at what a failing check saw)
+    const probe = (...px: string[]) => JSON.parse(spawnSync('python3', [probePy, process.env.RUNE_TITLEBAR_SHOTS ? join(process.env.RUNE_TITLEBAR_SHOTS, `probe-${String(shotN++).padStart(3, '0')}.png`) : '-', ...px], { env: { ...process.env, RG: work }, encoding: 'utf8' }).stdout) as { bbox: [number, number, number, number] | null; px: Record<string, [number, number, number]> };
+    const send = (line: string) => new Promise<void>((res) => { ptrOut.push(() => res()); ptr!.stdin!.write(`${line}\n`); });
+    // the frame is the window minus the 20 px shadow margin; the content is 4 px (band) further in. Balls: 14 px from the content's left, centre y 28.
+    const frameBox = async () => { const b = probe().bbox!; return { x: b[0], y: b[1], r: b[2], b: b[3] }; };
+
+    beforeAll(async () => {
+      const bin2 = spawnSync('bash', [fakeptrBuild, join(work, 'fp')], { encoding: 'utf8' });
+      expect(bin2.status, bin2.stderr).toBe(0);
+      ptr = spawn(join(work, 'fp/fakeptr'), [], { env: { PATH: process.env.PATH, XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR, WAYLAND_DISPLAY: `wayland-rd-${process.pid}` }, stdio: ['pipe', 'pipe', 'inherit'] });
+      createInterface({ input: ptr.stdout! }).on('line', () => ptrOut.shift()?.(''));
+    }, 60_000);
+    afterAll(() => { try { ptr?.stdin?.write('quit\n'); ptr?.kill('SIGTERM'); } catch { /* gone */ } });
+
+    it('is client-decorated and framed: shadow margin, band, light edge', async () => {
+      // a click on bare bar space gives the window the focus (the band and the lights look different unfocused)
+      await send('click 1150 152');
+      await until('the window to be active', async () => (await win()).active, 8_000);
+      const w = await win();
+      expect(w).toMatchObject({ client: true, framed: true, maximized: false, active: true, inset: 24 });
+      const f = await frameBox();
+      // the visible frame (light edge included) sits 20 px - 1 px inside the 1280x800 window, centred on the 1600x1000 output
+      expect(f.r - f.x).toBeGreaterThanOrEqual(1280 - 2 * 20 - 1);
+      expect(f.r - f.x).toBeLessThanOrEqual(1280 - 2 * 20 + 6);
+      const px = probe(`${f.x + 3},${f.y + 300}`);
+      expect(px.px[`${f.x + 3},${f.y + 300}`]![0]).toBeGreaterThan(10); // the band is not black
+    });
+
+    it('the three lights are coloured balls (red, yellow, green) at the left of the top row, and hover brightens', async () => {
+      const f = await frameBox();
+      const cx = f.x + 1 + 4 + 14 + 7.4; const cy = f.y + 1 + 4 + 28;   // content origin = frame + edge + band
+      const at = (i: number) => `${Math.round(cx + 19 * i)},${Math.round(cy)}`;
+      const base = probe(at(0), at(1), at(2)).px;
+      const [r, y, g] = [base[at(0)]!, base[at(1)]!, base[at(2)]!];
+      expect(r[0]).toBeGreaterThan(r[1] + 60); expect(r[0]).toBeGreaterThan(r[2] + 60);          // red
+      expect(y[0]).toBeGreaterThan(y[2] + 80); expect(y[1]).toBeGreaterThan(y[2] + 80);          // yellow
+      expect(g[1]).toBeGreaterThan(g[0] + 60); expect(g[1]).toBeGreaterThan(g[2] + 60);          // green
+      await send(`move ${Math.round(cx)} ${Math.round(cy)}`); await new Promise((r2) => setTimeout(r2, 700));
+      const hov = probe(at(0)).px[at(0)]!;
+      expect(hov[0] + hov[1] + hov[2]).toBeGreaterThan(r[0] + r[1] + r[2]);                      // brighter
+      await send('move 800 600');
+    });
+
+    it('drag on empty top-row space moves the window; double click maximizes and restores; edges and corners resize', async () => {
+      const f0 = await frameBox();
+      const barY = f0.y + 1 + 4 + 28;
+      await send(`drag 1150 ${barY} 1250 ${barY + 60}`); await new Promise((r) => setTimeout(r, 900));
+      const f1 = await frameBox();
+      expect(f1.x - f0.x).toBeGreaterThan(40); expect(f1.y - f0.y).toBeGreaterThan(20);
+      // back to the middle-ish, then double click on bare bar space
+      await send(`dblclick ${f1.x + 900} ${f1.y + 1 + 4 + 28}`);
+      await until('maximized', async () => (await win()).maximized, 5_000);
+      expect(await win()).toMatchObject({ framed: false, inset: 0 });
+      // no inset and square: the content reaches the output's very corner (a rounded corner would leave it black)
+      await new Promise((r) => setTimeout(r, 1200));
+      const corner = probe('3,3', '1596,3', '3,500');
+      for (const k of Object.keys(corner.px)) expect(corner.px[k]!.reduce((a, v) => a + v, 0), `pixel ${k}`).toBeGreaterThan(0);
+      await send('dblclick 1100 40');
+      await until('restored', async () => !(await win()).maximized, 5_000);
+      expect((await win()).framed).toBe(true);
+      await new Promise((r) => setTimeout(r, 1200));   // let the compositor and the frame settle
+      // resize from the right edge, the bottom edge and the bottom-right corner (the window sits near the screen edge after the move, so go inward)
+      const f2 = await frameBox(); const w0 = (await win()).w;
+      await send(`drag ${f2.r - 1} ${f2.y + 400} ${f2.r + 30} ${f2.y + 400}`); await new Promise((r) => setTimeout(r, 900));
+      expect((await win()).w).toBeGreaterThan(w0 + 15);
+      const f3 = await frameBox(); const h0 = (await win()).h;
+      await send(`drag ${f3.x + 400} ${f3.b - 1} ${f3.x + 400} ${f3.b + 20}`); await new Promise((r) => setTimeout(r, 900));
+      expect((await win()).h).toBeGreaterThan(h0 + 8);
+      const f4 = await frameBox(); const [w1, h1] = [(await win()).w, (await win()).h];
+      await send(`drag ${f4.r - 3} ${f4.b - 3} ${f4.r + 17} ${f4.b + 12}`); await new Promise((r) => setTimeout(r, 900));
+      const w2 = await win(); expect(w2.w).toBeGreaterThan(w1 + 8); expect(w2.h).toBeGreaterThan(h1 + 5);
+    }, 60_000);
+
+    it('the minimize ball hides the window; the close ball ends the app', async () => {
+      // un-maximized now; first put the window back where its balls are easy to reach
+      const f = await frameBox();
+      const cx = f.x + 1 + 4 + 14 + 7.4; const cy = f.y + 1 + 4 + 28;
+      await send(`click ${Math.round(cx + 19)} ${Math.round(cy)}`);                              // minimize
+      await until('the window to leave the screen', async () => probe().bbox === null, 6_000);
+      expect(child.exitCode).toBeNull();
+      // restore it through KWin (private session) to reach the close ball
+      const bus = readFileSync(join(work, 'run/bus'), 'utf8').trim();
+      const js = join(work, 'unmin.js');
+      writeFileSync(js, 'for (const w of workspace.windowList()) { if (w.minimized) w.minimized = false; }');
+      spawnSync('bash', ['-c', `export DBUS_SESSION_BUS_ADDRESS='${bus}'; id=$(qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.loadScript '${js}' unmin 2>/dev/null || qdbus org.kde.KWin /Scripting loadScript '${js}' unmin); qdbus6 org.kde.KWin /Scripting/Script$id org.kde.kwin.Script.run 2>/dev/null || qdbus org.kde.KWin /Scripting/Script$id run`], { encoding: 'utf8' });
+      await until('the window back', async () => probe().bbox !== null, 6_000);
+      const f2 = await frameBox();
+      await send(`click ${Math.round(f2.x + 1 + 4 + 14 + 7.4)} ${Math.round(f2.y + 1 + 4 + 28)}`); // close
+      await until('the app to exit', async () => child.exitCode !== null, 8_000);
+    }, 40_000);
+  });
 });

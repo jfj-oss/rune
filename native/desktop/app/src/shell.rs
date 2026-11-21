@@ -24,6 +24,7 @@ impl Render for Rune {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.frame += 1;
         self.frame_inset = crate::frame::inset(window);
+        { let v = window.viewport_size(); self.win_info = (f32::from(v.width), f32::from(v.height), window.is_maximized(), window.is_window_active(), crate::frame::framed(window), crate::frame::client(window)); }
         self.win_active = window.is_window_active();
         self.watch_window(window, cx);
         if self.frame == 1 { self.start_hook_loop(cx); }
@@ -158,7 +159,7 @@ impl Rune {
         let me = cx.entity();
         let lights = crate::frame::client(window).then(|| {
             let close = move |window: &mut Window, cx: &mut App| { me.update(cx, |r, _| r.remember_window(window)); window.remove_window(); };
-            h_flex().absolute().left(px(if self.sidebar_collapsed { 10. } else { crate::frame::LIGHTS_LEFT })).top_0().h(px(TOPBAR_H)).items_center().child(crate::frame::traffic_lights(window, close))
+            h_flex().absolute().left(px(if self.sidebar_collapsed { 10. } else { crate::frame::LIGHTS_LEFT })).top_0().h(px(TOPBAR_H)).items_center().child(crate::frame::traffic_lights(window, cx, close))
         });
         let d = div().id("lights-zone").absolute().left_0().top_0().w(px(sw)).h(px(TOPBAR_H)).occlude().rounded_tl(px(crate::frame::round())).children(lights);
         Some(crate::frame::bar_behaviour(d, "lights-drag", window, cx))
