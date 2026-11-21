@@ -6,6 +6,10 @@
 //!   {"cmd":"player","name":"next|prev|pause|resume|shuffle|repeat|clear","n":..}   {"cmd":"seek","ms"} {"cmd":"volume","v"}
 //!   {"cmd":"jump","index"} {"cmd":"remove","index"} {"cmd":"move","index","to"}   queue edits by queue position
 //!   {"cmd":"add_to_playlist","playlist","name","ids":[..]} {"cmd":"new_playlist","name","ids":[..]} {"cmd":"pin","id","on"}
+//!   {"cmd":"click","x","y","n"}                  a real left click at window pixels (mouse move, down, up through the window's own input path); n clicks
+//!   {"cmd":"size","w","h"}                       resize the window (logical px)
+//!   {"cmd":"backdrop","mode":"dither-custom"}    pick the Background (the saved ids)
+//!   {"cmd":"picker","well":"mid|light","do":"open|close|pick|hex","h","s","v","hex"}   the Custom colour picker: open its popover, drag to an HSV, type a hex
 //!   {"cmd":"queue","open":true}  {"cmd":"scroll","dy":px}  {"cmd":"bench","steps":N,"dy":px,"ms":16}   (frame intervals while scrolling)
 use crate::rune::*;
 use gpui_kit::*;
@@ -70,7 +74,7 @@ impl Rune {
                     "route": self.route().key(), "online": self.model.online(), "zone": self.model.zone,
                     "status": p.map(|p| format!("{:?}", p.status).to_lowercase()), "index": p.map(|p| p.index), "shuffle": p.map(|p| p.shuffle), "volume": p.map(|p| p.volume),
                     "queue": p.map(|p| p.queue.iter().map(|q| q.track.title.clone()).collect::<Vec<_>>()),
-                    "toast": self.toast.as_ref().map(|t| t.text.clone()), "queue_open": self.queue_open, "menu": self.menu.is_some(), "dialog": self.dialog.is_some(),
+                    "toast": self.toast.as_ref().map(|t| t.text.clone()), "queue_open": self.queue_open, "np_open": self.np_open, "picker": self.picker.as_ref().map(|p| json!({"well": if p.0 == CWell::Mid { "mid" } else { "light" }, "hsv": p.1.hsv})), "backdrop": self.foil.mode.id(), "custom": [crate::dither::to_hex(self.foil.custom.mid), crate::dither::to_hex(self.foil.custom.light)], "mid_field": self.custom_mid_in.read(cx).value().to_string(), "light_field": self.custom_light_in.read(cx).value().to_string(), "picker_field": self.picker_hex_in.read(cx).value().to_string(), "menu": self.menu.is_some(), "dialog": self.dialog.is_some(),
                     "covers_held": held, "covers_bytes": bytes, "covers_requested": self.covers.requested, "covers_fetched": self.covers.fetched, "frames": self.frame,
                     "own_zone": self.own_zone, "audio": self.audio.as_ref().map(|a| json!({"loaded": a.loaded(), "sounding": a.is_sounding(), "position": crate::audio::Engine::position(&a.engine)})),
                     "albums_loaded": self.data.albums.values().map(|l| l.items.len()).max(),
@@ -132,7 +136,53 @@ impl Rune {
                 self.spawn_send(cx, "POST", "/playlists/smart".into(), Some(body), |me, r, cx| { match r { Ok(v) => { me.data.playlists = None; if let Some(id) = v.get("id").and_then(|x| x.as_str()) { me.go(crate::route::Route::Playlist(id.to_string()), cx); } } Err(e) => me.say(e, cx) } });
                 json!({"ok": true})
             }
-            "setup" => { cx.spawn(async move |this, cx| { let _ = cx.update(|app| { if let Some(w) = app.active_window() { let _ = w.update(app, |root, window, cx| { if let Ok(me) = root.downcast::<Rune>() { me.update(cx, |m, cx| m.open_setup(window, cx)); } }); } }); let _ = this.update(cx, |_, _| {}); }).detach(); json!({"ok": true}) }
+            "click" => {
+                let (x, y, times) = (n("x") as f32, n("y") as f32, (n("n") as usize).max(1));
+                cx.spawn(async move |this, cx| {
+                    let _ = cx.update(|app| { if let Some(w) = app.windows().into_iter().next() { let _ = w.update(app, |_, window, cx| {
+                        let pos = point(px(x), px(y));
+                        window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent { position: pos, pressed_button: None, modifiers: Modifiers::default() }), cx);
+                        for i in 1..=times {
+                            window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: pos, modifiers: Modifiers::default(), click_count: i, first_mouse: false }), cx);
+                            window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: pos, modifiers: Modifiers::default(), click_count: i }), cx);
+                        }
+                    }); } });
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                    let _ = reply.send(json!({"ok": true}));
+                }).detach();
+                return;
+            }
+            "size" => {
+                let (w, h) = (n("w") as f32, n("h") as f32);
+                cx.spawn(async move |this, cx| {
+                    let _ = cx.update(|app| { if let Some(win) = app.windows().into_iter().next() { let _ = win.update(app, |_, window, _| window.resize(size(px(w), px(h)))); } });
+                    cx.background_executor().timer(Duration::from_millis(400)).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                    let _ = reply.send(json!({"ok": true}));
+                }).detach();
+                return;
+            }
+            "backdrop" => { match crate::dither::Mode::from_id(&s("mode")) { Some(m) => { let p = self.foil; self.set_foil(crate::backdrop::Prefs { mode: m, ..p }, cx); json!({"ok": true}) } None => json!({"error": "no such backdrop"}) } }
+            "picker" => {
+                let k = if s("well") == "light" { CWell::Light } else { CWell::Mid };
+                let (h, sat, val, hex) = (n("h") as f32, n("s") as f32, n("v") as f32, s("hex"));
+                let act = s("do");
+                cx.spawn(async move |this, cx| {
+                    let _ = cx.update(|app| { if let Some(w) = app.windows().into_iter().next() { let _ = w.update(app, |root, window, cx| { if let Ok(r) = root.downcast::<crate::backdrop::Root>() { let me = r.read(cx).rune.clone(); me.update(cx, |m, cx| match act.as_str() {
+                        "open" => { if m.picker.as_ref().map(|p| p.0) != Some(k) { m.picker_toggle(k, window, cx); } }
+                        "close" => m.picker_close(cx),
+                        // what a drag in the square / on the strip does: the state moves, the same change path runs
+                        "pick" => { if let Some(p) = m.picker.as_mut().filter(|p| p.0 == k) { p.1.set_hue(h); p.1.set_sv(sat, val); let hsv = p.1.hsv; m.set_custom(k, crate::colour_picker::hsv_to_rgb(hsv), window, cx); } }
+                        "hex" => { m.picker_hex_in.update(cx, |s, cx| s.set_value(hex.clone(), window, cx)); m.custom_typed(k, &hex, window, cx); }
+                        _ => {}
+                    }); } }); } });
+                    cx.background_executor().timer(Duration::from_millis(150)).await;
+                    let _ = this.update(cx, |_, cx| cx.notify());
+                    let _ = reply.send(json!({"ok": true}));
+                }).detach();
+                return;
+            }
+            "setup" => { cx.spawn(async move |this, cx| { let _ = cx.update(|app| { if let Some(w) = app.windows().into_iter().next() { let _ = w.update(app, |root, window, cx| { if let Ok(r) = root.downcast::<crate::backdrop::Root>() { let me = r.read(cx).rune.clone(); me.update(cx, |m, cx| m.open_setup(window, cx)); } }); } }); let _ = this.update(cx, |_, _| {}); }).detach(); json!({"ok": true}) }
             "pin" => { self.set_pin(&s("id"), b("on"), false, cx); json!({"ok": true}) }
             "queue" => { self.queue_open = b("open"); cx.notify(); json!({"ok": true}) }
             "scroll" => { if let Some(l) = self.lists.get(&self.route().key()) { l.scroll_by(px(n("dy") as f32)); } cx.notify(); json!({"ok": true}) }

@@ -190,9 +190,22 @@ impl Rune {
         }
         let mut background = card("Background", "palette").child(muted("Foil waves are the default. The Dither backgrounds are the web's: black and one colour, in fine dots.")).child(modes);
         if current == crate::dither::Mode::Custom {
-            let hexbox = |input: &Entity<InputState>, name: &str, sub: &str, col: crate::dither::Rgb| {
+            let hexbox = |k: crate::rune::CWell, input: &Entity<InputState>, name: &str, sub: &str, col: crate::dither::Rgb, cx: &mut Context<Self>| {
+                let open = self.picker.as_ref().is_some_and(|p| p.0 == k);
+                let tag = if k == crate::rune::CWell::Mid { "mid" } else { "light" };
+                // the swatch opens the visual picker, a popover under it (deferred: above the page and not clipped by its scroll)
+                let mut swatch = div().relative().flex_none()
+                    .child(div().id(SharedString::from(format!("st-swatch-{tag}"))).role(Role::Button).aria_label(format!("Pick the {} colour", name.to_lowercase())).size(px(26.)).rounded(px(6.)).border_1().border_color(if open { c(ACCENT) } else { wh(0.25) }).bg(c(rgb_u32(col))).cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| { this.picker_toggle(k, window, cx); cx.stop_propagation(); })));
+                if let Some((pk, st)) = self.picker.as_ref().filter(|p| p.0 == k) {
+                    let _ = pk;
+                    let panel = crate::colour_picker::panel(st, &self.picker_hex_in, cx, |t: &mut Rune| t.picker.as_mut().map(|p| &mut p.1), |t, hsv, window, cx| {
+                        if let Some(k) = t.picker.as_ref().map(|p| p.0) { t.set_custom(k, crate::colour_picker::hsv_to_rgb(hsv), window, cx); }
+                    }).on_mouse_down_out(cx.listener(|this, _, _, cx| this.picker_close(cx)));
+                    swatch = swatch.child(deferred(anchored().anchor(Anchor::TopLeft).offset(point(px(0.), px(32.))).snap_to_window_with_margin(px(8.)).child(panel)).with_priority(2));
+                }
                 h_flex().gap(px(10.)).items_center()
-                    .child(div().size(px(26.)).flex_none().rounded(px(6.)).border_1().border_color(wh(0.25)).bg(c(rgb_u32(col))))
+                    .child(swatch)
                     .child(v_flex().w(px(150.)).child(div().text_size(px(14.)).font_weight(w(600.)).child(name.to_string())).child(muted(sub)))
                     .child(div().h(px(36.)).w(px(130.)).px(px(12.)).flex().items_center().rounded_full().bg(surface2()).border_1().border_color(line()).child(div().flex_1().child(Input::new(input).appearance(false).cleanable(false))))
             };
@@ -203,16 +216,15 @@ impl Rune {
                 presets = presets.child(div().id(SharedString::from(format!("st-duo-{i}"))).role(Role::Button).aria_label(name.to_string()).size(px(28.)).rounded_full().border_1().border_color(wh(0.25)).cursor_pointer()
                     .bg(linear_gradient(135., linear_color_stop(c(rgb_u32(m)), 0.55), linear_color_stop(c(rgb_u32(l)), 0.55)))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        let mut p = this.foil; p.custom = crate::dither::Palette { mid: m, light: l };
-                        let (a, b) = (ms.clone(), ls.clone());
-                        this.custom_mid_in.update(cx, |s, cx| s.set_value(a, window, cx));
-                        this.custom_light_in.update(cx, |s, cx| s.set_value(b, window, cx));
-                        this.set_foil(p, cx);
+                        let _ = (&ms, &ls);
+                        this.picker_close(cx);
+                        this.set_custom(crate::rune::CWell::Mid, m, window, cx);
+                        this.set_custom(crate::rune::CWell::Light, l, window, cx);
                     })));
             }
             background = background.child(v_flex().gap(px(10.)).pt(px(6.))
-                .child(hexbox(&self.custom_mid_in, "Base", "Most of the dots", fp.custom.mid))
-                .child(hexbox(&self.custom_light_in, "Highlights", "The brightest parts", fp.custom.light))
+                .child(hexbox(crate::rune::CWell::Mid, &self.custom_mid_in, "Base", "Most of the dots", fp.custom.mid, cx))
+                .child(hexbox(crate::rune::CWell::Light, &self.custom_light_in, "Highlights", "The brightest parts", fp.custom.light, cx))
                 .child(presets));
         }
         let background = background
