@@ -1,0 +1,18 @@
+#!/bin/sh
+# Opens rune: makes sure the server runs, opens the setup page in the browser the first time, checks for an update now and
+# then, and starts the native app pointed at this PC's server.
+A=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+URL=http://127.0.0.1:4545
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/rune-app
+mkdir -p "$STATE"
+N="$A/node/bin/node"; H="$A/bin/helper.mjs"
+if ! "$N" "$H" health "$URL"; then
+  systemctl --user start rune-app.service 2>/dev/null || (nohup "$A/bin/rune-server" >"$STATE/server.log" 2>&1 &)
+  i=0; while [ $i -lt 40 ] && ! "$N" "$H" health "$URL"; do sleep 0.5; i=$((i+1)); done
+fi
+if [ ! -e "$STATE/setup-opened" ] && [ "$("$N" "$H" needs-setup "$URL" 2>/dev/null)" = yes ]; then
+  touch "$STATE/setup-opened"
+  xdg-open "$URL/setup" >/dev/null 2>&1 &
+fi
+("$A/bin/rune-update" --check >/dev/null 2>&1 &)
+RUNE_DESKTOP_URL=$URL exec "$A/bin/rune-desktop" "$@"

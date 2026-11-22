@@ -7,6 +7,8 @@ export interface SetupStatus {
   redirectUri: string;
   spotifyClientId: string;
   spotifyActive: boolean;
+  /** The downloadable build's own Spotify app is in use: only signing in is needed. */
+  spotifyBundled?: boolean;
   spotifyPending: boolean;
   rootsPending: boolean;
   publicUrl: string;

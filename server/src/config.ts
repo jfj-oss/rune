@@ -67,6 +67,12 @@ export function configFilePath(): string {
   return process.env.RUNE_CONFIG_FILE || fileURLToPath(new URL('../config.json', import.meta.url));
 }
 
+/** The Spotify app id the downloadable build came with (RUNE_SPOTIFY_CLIENT_ID), or undefined. */
+export function bundledSpotifyClientId(): string | undefined {
+  const v = process.env.RUNE_SPOTIFY_CLIENT_ID?.trim();
+  return v ? v : undefined;
+}
+
 /** Read the user's own settings file (an empty object when there is none). */
 export function readUserConfig(): Record<string, unknown> {
   const file = configFilePath();
@@ -90,6 +96,8 @@ export function loadConfig(): Config {
   if (process.env.RUNE_PORT) cfg.port = Number(process.env.RUNE_PORT);
   if (process.env.RUNE_DATA_DIR) cfg.dataDir = process.env.RUNE_DATA_DIR;
   if (process.env.RUNE_AUDIO_DEVICE) cfg.audioDevice = process.env.RUNE_AUDIO_DEVICE;
+  // The downloadable build (scripts/package-linux.sh) brings the Spotify app id of whoever shared it; the user's own wins.
+  if (!cfg.spotifyClientId && bundledSpotifyClientId()) cfg.spotifyClientId = bundledSpotifyClientId();
   mkdirSync(cfg.dataDir, { recursive: true });
   return cfg;
 }

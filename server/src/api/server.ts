@@ -976,7 +976,7 @@ export async function buildApp(db: Db, cfg: Config, opts: AppOptions = {}): Prom
   // ---------- self-update
   // The served web build lives in the git checkout's web/dist; both the static
   // plugin and the update module need that path, so resolve it once here.
-  const dist = opts.webDist ?? new URL('../../../web/dist', import.meta.url).pathname;
+  const dist = opts.webDist ?? process.env.RUNE_WEB_DIST ?? new URL('../../../web/dist', import.meta.url).pathname;
   const updateService = createUpdateService({
     repoRoot: () => findUpdateRepoRoot(process.cwd()),
     webDist: dist,

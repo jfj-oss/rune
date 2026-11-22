@@ -77,6 +77,25 @@ function MusicStep({ s, onSaved }: { s: SetupStatus; onSaved: () => void }) {
 }
 
 function SpotifyStep({ s, onSaved }: { s: SetupStatus; onSaved: () => void }) {
+  const [own, setOwn] = useState(false);
+  if (s.spotifyBundled && !own) {
+    return (
+      <section className="statuscard setup__card" id="spotify">
+        <h2 className="statuscard__head"><Music2 size={17} /> 2 · Spotify <span className="setup__opt">optional</span></h2>
+        <p className="muted">Skip this and rune is a fully working local player. To also play Spotify, sign in with your own Spotify account (Spotify Premium is needed to play). rune only sees your account, on this PC.</p>
+        <div className="setup__actions">
+          <a className="btn btn--primary" href="/api/spotify/login">Sign in with Spotify</a>
+          <span className="muted">Opens Spotify’s login; you return here when it is done.</span>
+        </div>
+        <p className="muted setup__note">If Spotify says you are not allowed to use this app, send the email address of your Spotify account to whoever gave you rune: they add it once. Spotify songs play through the Spotify app (<span className="mono">flatpak install flathub com.spotify.Client</span>).</p>
+        <p className="muted setup__note"><button type="button" className="link" onClick={() => setOwn(true)}>Use my own Spotify developer app instead</button></p>
+      </section>
+    );
+  }
+  return <OwnSpotifyApp s={s} onSaved={onSaved} />;
+}
+
+function OwnSpotifyApp({ s, onSaved }: { s: SetupStatus; onSaved: () => void }) {
   const [id, setId] = useState(s.spotifyClientId);
   const save = useMutation({ mutationFn: () => setupApi.saveConfig({ spotifyClientId: id.trim() }), onSuccess: onSaved });
   const uris = redirectUris(s);

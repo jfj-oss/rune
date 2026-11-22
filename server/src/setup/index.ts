@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync,
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { configFilePath, readUserConfig, type Config } from '../config.js';
+import { bundledSpotifyClientId, configFilePath, readUserConfig, type Config } from '../config.js';
 import { soloistSettings, type SoloistRun } from '../soloist/index.js';
 import { fromLoopback, isSameOriginRequest } from '../update.js';
 
@@ -136,7 +136,9 @@ export function registerSetupRoutes(r: FastifyInstance, deps: SetupDeps): void {
       spotifyClientId: typeof user.spotifyClientId === 'string' ? user.spotifyClientId : '',
       // The running process was started with an app id (a changed id needs a restart to take effect).
       spotifyActive: !!cfg.spotifyClientId,
-      spotifyPending: (typeof user.spotifyClientId === 'string' ? user.spotifyClientId : '') !== (cfg.spotifyClientId ?? ''),
+      // The downloadable build's own app id is in use (the user has none of their own): only "Sign in" is needed.
+      spotifyBundled: !(typeof user.spotifyClientId === 'string' && user.spotifyClientId) && !!bundledSpotifyClientId(),
+      spotifyPending: (typeof user.spotifyClientId === 'string' && user.spotifyClientId ? user.spotifyClientId : (bundledSpotifyClientId() ?? '')) !== (cfg.spotifyClientId ?? ''),
       rootsPending: JSON.stringify(Array.isArray(user.libraryRoots) ? user.libraryRoots : []) !== JSON.stringify(roots),
       publicUrl: cfg.publicUrl ?? '',
       configFile: configFilePath(),

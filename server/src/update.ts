@@ -324,7 +324,8 @@ class UpdateServiceImpl implements UpdateService {
     const current = await this.headSha();
     const running = await this.runningCommit;
     const pendingLocal = await this.isPendingLocal(current, running);
-    const inside = await this.insideWorkTree();
+    // the downloadable build is not a git checkout and updates through its app (scripts/package-linux.sh)
+    const inside = process.env.RUNE_BUNDLE !== '1' && (await this.insideWorkTree());
     const branch = await this.currentBranch();
     const supported = inside && current !== null && branch !== null && (await this.hasOrigin());
 

@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs the rune server from this download (started by the rune-app user service; see install.sh).
+A=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+CFG=${XDG_CONFIG_HOME:-$HOME/.config}/rune-app
+mkdir -p "$CFG"
+export RUNE_BUNDLE=1 RUNE_HOST=${RUNE_HOST:-127.0.0.1} RUNE_WEB_DIST="$A/web" RUNE_CONFIG_FILE="$CFG/server.json"
+# without mpv the server cannot play on this PC itself, but everything else (and the app, which plays on its own) still works
+command -v mpv >/dev/null || export RUNE_NO_PC=1
+[ -s "$A/spotify-client-id" ] && export RUNE_SPOTIFY_CLIENT_ID="$(cat "$A/spotify-client-id")"
+exec "$A/node/bin/node" "$A/server/main.mjs"
