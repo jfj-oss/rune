@@ -15,6 +15,9 @@ use std::time::{Duration, Instant};
 pub const MAX_FPS: f64 = 20.0;
 /// The widest frame decoded; a wider clip is scaled down once per frame by ffmpeg (better: cut the clip to this size).
 pub const MAX_W: u32 = 1920;
+/// How often one ffmpeg plays the clip before it ends by itself (the worker then starts another). Never endless: an ffmpeg left
+/// behind by a crash was once found reading an endless loop at two full cores with nobody taking its frames.
+const LOOPS: &str = "720";
 
 pub fn path() -> PathBuf {
     std::env::var_os("RUNE_DESKTOP_VIDEO").map(PathBuf::from).unwrap_or_else(|| crate::crashlog::data_dir().join("backdrop.mp4"))
@@ -76,12 +79,30 @@ fn start(src: (u32, u32, f64), dst: (u32, u32, f64)) -> Option<Child> {
     if dst.2 + 0.01 < src.2 { filters.push(format!("fps={}", dst.2)); }
     let mut cmd = Command::new(bin);
     // one decoding thread and one filter thread: a few small frames a second need no more, and each extra thread holds frames
-    cmd.args(["-v", "error", "-nostdin", "-threads", "1", "-filter_threads", "1", "-stream_loop", "-1", "-i"]).arg(path()).arg("-an");
+    cmd.args(["-v", "error", "-nostdin", "-threads", "1", "-filter_threads", "1", "-stream_loop", LOOPS, "-i"]).arg(path()).arg("-an");
     if !filters.is_empty() { cmd.args(["-vf", &filters.join(",")]); }
+    die_with_us(&mut cmd);
     cmd.args(["-f", "rawvideo", "-pix_fmt", "bgra", "-"])
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|e| eprintln!("rune: could not start ffmpeg for the video backdrop: {e}")).ok()
 }
+
+/// Linux: ffmpeg is killed when the worker thread that started it ends, however rune ends (quit, crash, kill).
+#[cfg(target_os = "linux")]
+fn die_with_us(cmd: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: prctl and getppid only make system calls, which is allowed between fork and exec
+    let parent = std::process::id() as libc::pid_t;
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 { return Err(std::io::Error::last_os_error()); }
+            if libc::getppid() != parent { return Err(std::io::Error::other("rune is gone")); }
+            Ok(())
+        });
+    }
+}
+#[cfg(not(target_os = "linux"))]
+fn die_with_us(_: &mut Command) {}
 
 fn stop(child: &mut Option<Child>) {
     if let Some(mut c) = child.take() { let _ = c.kill(); let _ = c.wait(); }
@@ -150,6 +171,24 @@ mod tests {
         assert_eq!(parse_probe(t), Some((1920, 1080, 20.0)));
         assert_eq!(parse_probe("Video: vp9, yuv420p, 640x360, 29.97 fps"), Some((640, 360, 29.97)));
         assert_eq!(parse_probe("nothing here"), None);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_child_dies_with_the_thread_that_started_it() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let mut child = std::thread::spawn(|| {
+            let mut c = Command::new("sleep");
+            c.arg("60").stdin(Stdio::null()).stdout(Stdio::null());
+            super::die_with_us(&mut c);
+            c.spawn().unwrap()
+        }).join().unwrap();
+        let t = Instant::now();
+        loop {
+            if child.try_wait().unwrap().is_some() { break }
+            if t.elapsed() > Duration::from_secs(10) { let _ = child.kill(); panic!("still running"); }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
     #[test]
     fn covers_without_stretching() {

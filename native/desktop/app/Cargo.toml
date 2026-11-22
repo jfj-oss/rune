@@ -25,6 +25,7 @@ rubato = "0.15"
 
 # OS integration (src/os): Linux speaks D-Bus (MPRIS, tray, notifications, single instance), macOS the media frameworks
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 zbus = "=5.19.0"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 [target.'cfg(target_os = "macos")'.dependencies]
