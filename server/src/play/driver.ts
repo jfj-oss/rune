@@ -54,6 +54,8 @@ export interface Output {
   /** Extra details for the page (mpv's signal path, a radio stream's title). */
   details?(): Pick<PlayerState, 'signalPath' | 'nowPlaying' | 'tab'>;
   onDetails?(fn: () => void): void;
+  /** Would a start right now need no Spotify Web API request (Soloist)? Then the API's limit does not hold the song back. */
+  needsNoApi?(): boolean;
   close(): void;
 }
 
@@ -556,10 +558,11 @@ export class QueueDriver implements PlaybackZone {
       await this.silence();
       return fail({ reason: 'spotify-unavailable', message: 'Spotify is not connected: this song cannot play on the PC.' });
     }
-    if (kind === 'spotify') {
+    if (kind === 'spotify' && !out.needsNoApi?.()) {
       const until = this.deps.rateLimitedUntil?.() ?? null;
       if (until !== null && until > this.now()) {
-        // The user's decision: a Spotify song waits for the limit, it is not skipped for a local one.
+        // The user's decision: a Spotify song waits for the limit, it is not skipped for a local one. (Soloist plays on:
+        // it sends no Web API request.)
         await this.silence();
         return fail({ reason: 'rate-limited', message: "Spotify's limit is used up: this song plays once it lifts.", until });
       }

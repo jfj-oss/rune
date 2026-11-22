@@ -242,6 +242,11 @@ export class PcSpotifyOutput implements Output {
     }
   }
 
+  /** Soloist plays without the Web API; only the Spotify app needs it. */
+  needsNoApi(): boolean {
+    return this.deps.soloist?.available() ?? false;
+  }
+
   /** Which player holds the current Spotify run. */
   engine(): PcSpotifyEngine | null {
     if (!this.active) return null;

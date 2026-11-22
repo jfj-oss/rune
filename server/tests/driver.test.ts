@@ -49,7 +49,7 @@ function mirrorOf(w: World): MirrorZone {
   };
 }
 
-function rig(opts: { store?: MemStore; appOpen?: boolean; limit?: () => number | null; device?: () => string | null } = {}) {
+function rig(opts: { store?: MemStore; appOpen?: boolean; limit?: () => number | null; device?: () => string | null; noApi?: () => boolean } = {}) {
   const w = new World({ mpris: true, uriLists: true });
   for (const [id, d] of SONGS) w.songs.set(id, sp(id, d));
   w.appOpen = opts.appOpen ?? true;
@@ -59,6 +59,7 @@ function rig(opts: { store?: MemStore; appOpen?: boolean; limit?: () => number |
   const plays: RecordedPlay[] = [];
   const startApp = vi.fn(async () => { setTimeout(() => w.openApp(), 3000); });
   const spotify = new SpotifyAppOutput({ bus: w.mpris!, api: w, deviceId: opts.device ?? (() => DEV), startApp, confirmMs: 8000 });
+  if (opts.noApi) Object.assign(spotify, { needsNoApi: opts.noApi });
   const ended = vi.fn();
   const driver = new QueueDriver({
     load: (ids) => ids.flatMap((id) => {
@@ -151,6 +152,15 @@ describe('server queue: a mixed queue plays with no tab open', () => {
     expect(r.driver.state().hold?.reason).toBe('rate-limited');
     until = null;
     await r.driver.command({ type: 'resume' });
+    await run(1000);
+    expect(r.now()).toBe('sp:s1 playing');
+    expect(r.driver.state().hold).toBeUndefined();
+    await r.done();
+  });
+
+  it('rate limit up but the Spotify player needs no Web API (Soloist): the song plays', async () => {
+    const r = rig({ limit: () => Date.now() + 7 * 3600_000, noApi: () => true });
+    await r.play(r.items(spot('s1')));
     await run(1000);
     expect(r.now()).toBe('sp:s1 playing');
     expect(r.driver.state().hold).toBeUndefined();
